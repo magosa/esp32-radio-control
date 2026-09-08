@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ESP32 Firmware Boot & OLED Display States",
+    "subtitle": "Bringup sequence and real-time screen layout transitions",
+    "visual_preset": "signal-flow",
+    "animation": "trace",
+    "quality_profile": "standard",
+    "views": [
+      {
+        "id": "boot-ready",
+        "label": "Boot to Ready",
+        "focus": ["esp32_boot", "splash_screen", "waiting_screen"],
+        "note": "Power on splash screen to Bluetooth standby display"
+      },
+      {
+        "id": "active-driving",
+        "label": "Connected Driving Feedback",
+        "focus": ["waiting_screen", "bt_connect", "connected_screen", "telemetry_bars"],
+        "note": "Real-time mode and motor speed telemetry on 0.96 inch OLED"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "esp32_boot",
+      "type": "backend",
+      "label": "1. ESP32 Boot",
+      "sublabel": "Wire.begin(21, 22)",
+      "pos": [40, 90],
+      "size": [150, 60],
+      "tag": "Power ON"
+    },
+    {
+      "id": "splash_screen",
+      "type": "frontend",
+      "label": "2. Splash Screen",
+      "sublabel": "\"ESP32 RC CAR Init...\"",
+      "pos": [260, 90],
+      "size": [160, 60],
+      "tag": "0.96\" SSD1306"
+    },
+    {
+      "id": "waiting_screen",
+      "type": "frontend",
+      "label": "3. Standby Screen",
+      "sublabel": "\"[BT: WAITING...]\"",
+      "pos": [490, 90],
+      "size": [160, 60],
+      "tag": "MODE: STOP"
+    },
+    {
+      "id": "bt_connect",
+      "type": "cloud",
+      "label": "4. Bluetooth Link",
+      "sublabel": "Android SPP Connected",
+      "pos": [490, 240],
+      "size": [160, 60],
+      "tag": "SerialBT"
+    },
+    {
+      "id": "connected_screen",
+      "type": "frontend",
+      "label": "5. Active Running UI",
+      "sublabel": "\"[BT: CONNECTED]\"",
+      "pos": [260, 240],
+      "size": [160, 60],
+      "tag": "MODE: FORWARD"
+    },
+    {
+      "id": "telemetry_bars",
+      "type": "frontend",
+      "label": "6. Dual PWM Bars",
+      "sublabel": "L: [||||||  ] / R: [||||||  ]",
+      "pos": [40, 240],
+      "size": [150, 60],
+      "tag": "100ms Refresh"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Boot & Bringup Phase",
+      "wraps": ["esp32_boot", "splash_screen", "waiting_screen"]
+    },
+    {
+      "kind": "region",
+      "label": "Operational OLED Display Feedback",
+      "wraps": ["bt_connect", "connected_screen", "telemetry_bars"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "boot-to-splash",
+      "from": "esp32_boot",
+      "to": "splash_screen",
+      "label": "Init Display",
+      "variant": "emphasis"
+    },
+    {
+      "id": "splash-to-wait",
+      "from": "splash_screen",
+      "to": "waiting_screen",
+      "label": "BT Init Done",
+      "variant": "default"
+    },
+    {
+      "id": "wait-to-link",
+      "from": "waiting_screen",
+      "to": "bt_connect",
+      "label": "Pairing Link",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "link-to-active",
+      "from": "bt_connect",
+      "to": "connected_screen",
+      "label": "Client Joined",
+      "variant": "emphasis"
+    },
+    {
+      "id": "active-to-bars",
+      "from": "connected_screen",
+      "to": "telemetry_bars",
+      "label": "Live Meters",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Boot Bringup Check",
+      "items": [
+        "First 500ms shows 'ESP32 RC CAR Initializing...'",
+        "Transitions automatically to '[BT: WAITING...]' with speed bars at 0"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Connected & Running Telemetry",
+      "items": [
+        "Header updates to '[BT: CONNECTED]' upon Android Bluetooth SPP handshake",
+        "Dual bar graphs show active PWM speed (0-255) for left and right wheels"
+      ]
+    }
+  ]
+}

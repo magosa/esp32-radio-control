@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ESP32 Bluetooth RC Car Architecture",
+    "subtitle": "Android App -> ESP32 MCU -> L298N H-Bridge -> TT Motors (2WD)",
+    "visual_preset": "signal-flow",
+    "animation": "trace",
+    "quality_profile": "standard",
+    "views": [
+      {
+        "id": "control-flow",
+        "label": "Control Path",
+        "focus": ["smartphone", "esp32", "l298n", "motor_left", "motor_right"],
+        "note": "Command flow from Android app to dual TT motors via 30kHz PWM"
+      },
+      {
+        "id": "power-distribution",
+        "label": "Power & GND",
+        "focus": ["battery", "l298n", "esp32"],
+        "note": "9V input regulated to clean 5V with unified ground"
+      },
+      {
+        "id": "ui-feedback",
+        "label": "Status Feedback",
+        "focus": ["esp32", "oled"],
+        "note": "Real-time telemetry and PWM meters on 0.96 inch I2C OLED"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "smartphone",
+      "type": "frontend",
+      "label": "Android Controller",
+      "sublabel": "App Inventor 2 / Terminal",
+      "pos": [40, 240],
+      "size": [150, 64],
+      "tag": "Bluetooth Classic SPP"
+    },
+    {
+      "id": "esp32",
+      "type": "backend",
+      "label": "ESP32 Main Board",
+      "sublabel": "BluetoothSerial & PWM Core",
+      "pos": [270, 240],
+      "size": [160, 64],
+      "tag": "GPIO 14,25,26,27,32,33"
+    },
+    {
+      "id": "oled",
+      "type": "frontend",
+      "label": "0.96\" OLED Display",
+      "sublabel": "SSD1306 (128x64)",
+      "pos": [270, 90],
+      "size": [160, 60],
+      "tag": "I2C: SDA=21, SCL=22"
+    },
+    {
+      "id": "battery",
+      "type": "external",
+      "label": "9V Battery Pack",
+      "sublabel": "006P with Power Switch",
+      "pos": [510, 90],
+      "size": [160, 60],
+      "tag": "Main Power 9.0V DC"
+    },
+    {
+      "id": "l298n",
+      "type": "backend",
+      "label": "L298N Motor Driver",
+      "sublabel": "Dual H-Bridge & 5V Reg",
+      "pos": [510, 240],
+      "size": [160, 64],
+      "tag": "ENA/ENB PWM & 5V-EN"
+    },
+    {
+      "id": "motor_left",
+      "type": "external",
+      "label": "Left TT Motor",
+      "sublabel": "1:48 Geared DC + Wheel",
+      "pos": [750, 170],
+      "size": [150, 60],
+      "tag": "OUT3 / OUT4"
+    },
+    {
+      "id": "motor_right",
+      "type": "external",
+      "label": "Right TT Motor",
+      "sublabel": "1:48 Geared DC + Wheel",
+      "pos": [750, 310],
+      "size": [150, 60],
+      "tag": "OUT1 / OUT2"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Controller Platform",
+      "wraps": ["smartphone"]
+    },
+    {
+      "kind": "region",
+      "label": "ESP32 Embedded System",
+      "wraps": ["esp32", "oled"]
+    },
+    {
+      "kind": "region",
+      "label": "Drive & Power System",
+      "wraps": ["battery", "l298n", "motor_left", "motor_right"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "bt-stream",
+      "from": "smartphone",
+      "to": "esp32",
+      "label": "a,speed,speed;",
+      "variant": "emphasis"
+    },
+    {
+      "id": "i2c-bus",
+      "from": "esp32",
+      "to": "oled",
+      "label": "I2C Telemetry",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "pwm-and-dir",
+      "from": "esp32",
+      "to": "l298n",
+      "label": "30kHz PWM & DIR",
+      "variant": "emphasis"
+    },
+    {
+      "id": "batt-power",
+      "from": "battery",
+      "to": "l298n",
+      "label": "+9V Input",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "reg-5v-feed",
+      "from": "l298n",
+      "to": "esp32",
+      "label": "5.0V Regulated",
+      "fromSide": "left",
+      "toSide": "right",
+      "labelDy": -20
+    },
+    {
+      "id": "out-left",
+      "from": "l298n",
+      "to": "motor_left",
+      "label": "Drive Left",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "out-right",
+      "from": "l298n",
+      "to": "motor_right",
+      "label": "Drive Right",
+      "fromSide": "right",
+      "toSide": "left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Wireless Link",
+      "items": [
+        "Bluetooth Classic SPP profile (Device: ESP32_RC_Car)",
+        "Fail-safe watchdog stops motors after 1.5s silence"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Dual Motor PWM",
+      "items": [
+        "30kHz silent PWM prevents audible coil whine",
+        "Independent left/right speed for pivot and differential steering"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Power Regulation",
+      "items": [
+        "9V battery provides headroom for L298N 78M05 regulator",
+        "Stable 5V output eliminates micro-controller brownout resets"
+      ]
+    }
+  ]
+}

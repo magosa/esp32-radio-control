@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+web-controller/node_modules/
+
+# Next.js build output
+.next/
+web-controller/.next/
+out/
+web-controller/out/
+
+# Slidev export / build
+dist/
+
+# Binaries and local tooling
+bin/
+*.exe
+*.zip
+*.tar.gz
+
+# Temporary and IDE files
+.vscode/
+scratch/
+.tempmediaStorage/
+*.log
+.DS_Store
+Thumbs.db
+
+# Arduino build cache
+*.build/
+*.bin
+*.elf
+*.hex

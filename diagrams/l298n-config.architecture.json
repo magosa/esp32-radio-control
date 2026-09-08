@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "L298N Configuration & Pin Hookup",
+    "subtitle": "Jumper Configuration & Signal Wiring for ESP32",
+    "visual_preset": "blueprint",
+    "animation": "trace",
+    "quality_profile": "standard",
+    "views": [
+      {
+        "id": "jumpers",
+        "label": "Jumper Rules",
+        "focus": ["l298n_ena", "l298n_5v_jumper", "l298n_enb"],
+        "note": "Remove ENA/ENB jumpers for PWM; Keep 5V-EN jumper mounted"
+      },
+      {
+        "id": "power-feed",
+        "label": "9V Input & 5V Reg",
+        "focus": ["batt_9v", "l298n_pwr", "l298n_5v_jumper", "l298n_5v_out", "esp32_5v_in"],
+        "note": "9V battery input stepped down to 5.0V by 78M05 regulator"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "esp32_pwm_r",
+      "type": "backend",
+      "label": "ESP32 GPIO 14",
+      "sublabel": "Right PWM Output",
+      "pos": [40, 80],
+      "size": [150, 60],
+      "tag": "30kHz LEDC"
+    },
+    {
+      "id": "l298n_ena",
+      "type": "security",
+      "label": "ENA Pin Header",
+      "sublabel": "[REMOVE JUMPER]",
+      "pos": [260, 80],
+      "size": [160, 60],
+      "tag": "Speed Control R"
+    },
+    {
+      "id": "batt_9v",
+      "type": "external",
+      "label": "9V Battery Box",
+      "sublabel": "+9V Red / GND Black",
+      "pos": [40, 220],
+      "size": [150, 60],
+      "tag": "Power Source"
+    },
+    {
+      "id": "l298n_pwr",
+      "type": "backend",
+      "label": "L298N 12V & GND",
+      "sublabel": "Power Input Block",
+      "pos": [260, 220],
+      "size": [160, 60],
+      "tag": "Screw Terminals"
+    },
+    {
+      "id": "l298n_5v_jumper",
+      "type": "cloud",
+      "label": "5V-EN Jumper",
+      "sublabel": "[KEEP MOUNTED]",
+      "pos": [490, 220],
+      "size": [160, 60],
+      "tag": "78M05 Enabled"
+    },
+    {
+      "id": "l298n_5v_out",
+      "type": "backend",
+      "label": "L298N 5V Terminal",
+      "sublabel": "Regulated 5.0V Out",
+      "pos": [720, 220],
+      "size": [160, 60],
+      "tag": "Clean 5V"
+    },
+    {
+      "id": "esp32_5v_in",
+      "type": "backend",
+      "label": "ESP32 5V (VIN)",
+      "sublabel": "MCU Power Input",
+      "pos": [720, 350],
+      "size": [160, 60],
+      "tag": "No Brownout"
+    },
+    {
+      "id": "esp32_pwm_l",
+      "type": "backend",
+      "label": "ESP32 GPIO 25",
+      "sublabel": "Left PWM Output",
+      "pos": [40, 350],
+      "size": [150, 60],
+      "tag": "30kHz LEDC"
+    },
+    {
+      "id": "l298n_enb",
+      "type": "security",
+      "label": "ENB Pin Header",
+      "sublabel": "[REMOVE JUMPER]",
+      "pos": [260, 350],
+      "size": [160, 60],
+      "tag": "Speed Control L"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "ESP32 Controller Signals",
+      "wraps": ["esp32_pwm_r", "esp32_pwm_l", "esp32_5v_in"]
+    },
+    {
+      "kind": "region",
+      "label": "L298N Driver Board Setup",
+      "wraps": ["l298n_ena", "l298n_pwr", "l298n_5v_jumper", "l298n_5v_out", "l298n_enb"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "pwm-r-wire",
+      "from": "esp32_pwm_r",
+      "to": "l298n_ena",
+      "label": "PWM Right",
+      "variant": "emphasis"
+    },
+    {
+      "id": "power-in-wire",
+      "from": "batt_9v",
+      "to": "l298n_pwr",
+      "label": "+9V & GND",
+      "variant": "emphasis"
+    },
+    {
+      "id": "reg-enable",
+      "from": "l298n_pwr",
+      "to": "l298n_5v_jumper",
+      "label": "Internal Feed",
+      "variant": "default"
+    },
+    {
+      "id": "reg-out",
+      "from": "l298n_5v_jumper",
+      "to": "l298n_5v_out",
+      "label": "5.0V DC",
+      "variant": "emphasis"
+    },
+    {
+      "id": "feed-esp32",
+      "from": "l298n_5v_out",
+      "to": "esp32_5v_in",
+      "label": "Supply 5V",
+      "variant": "emphasis",
+      "labelDy": 24
+    },
+    {
+      "id": "pwm-l-wire",
+      "from": "esp32_pwm_l",
+      "to": "l298n_enb",
+      "label": "PWM Left",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "ENA / ENB Jumpers",
+      "items": [
+        "MUST remove both black shorting caps to expose pin headers",
+        "Connect to ESP32 GPIO 14 (Right) and GPIO 25 (Left)"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "5V-EN Jumper",
+      "items": [
+        "KEEP mounted behind the blue screw terminals",
+        "Enables 78M05 step-down regulator converting 9V to stable 5V"
+      ]
+    }
+  ]
+}

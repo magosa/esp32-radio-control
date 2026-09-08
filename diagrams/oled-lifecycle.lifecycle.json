@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "ESP32 Firmware Boot & OLED Telemetry Lifecycle",
+    "output": "public/diagrams/oled-lifecycle.html",
+    "viewBox": [960, 640],
+    "animation": "trace",
+    "quality_profile": "standard",
+    "views": [
+      {
+        "id": "boot-path",
+        "label": "Boot to Bluetooth Ready",
+        "focus": ["pwr_on", "oled_init", "pin_pwm_init", "bt_wait"],
+        "note": "Initial sequence showing hardware bringup and OLED ready screen"
+      },
+      {
+        "id": "running-path",
+        "label": "Connected Driving & Failsafe",
+        "focus": ["bt_wait", "connected", "driving", "idle_brake", "failsafe_stop"],
+        "note": "Driving state transitions and timeout protection watchdog"
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "main", "label": "Firmware & OLED States" },
+    { "id": "running", "label": "Active Drive Cycle" },
+    { "id": "safety", "label": "Watchdog & Safety Gate" }
+  ],
+  "states": [
+    {
+      "id": "pwr_on",
+      "type": "start",
+      "label": "Power ON (9V / 5V)",
+      "sublabel": "ESP32 Bootloader",
+      "lane": "main",
+      "col": 0,
+      "step": "01",
+      "tag": "Hardware"
+    },
+    {
+      "id": "oled_init",
+      "type": "active",
+      "label": "OLED Init (I2C)",
+      "sublabel": "\"ESP32 RC CAR Initializing...\"",
+      "lane": "main",
+      "col": 1,
+      "step": "02",
+      "tag": "SSD1306"
+    },
+    {
+      "id": "pin_pwm_init",
+      "type": "active",
+      "label": "LEDC PWM & Pins",
+      "sublabel": "30kHz / All Pins LOW",
+      "lane": "main",
+      "col": 2,
+      "step": "03",
+      "tag": "Setup"
+    },
+    {
+      "id": "bt_wait",
+      "type": "waiting",
+      "label": "[BT: WAITING...]",
+      "sublabel": "OLED: MODE STOP (0%)",
+      "lane": "main",
+      "col": 3,
+      "step": "04",
+      "tag": "Waiting Client"
+    },
+    {
+      "id": "connected",
+      "type": "success",
+      "label": "[BT: CONNECTED]",
+      "sublabel": "Android SPP Linked",
+      "lane": "main",
+      "col": 4,
+      "step": "05",
+      "tag": "Ready"
+    },
+    {
+      "id": "driving",
+      "type": "active",
+      "label": "Active Driving",
+      "sublabel": "FORWARD / TURN / REVERSE",
+      "lane": "running",
+      "col": 1,
+      "tag": "PWM Bars 0-255"
+    },
+    {
+      "id": "idle_brake",
+      "type": "waiting",
+      "label": "Brake & Stop",
+      "sublabel": "Command 'e' (PWM 0)",
+      "lane": "running",
+      "col": 3,
+      "tag": "TouchUp"
+    },
+    {
+      "id": "failsafe_stop",
+      "type": "failure",
+      "label": "Watchdog Stop",
+      "sublabel": "Silence > 1.5s Detected",
+      "lane": "safety",
+      "col": 2,
+      "tag": "Failsafe"
+    }
+  ],
+  "transitions": [
+    { "id": "t1", "from": "pwr_on", "to": "oled_init", "variant": "default", "route": "straight" },
+    { "id": "t2", "from": "oled_init", "to": "pin_pwm_init", "variant": "default", "route": "straight" },
+    { "id": "t3", "from": "pin_pwm_init", "to": "bt_wait", "variant": "emphasis", "route": "straight" },
+    { "id": "t4", "from": "bt_wait", "to": "connected", "variant": "emphasis", "route": "straight" },
+    { "id": "t5", "from": "connected", "to": "driving", "variant": "emphasis", "fromSide": "bottom", "toSide": "right" },
+    { "id": "t6", "from": "driving", "to": "idle_brake", "variant": "default", "fromSide": "right", "toSide": "left" },
+    { "id": "t7", "from": "idle_brake", "to": "driving", "variant": "emphasis", "fromSide": "bottom", "toSide": "bottom" },
+    { "id": "t8", "from": "driving", "to": "failsafe_stop", "variant": "security", "fromSide": "bottom", "toSide": "top" },
+    { "id": "t9", "from": "failsafe_stop", "to": "bt_wait", "variant": "security", "fromSide": "top", "toSide": "bottom" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Initial Screen Verification",
+      "items": [
+        "On boot, OLED displays splash 'ESP32 RC CAR Initializing...'",
+        "Transitions to '[BT: WAITING...]' header with speed bars at 0"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Connected & Running Feedback",
+      "items": [
+        "Header flips to '[BT: CONNECTED]' immediately when Android pairs",
+        "Mode and PWM bar graphs update in real-time on 100ms intervals"
+      ]
+    }
+  ]
+}

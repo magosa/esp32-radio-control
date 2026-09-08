@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "ESP32 RC Car Bluetooth Control Sequence",
+    "animation": "trace",
+    "quality_profile": "standard",
+    "viewBox": [820, 720],
+    "views": [
+      {
+        "id": "forward-run",
+        "label": "Forward Drive Action",
+        "focus": ["user", "app", "esp32", "l298n", "motor"],
+        "note": "TouchDown triggers Bluetooth packet transmission and motor rotation"
+      },
+      {
+        "id": "telemetry",
+        "label": "OLED Telemetry",
+        "focus": ["esp32", "oled"],
+        "note": "Immediate I2C screen refresh displaying speed bar meters"
+      },
+      {
+        "id": "release-stop",
+        "label": "TouchUp Safe Stop",
+        "focus": ["user", "app", "esp32", "l298n", "motor"],
+        "note": "Releasing button immediately stops motors without runaway risk"
+      }
+    ]
+  },
+  "participants": [
+    { "id": "user", "type": "external", "label": "User", "sublabel": "Pointer Event" },
+    { "id": "app", "type": "frontend", "label": "Web App", "sublabel": "Next.js BLE" },
+    { "id": "esp32", "type": "backend", "label": "ESP32 Core", "sublabel": "BLE Nordic UART" },
+    { "id": "oled", "type": "frontend", "label": "OLED Display", "sublabel": "SSD1306 (128x64)" },
+    { "id": "l298n", "type": "backend", "label": "L298N Driver", "sublabel": "H-Bridge" },
+    { "id": "motor", "type": "external", "label": "TT Motors", "sublabel": "2WD Wheels" }
+  ],
+  "segments": [
+    { "from": 140, "to": 390, "label": "TouchDown: Forward Acceleration" },
+    { "from": 410, "to": 660, "label": "TouchUp: Safe Braking & Stop" }
+  ],
+  "messages": [
+    { "id": "m1", "from": "user", "to": "app", "y": 170, "label": "TouchDown(Forward Button)", "variant": "default" },
+    { "id": "m2", "from": "app", "to": "esp32", "y": 215, "label": "Bluetooth SPP: \"a,200,200;\"", "variant": "emphasis" },
+    { "id": "m3", "from": "esp32", "to": "oled", "y": 260, "label": "I2C: [MODE: FORWARD, PWM:200]", "variant": "default" },
+    { "id": "m4", "from": "esp32", "to": "l298n", "y": 305, "label": "LEDC PWM: 30kHz (Duty 200) + DIR HIGH", "variant": "emphasis" },
+    { "id": "m5", "from": "l298n", "to": "motor", "y": 350, "label": "9V High Current Power Output", "variant": "emphasis" },
+    
+    { "id": "m6", "from": "user", "to": "app", "y": 440, "label": "TouchUp(Release Button)", "variant": "default" },
+    { "id": "m7", "from": "app", "to": "esp32", "y": 485, "label": "Bluetooth SPP: \"e,0,0;\"", "variant": "emphasis" },
+    { "id": "m8", "from": "esp32", "to": "l298n", "y": 530, "label": "PWM 0 & DIR LOW (Brake)", "variant": "security" },
+    { "id": "m9", "from": "l298n", "to": "motor", "y": 575, "label": "Motor Power Cut (Stop)", "variant": "security" },
+    { "id": "m10", "from": "esp32", "to": "oled", "y": 620, "label": "I2C: [MODE: STOP, PWM: 0]", "variant": "default" }
+  ],
+  "activations": [
+    { "participant": "app", "from": 170, "to": 500, "type": "frontend" },
+    { "participant": "esp32", "from": 215, "to": 630, "type": "backend" },
+    { "participant": "l298n", "from": 305, "to": 580, "type": "backend" },
+    { "participant": "motor", "from": 350, "to": 575, "type": "external" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Touch & Release Safety",
+      "items": [
+        "Car moves ONLY while user actively holds the button on screen",
+        "Releasing the touch instantly dispatches stop packet 'e,0,0;'"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Dual Feedback Pipeline",
+      "items": [
+        "Firmware concurrently handles PWM motor actuation and 100ms OLED refresh",
+        "User visually confirms received command and motor speed bar on chassis"
+      ]
+    }
+  ]
+}

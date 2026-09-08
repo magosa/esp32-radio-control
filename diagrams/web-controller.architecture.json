@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Next.js & shadcn/ui Web Controller Architecture",
+    "subtitle": "Web Bluetooth API (BLE) Transport, Cyberpunk Dashboard & ESP32 Integration",
+    "visual_preset": "signal-flow",
+    "animation": "trace",
+    "quality_profile": "standard",
+    "views": [
+      {
+        "id": "drive-control",
+        "label": "Touch to BLE Drive Flow",
+        "focus": ["dpad_component", "speed_slider", "use_rc_hook", "nus_gatt_client", "esp32_hardware"],
+        "note": "PointerDown triggers dynamic speed packet, sent via Web Bluetooth NUS to ESP32"
+      },
+      {
+        "id": "safety-estop",
+        "label": "Emergency Stop & Failsafe",
+        "focus": ["estop_button", "nus_gatt_client", "esp32_hardware"],
+        "note": "PointerUp or E-STOP immediately dispatches 'e,0,0;' to stop vehicle"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "dpad_component",
+      "type": "frontend",
+      "label": "D-Pad PointerDown",
+      "sublabel": "Forward / Turn / Rev",
+      "pos": [40, 90],
+      "size": [150, 60],
+      "tag": "Next.js UI"
+    },
+    {
+      "id": "speed_slider",
+      "type": "frontend",
+      "label": "shadcn/ui Slider",
+      "sublabel": "PWM Speed (100-255)",
+      "pos": [40, 240],
+      "size": [150, 60],
+      "tag": "Throttle"
+    },
+    {
+      "id": "use_rc_hook",
+      "type": "backend",
+      "label": "useWebBluetooth",
+      "sublabel": "Packet & Haptics Engine",
+      "pos": [260, 90],
+      "size": [180, 60],
+      "tag": "React Hook"
+    },
+    {
+      "id": "estop_button",
+      "type": "security",
+      "label": "PointerUp / E-STOP",
+      "sublabel": "Finger Released or Panic",
+      "pos": [260, 240],
+      "size": [180, 60],
+      "tag": "Safety Guard"
+    },
+    {
+      "id": "nus_gatt_client",
+      "type": "messagebus",
+      "label": "Web Bluetooth (NUS)",
+      "sublabel": "writeValueWithoutResponse",
+      "pos": [510, 165],
+      "size": [160, 60],
+      "tag": "GATT Client"
+    },
+    {
+      "id": "esp32_hardware",
+      "type": "backend",
+      "label": "ESP32_RC_Car (BLE)",
+      "sublabel": "30kHz PWM & OLED Display",
+      "pos": [740, 165],
+      "size": [160, 60],
+      "tag": "Hardware Bot"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Browser Web UI Layer (Next.js 14 + shadcn/ui)",
+      "wraps": ["dpad_component", "speed_slider", "use_rc_hook", "estop_button", "nus_gatt_client"]
+    },
+    {
+      "kind": "region",
+      "label": "Vehicle Hardware Layer",
+      "wraps": ["esp32_hardware"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "touch-to-hook",
+      "from": "dpad_component",
+      "to": "use_rc_hook",
+      "label": "Press Event",
+      "variant": "emphasis"
+    },
+    {
+      "id": "slider-to-hook",
+      "from": "speed_slider",
+      "to": "use_rc_hook",
+      "label": "Speed Value",
+      "variant": "default"
+    },
+    {
+      "id": "hook-to-gatt",
+      "from": "use_rc_hook",
+      "to": "nus_gatt_client",
+      "label": "\"a,200,200;\"",
+      "variant": "emphasis"
+    },
+    {
+      "id": "estop-to-gatt",
+      "from": "estop_button",
+      "to": "nus_gatt_client",
+      "label": "\"e,0,0;\" (Stop)",
+      "variant": "security",
+      "labelAt": [475, 314]
+    },
+    {
+      "id": "gatt-to-esp",
+      "from": "nus_gatt_client",
+      "to": "esp32_hardware",
+      "label": "BLE 2.4GHz",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Next.js 14 & shadcn/ui Cockpit",
+      "items": [
+        "Zero native app installation: run directly in Chrome browser on Android/PC",
+        "Cyberpunk dark UI with reactive D-Pad, speed slider, and haptic feedback"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Dual Safe Braking Guard",
+      "items": [
+        "PointerUp and E-STOP instantly dispatch 'e,0,0;' to stop vehicle",
+        "Firmware failsafe automatically cuts motor PWM if BLE signal drops >1.5s"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Nordic UART Service (NUS) Protocol",
+      "items": [
+        "High-frequency 10-20ms BLE serial streaming without Wi-Fi dropouts",
+        "Dual telemetry feedback with OLED screen and live web gauges"
+      ]
+    }
+  ]
+}

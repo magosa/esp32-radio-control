@@ -1,0 +1,71 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "ESP32 RC Car Control Loop Workflow",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "standard",
+    "views": [
+      {
+        "id": "drive-loop",
+        "label": "Touch to Motor Drive",
+        "focus": ["touch_down", "make_packet", "bt_send", "bt_recv", "parse_cmd", "pwm_gen", "l298n_drive", "motor_spin", "oled_draw"],
+        "note": "Complete control pipeline from finger touch to motor wheel spinning and OLED telemetry"
+      },
+      {
+        "id": "failsafe-loop",
+        "label": "Fail-safe Timeout Stop",
+        "focus": ["parse_cmd", "failsafe", "motor_stop"],
+        "note": "Safety mechanism that automatically halts motors when Bluetooth signal drops"
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "ui", "label": "Android App UI" },
+    { "id": "radio", "label": "Bluetooth RF Link" },
+    { "id": "mcu", "label": "ESP32 Firmware" },
+    { "id": "actuator", "label": "Driver & Motors" }
+  ],
+  "phases": [
+    { "id": "p_input", "label": "User Input", "fromCol": 0, "toCol": 1 },
+    { "id": "p_comm", "label": "Wireless SPP", "fromCol": 2, "toCol": 3 },
+    { "id": "p_mcu", "label": "Control & Safety", "fromCol": 4, "toCol": 5 },
+    { "id": "p_act", "label": "Motor Execution", "fromCol": 6, "toCol": 7 }
+  ],
+  "mainPath": [
+    "touch_down",
+    "make_packet",
+    "bt_send",
+    "bt_recv",
+    "parse_cmd",
+    "pwm_gen",
+    "l298n_drive",
+    "motor_spin"
+  ],
+  "nodes": [
+    { "id": "touch_down", "lane": "ui", "col": 0, "type": "frontend", "label": "Touch Down", "sublabel": "Forward button pressed", "width": 130 },
+    { "id": "make_packet", "lane": "ui", "col": 1, "type": "frontend", "label": "Build Packet", "sublabel": "a,speed,speed;", "width": 130 },
+    { "id": "bt_send", "lane": "radio", "col": 2, "type": "messagebus", "label": "BT Transmitter", "sublabel": "SPP Serial Stream", "width": 130 },
+    { "id": "bt_recv", "lane": "radio", "col": 3, "type": "messagebus", "label": "BT Receiver", "sublabel": "SerialBT.available()", "width": 130 },
+    { "id": "parse_cmd", "lane": "mcu", "col": 4, "type": "backend", "label": "Command Parser", "sublabel": "Extract cmd & PWM", "width": 130 },
+    { "id": "oled_draw", "lane": "mcu", "col": 5, "type": "frontend", "label": "OLED Update", "sublabel": "Speed Bar & Mode", "width": 130 },
+    { "id": "failsafe", "lane": "mcu", "col": 4, "row": 1, "type": "security", "label": "Fail-safe Guard", "sublabel": "Timeout > 1500ms", "tag": "Watchdog", "width": 130 },
+    { "id": "pwm_gen", "lane": "mcu", "col": 5, "row": 0, "type": "backend", "label": "LEDC PWM (30kHz)", "sublabel": "GPIO 14 & 25", "width": 130 },
+    { "id": "l298n_drive", "lane": "actuator", "col": 6, "type": "backend", "label": "L298N H-Bridge", "sublabel": "Power Inversion", "width": 130 },
+    { "id": "motor_spin", "lane": "actuator", "col": 7, "type": "external", "label": "TT Motors", "sublabel": "2WD Wheels Rotate", "width": 130 },
+    { "id": "motor_stop", "lane": "actuator", "col": 5, "row": 1, "type": "security", "label": "Emergency Stop", "sublabel": "PWM 0 / Pins LOW", "width": 130 }
+  ],
+  "edges": [
+    { "from": "touch_down", "to": "make_packet", "label": "trigger" },
+    { "from": "make_packet", "to": "bt_send", "label": "write" },
+    { "from": "bt_send", "to": "bt_recv", "label": "RF 2.4GHz", "variant": "emphasis" },
+    { "from": "bt_recv", "to": "parse_cmd", "label": "readString" },
+    { "from": "parse_cmd", "to": "pwm_gen", "label": "duty 0-255" },
+    { "from": "parse_cmd", "to": "oled_draw", "label": "telemetry" },
+    { "from": "parse_cmd", "to": "failsafe", "label": "reset timer", "variant": "dashed" },
+    { "from": "failsafe", "to": "motor_stop", "label": "timeout", "variant": "security" },
+    { "from": "pwm_gen", "to": "l298n_drive", "label": "PWM + DIR" },
+    { "from": "l298n_drive", "to": "motor_spin", "label": "High Current" }
+  ]
+}

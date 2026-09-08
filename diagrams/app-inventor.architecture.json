@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "MIT App Inventor 2 Architecture & Control Flow",
+    "subtitle": "UI Components, Touch Events & Serial Transmission Blocks",
+    "visual_preset": "signal-flow",
+    "animation": "trace",
+    "quality_profile": "standard",
+    "views": [
+      {
+        "id": "touch-event",
+        "label": "TouchDown to Drive",
+        "focus": ["btn_touch", "proc_packet", "slider_speed", "bt_client", "esp32_rc"],
+        "note": "TouchDown event dynamically formats speed and sends Bluetooth stream"
+      },
+      {
+        "id": "release-event",
+        "label": "TouchUp Safe Stop",
+        "focus": ["btn_release", "bt_client", "esp32_rc"],
+        "note": "TouchUp event immediately dispatches 'e,0,0;' to stop vehicle"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "btn_touch",
+      "type": "frontend",
+      "label": "Button TouchDown",
+      "sublabel": "Forward / Turn / Rev",
+      "pos": [40, 90],
+      "size": [150, 60],
+      "tag": "User Input"
+    },
+    {
+      "id": "slider_speed",
+      "type": "frontend",
+      "label": "Slider_Speed",
+      "sublabel": "Value: 100 - 255",
+      "pos": [40, 240],
+      "size": [150, 60],
+      "tag": "PWM Speed Setting"
+    },
+    {
+      "id": "proc_packet",
+      "type": "backend",
+      "label": "sendCommand(cmd)",
+      "sublabel": "join(cmd,\",\",speed,\",\",speed,\";\")",
+      "pos": [260, 90],
+      "size": [180, 60],
+      "tag": "Packet Builder"
+    },
+    {
+      "id": "btn_release",
+      "type": "security",
+      "label": "Button TouchUp",
+      "sublabel": "Finger Released",
+      "pos": [260, 240],
+      "size": [180, 60],
+      "tag": "Auto Stop Trigger"
+    },
+    {
+      "id": "bt_client",
+      "type": "messagebus",
+      "label": "BluetoothClient1",
+      "sublabel": "SendText(packet)",
+      "pos": [510, 165],
+      "size": [160, 60],
+      "tag": "SPP Stream"
+    },
+    {
+      "id": "esp32_rc",
+      "type": "backend",
+      "label": "ESP32_RC_Car",
+      "sublabel": "SerialBT.readString()",
+      "pos": [740, 165],
+      "size": [160, 60],
+      "tag": "Vehicle Execution"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Android App Event & Logic Layer",
+      "wraps": ["btn_touch", "slider_speed", "proc_packet", "btn_release", "bt_client"]
+    },
+    {
+      "kind": "region",
+      "label": "Hardware Receiver",
+      "wraps": ["esp32_rc"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "touch-to-proc",
+      "from": "btn_touch",
+      "to": "proc_packet",
+      "label": "Press Event",
+      "variant": "emphasis"
+    },
+    {
+      "id": "slider-to-proc",
+      "from": "slider_speed",
+      "to": "proc_packet",
+      "label": "Read ThumbPosition",
+      "variant": "default"
+    },
+    {
+      "id": "proc-to-bt",
+      "from": "proc_packet",
+      "to": "bt_client",
+      "label": "\"a,200,200;\"",
+      "variant": "emphasis"
+    },
+    {
+      "id": "release-to-bt",
+      "from": "btn_release",
+      "to": "bt_client",
+      "label": "\"e,0,0;\" (Stop)",
+      "variant": "security",
+      "labelAt": [475, 314]
+    },
+    {
+      "id": "bt-to-esp",
+      "from": "bt_client",
+      "to": "esp32_rc",
+      "label": "RF 2.4GHz",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "violet",
+      "title": "Touch & Release Control Blocks",
+      "items": [
+        "TouchDown block calls sendCommand(\"a\") with current slider velocity",
+        "TouchUp block automatically calls sendCommand(\"e\") to halt motors instantly"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Dynamic Speed Scaling",
+      "items": [
+        "Slider ThumbPosition (100-255) is rounded and concatenated into the SPP payload",
+        "Allows seamless acceleration and fine steering maneuvers"
+      ]
+    }
+  ]
+}
