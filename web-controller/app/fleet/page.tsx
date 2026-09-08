@@ -59,6 +59,16 @@ export default function FleetDashboardPage() {
     sendCommand("all", cmd, cmd === "e" ? 0 : SPEED, cmd === "e" ? 0 : SPEED);
   };
 
+  // 前進/後退/旋回ボタンは押している間だけ駆動し、離すと即停止する(実機RCコントローラー同様のホールド操作)
+  const holdProps = (cmd: DriveCommand, sender: (cmd: DriveCommand) => void) => ({
+    onMouseDown: () => sender(cmd),
+    onMouseUp: () => sender("e" as DriveCommand),
+    onMouseLeave: () => sender("e" as DriveCommand),
+    onTouchStart: () => sender(cmd),
+    onTouchEnd: () => sender("e" as DriveCommand),
+    onTouchCancel: () => sender("e" as DriveCommand),
+  });
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-4 max-w-3xl mx-auto">
       <header className="flex items-center justify-between mb-4">
@@ -95,8 +105,8 @@ export default function FleetDashboardPage() {
           {DIRECTIONS.map((d) => (
             <button
               key={d.cmd}
-              onClick={() => sendToAll(d.cmd)}
-              className="px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-xs font-mono"
+              {...(d.cmd === "e" ? { onClick: () => sendToAll(d.cmd) } : holdProps(d.cmd, sendToAll))}
+              className="px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-xs font-mono select-none touch-none"
             >
               {d.label}
             </button>
@@ -111,8 +121,8 @@ export default function FleetDashboardPage() {
               {DIRECTIONS.map((d) => (
                 <button
                   key={d.cmd}
-                  onClick={() => sendToSelected(d.cmd)}
-                  className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-mono"
+                  {...(d.cmd === "e" ? { onClick: () => sendToSelected(d.cmd) } : holdProps(d.cmd, sendToSelected))}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-mono select-none touch-none"
                 >
                   {d.label}
                 </button>
