@@ -30,3 +30,6 @@ Thumbs.db
 *.bin
 *.elf
 *.hex
+
+# ESP32 Wi-Fi / フリートハブ接続情報 (機密情報)
+esp32_rc_car/wifi_secrets.h

@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000",
+    "dev": "tsx watch server.ts",
     "build": "next build",
-    "start": "next start -p 3000",
-    "lint": "next lint"
+    "start": "cross-env NODE_ENV=production tsx server.ts",
+    "lint": "next lint",
+    "sim:device": "tsx scripts/fakeDevice.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -14,15 +15,19 @@
     "next": "^14.2.24",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tailwind-merge": "^3.0.1"
+    "tailwind-merge": "^3.0.1",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^20.17.19",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "@types/ws": "^8.5.13",
     "autoprefixer": "^10.4.20",
+    "cross-env": "^7.0.3",
     "postcss": "^8.5.2",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }
 }

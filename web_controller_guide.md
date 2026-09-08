@@ -102,3 +102,60 @@ Web Bluetooth APIでは、標準的なNordic UART Service (NUS) プロファイ�
 ```
 - 例: `a,190,190;`（前進、速度190）
 - 例: `e,0,0;`（即時全停止）
+
+---
+
+## 5. フリート管理ダッシュボード (WebSocket群制御)
+
+`v2` より、Web Bluetoothによる単機操縦(このガイドの1〜4章)に加え、複数台を同時制御する **フリートダッシュボード** を追加しました。単機コックピットは「レガシー/デバッグ用フォールバック」として維持されています。
+
+### 5.1 起動方法
+```powershell
+cd web-controller
+npm install
+npm run dev
+```
+`npm run dev` は `next dev` ではなく、WebSocketハブを内蔵したカスタムサーバー（`server.ts`）を起動します。ブラウザで以下にアクセスします。
+- `http://localhost:3000/` : 単機コックピット（Web Bluetooth、レガシー）
+- `http://localhost:3000/fleet` : フリートダッシュボード（WebSocket）
+
+### 5.2 通信構成
+```mermaid
+graph LR
+    subgraph Devices ["ESP32車両群 (複数台)"]
+        D1["rc-xxxxxx #1"]
+        D2["rc-xxxxxx #2"]
+        D3["rc-xxxxxx #N"]
+    end
+    subgraph Hub ["フリートハブサーバー (server.ts)"]
+        WSDevice["/ws/device"]
+        WSClient["/ws/client"]
+        Registry["VehicleRegistry"]
+        RouteEngine["RouteEngine (オープンループ)"]
+        WSDevice --> Registry
+        Registry --> RouteEngine
+    end
+    subgraph UI ["操作ブラウザ"]
+        Dashboard["/fleet ダッシュボード"]
+    end
+
+    D1 & D2 & D3 -- "JSON: hello / telemetry / drive / setName" --> WSDevice
+    Dashboard -- "JSON: clientCommand / setMode / routeStart 等" --> WSClient
+    WSClient --> Registry
+```
+
+### 5.3 疑似デバイスでの動作確認
+実機を用意できない場合、以下のコマンドで複数の疑似ESP32クライアントを起動して検証できます。
+```powershell
+npm run sim:device -- rc-car1 "Car1"
+npm run sim:device -- rc-car2 "Car2"
+```
+
+### 5.4 主な操作
+- **一括操作**: 全オンライン車両へ同一コマンドを一斉送信。
+- **個別選択操作**: チェックボックスで選択した車両にのみコマンドを送信。
+- **manual / auto 切り替え**: `auto` の車両はルートエンジンの制御対象になり、手動コマンドは無視されます（衝突防止）。
+- **ルート実行**: `web-controller/fleet/routes/*.json` に定義された時間ベース(オープンループ)の走行プログラムを、`auto`モードの車両に対して開始/停止できます（例: `rendezvous-demo` = 集合→解散デモ）。
+
+> 現時点では位置情報を用いた閉ループ制御（カメラ+ARマーカー等による実測位置トラッキング）は未実装です。`VehicleState.position` フィールドは将来拡張用に予約されています。
+

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import {
   useWebBluetooth,
   ConnectionStatus,
@@ -17,6 +18,7 @@ import {
   Activity,
   Radio,
   Keyboard,
+  Users,
 } from "lucide-react";
 
 type Direction = "forward" | "backward" | "left" | "right" | "stop";
@@ -159,8 +161,8 @@ export default function ControllerPage() {
             <div>
               <h1 className="text-sm font-bold tracking-wider text-slate-100 flex items-center gap-1.5 font-mono">
                 ESP32 COCKPIT
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                  BLE
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-300 border border-slate-600/50">
+                  レガシー / BLEフォールバック
                 </span>
               </h1>
               <p className="text-[10px] text-slate-400 font-mono">
@@ -170,6 +172,13 @@ export default function ControllerPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Link
+              href="/fleet"
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-cyan-300 border border-cyan-500/30 flex items-center gap-1.5 transition active:scale-95"
+            >
+              <Users className="w-3.5 h-3.5" />
+              フリート
+            </Link>
             {status === "connected" ? (
               <button
                 onClick={disconnect}

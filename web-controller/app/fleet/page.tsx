@@ -1,0 +1,214 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  Radio,
+  Wifi,
+  WifiOff,
+  Users,
+  PlayCircle,
+  StopCircle,
+  RotateCcw,
+} from "lucide-react";
+import { useFleetSocket } from "@/hooks/useFleetSocket";
+import type { DriveCommand } from "@/fleet/protocol";
+
+const SPEED = 190;
+
+const DIRECTIONS: { label: string; cmd: DriveCommand }[] = [
+  { label: "▲ 前進", cmd: "a" },
+  { label: "▼ 後退", cmd: "b" },
+  { label: "▶ 右旋回", cmd: "c" },
+  { label: "◀ 左旋回", cmd: "d" },
+  { label: "■ 停止", cmd: "e" },
+];
+
+export default function FleetDashboardPage() {
+  const {
+    status,
+    vehicles,
+    routeStatus,
+    availableRoutes,
+    sendCommand,
+    setMode,
+    startRoute,
+    stopRoute,
+  } = useFleetSocket();
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedRouteId, setSelectedRouteId] = useState<string>("");
+
+  const onlineCount = useMemo(() => vehicles.filter((v) => v.status === "online").length, [vehicles]);
+
+  const toggleSelect = (deviceId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(deviceId)) next.delete(deviceId);
+      else next.add(deviceId);
+      return next;
+    });
+  };
+
+  const sendToSelected = (cmd: DriveCommand) => {
+    if (selectedIds.size === 0) return;
+    sendCommand(Array.from(selectedIds), cmd, cmd === "e" ? 0 : SPEED, cmd === "e" ? 0 : SPEED);
+  };
+
+  const sendToAll = (cmd: DriveCommand) => {
+    sendCommand("all", cmd, cmd === "e" ? 0 : SPEED, cmd === "e" ? 0 : SPEED);
+  };
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-4 max-w-3xl mx-auto">
+      <header className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Users className="w-5 h-5 text-cyan-400" />
+          <div>
+            <h1 className="text-sm font-bold tracking-wider font-mono">FLEET DASHBOARD</h1>
+            <p className="text-[10px] text-slate-400 font-mono">WebSocket フリート管理</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] font-mono text-slate-400">
+            接続中: {onlineCount}/{vehicles.length}
+          </span>
+          {status === "connected" ? (
+            <Wifi className="w-4 h-4 text-emerald-400" />
+          ) : (
+            <WifiOff className="w-4 h-4 text-rose-400" />
+          )}
+          <Link
+            href="/"
+            className="text-[11px] font-mono px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 flex items-center gap-1"
+          >
+            <Radio className="w-3.5 h-3.5" />
+            レガシー接続(BLE)へ
+          </Link>
+        </div>
+      </header>
+
+      {/* 一括操作 */}
+      <section className="rounded-xl bg-slate-900/70 border border-slate-800 p-3 mb-4">
+        <h2 className="text-xs font-bold font-mono text-slate-300 mb-2">一括操作 (全車両)</h2>
+        <div className="flex flex-wrap gap-2">
+          {DIRECTIONS.map((d) => (
+            <button
+              key={d.cmd}
+              onClick={() => sendToAll(d.cmd)}
+              className="px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-xs font-mono"
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+        {selectedIds.size > 0 && (
+          <div className="mt-3 pt-3 border-t border-slate-800">
+            <h3 className="text-xs font-bold font-mono text-amber-300 mb-2">
+              選択中の{selectedIds.size}台へ送信
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {DIRECTIONS.map((d) => (
+                <button
+                  key={d.cmd}
+                  onClick={() => sendToSelected(d.cmd)}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-mono"
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ルート(集合→帰投)実行 */}
+      <section className="rounded-xl bg-slate-900/70 border border-slate-800 p-3 mb-4">
+        <h2 className="text-xs font-bold font-mono text-slate-300 mb-2">
+          自動ルート実行 (autoモードの車両が対象)
+        </h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={selectedRouteId}
+            onChange={(e) => setSelectedRouteId(e.target.value)}
+            className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs font-mono"
+          >
+            <option value="">ルートを選択...</option>
+            {availableRoutes.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => selectedRouteId && startRoute(selectedRouteId)}
+            disabled={!selectedRouteId}
+            className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-xs font-mono flex items-center gap-1 disabled:opacity-40"
+          >
+            <PlayCircle className="w-3.5 h-3.5" />
+            開始
+          </button>
+          <button
+            onClick={stopRoute}
+            className="px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-xs font-mono flex items-center gap-1"
+          >
+            <StopCircle className="w-3.5 h-3.5" />
+            停止
+          </button>
+        </div>
+        {routeStatus && (
+          <div className="mt-2 text-[11px] font-mono text-slate-400">
+            {routeStatus.running
+              ? `実行中: ${routeStatus.routeId} (${Math.round(routeStatus.elapsedMs / 1000)}s経過)`
+              : "停止中"}
+          </div>
+        )}
+      </section>
+
+      {/* 車両一覧 */}
+      <section className="space-y-2">
+        {vehicles.length === 0 && (
+          <p className="text-xs font-mono text-slate-500">
+            接続中の車両がありません。ESP32の電源を入れるか、疑似デバイス(scripts/fakeDevice.ts)で検証してください。
+          </p>
+        )}
+        {vehicles.map((v) => (
+          <div
+            key={v.deviceId}
+            className={`rounded-xl border p-3 flex items-center justify-between gap-3 ${
+              v.status === "online" ? "border-slate-800 bg-slate-900/70" : "border-slate-900 bg-slate-950/60 opacity-60"
+            }`}
+          >
+            <label className="flex items-center gap-2 flex-1 min-w-0">
+              <input
+                type="checkbox"
+                checked={selectedIds.has(v.deviceId)}
+                onChange={() => toggleSelect(v.deviceId)}
+                disabled={v.status !== "online"}
+              />
+              <div className="min-w-0">
+                <div className="text-xs font-bold font-mono truncate">{v.name}</div>
+                <div className="text-[10px] font-mono text-slate-500 truncate">
+                  {v.deviceId} · {v.status === "online" ? "ONLINE" : "OFFLINE"}
+                  {v.telemetry && ` · cmd=${v.telemetry.cmd} L=${v.telemetry.speedL} R=${v.telemetry.speedR}`}
+                </div>
+              </div>
+            </label>
+            <button
+              onClick={() => setMode(v.deviceId, v.mode === "auto" ? "manual" : "auto")}
+              disabled={v.status !== "online"}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1 border ${
+                v.mode === "auto"
+                  ? "bg-purple-500/20 border-purple-500/40 text-purple-300"
+                  : "bg-slate-800 border-slate-700 text-slate-300"
+              }`}
+            >
+              <RotateCcw className="w-3 h-3" />
+              {v.mode === "auto" ? "AUTO" : "MANUAL"}
+            </button>
+          </div>
+        ))}
+      </section>
+    </main>
+  );
+}

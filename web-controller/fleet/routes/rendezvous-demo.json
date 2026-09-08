@@ -1,0 +1,44 @@
+{
+  "id": "rendezvous-demo",
+  "label": "集合→解散デモ (最大3台・オープンループ)",
+  "programs": [
+    {
+      "slot": "car1",
+      "toRendezvous": [
+        { "cmd": "a", "speedL": 180, "speedR": 180, "durationMs": 3000 },
+        { "cmd": "d", "speedL": 160, "speedR": 160, "durationMs": 700 },
+        { "cmd": "a", "speedL": 180, "speedR": 180, "durationMs": 2000 }
+      ],
+      "rendezvousHoldMs": 3000,
+      "toDestination": [
+        { "cmd": "b", "speedL": 180, "speedR": 180, "durationMs": 2000 },
+        { "cmd": "c", "speedL": 160, "speedR": 160, "durationMs": 700 },
+        { "cmd": "a", "speedL": 180, "speedR": 180, "durationMs": 3000 }
+      ]
+    },
+    {
+      "slot": "car2",
+      "toRendezvous": [
+        { "cmd": "a", "speedL": 170, "speedR": 170, "durationMs": 2500 },
+        { "cmd": "c", "speedL": 160, "speedR": 160, "durationMs": 700 },
+        { "cmd": "a", "speedL": 170, "speedR": 170, "durationMs": 1500 }
+      ],
+      "rendezvousHoldMs": 3500,
+      "toDestination": [
+        { "cmd": "b", "speedL": 170, "speedR": 170, "durationMs": 1500 },
+        { "cmd": "d", "speedL": 160, "speedR": 160, "durationMs": 700 },
+        { "cmd": "a", "speedL": 170, "speedR": 170, "durationMs": 2500 }
+      ]
+    },
+    {
+      "slot": "car3",
+      "toRendezvous": [
+        { "cmd": "a", "speedL": 190, "speedR": 190, "durationMs": 4000 }
+      ],
+      "rendezvousHoldMs": 2500,
+      "toDestination": [
+        { "cmd": "b", "speedL": 190, "speedR": 190, "durationMs": 4000 }
+      ]
+    }
+  ]
+}

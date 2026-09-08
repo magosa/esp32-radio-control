@@ -173,3 +173,34 @@ Arduino IDE の **「ツール」 > 「ライブラリを管理...」**（また
     1. プログラム内のPWM速度を低め（例: `150` など）から徐々に上げる。
     2. ESP32のUSB端子に一時的にモバイルバッテリーやPCのUSB給電を接続し、ESP32電源とモーター電源を分離する（この場合、L298Nの5V端子とESP32の5V端子の接続線は外してください。GNDは共通のままにします）。
     3. より大容量の電池（単三電池6本ボックス等）に変更する。
+
+---
+
+## 6. フリート管理システム (複数台ラジコンのWebSocket群制御)
+
+`v2` より、複数台のESP32ラジコンをブラウザから一括制御する **フリート管理システム** を追加しました。従来のBluetooth接続は「レガシー/デバッグ用フォールバック」として引き続き利用できます。
+
+### 6.1 概要
+- 通信方式: 各ESP32は `TRANSPORT_MODE = MODE_WEBSOCKET`（デフォルト）でWi-Fi経由により`web-controller`のフリートハブサーバーへ常時接続します。
+- デバイスID: 各機体のWi-Fi MACアドレス下位3バイトから `rc-xxxxxx` 形式の一意なIDを自動生成し、表示名はブラウザから変更・保存（NVS）できます。
+- サーバー: `web-controller/server.ts`（Next.jsをラップするNode.jsカスタムサーバー）が `/ws/device`（ESP32用）と `/ws/client`（操作UI用）の2つのWebSocketエンドポイントを提供します。
+- フリートダッシュボード: `http://<サーバー>/fleet` で、接続中の車両一覧・個別/一括の手動操作・manual⇔auto切り替え・オープンループ(時間ベース)ルート実行(`web-controller/fleet/routes/*.json`)ができます。
+- Bluetooth接続(既存の `/` ページ)は `TRANSPORT_MODE = MODE_BLE` または `MODE_CLASSIC_BT` でファームウェアをビルドした場合のレガシー/デバッグ用フォールバックとして維持されています。
+
+### 6.2 ファームウェア側の設定
+1. `esp32_rc_car/wifi_secrets.example.h` を `esp32_rc_car/wifi_secrets.h` としてコピーし、`WIFI_SSID` / `WIFI_PASSWORD` / `FLEET_HUB_HOST` / `FLEET_HUB_PORT` を環境に合わせて設定します（このファイルは `.gitignore` 済みです）。
+2. Arduino IDEのライブラリマネージャーで **arduinoWebSockets**（Links2004）と **ArduinoJson**（bblanchon）を追加インストールします。
+3. `esp32_rc_car/esp32_rc_car.ino` 冒頭の `TRANSPORT_MODE` を `MODE_WEBSOCKET` のままにして書き込みます。
+
+### 6.3 サーバー側の起動
+```powershell
+cd web-controller
+npm install
+npm run dev            # カスタムサーバー(server.ts)を起動し、http://localhost:3000 で待受
+```
+実機を用意しなくても、疑似ESP32クライアントで動作確認できます。
+```powershell
+npm run sim:device -- rc-car1 "Car1"
+```
+ブラウザで `http://localhost:3000/fleet` を開くと、接続中の車両一覧・一括/個別操作・ルート実行UIが表示されます。
+
