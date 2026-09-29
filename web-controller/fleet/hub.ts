@@ -62,6 +62,11 @@ export class FleetHub {
           uptimeMs: msg.uptimeMs,
         });
         this.broadcastFleetState();
+      } else if (msg.type === "imageFrame") {
+        const capturedAt = Date.now();
+        this.registry.updateLastImage(msg.deviceId, capturedAt);
+        this.broadcastFleetState();
+        this.broadcastToClients({ ...msg, capturedAt });
       }
     });
 
@@ -124,7 +129,19 @@ export class FleetHub {
         this.routeEngine.stop();
         break;
       }
+      case "clientCaptureRequest": {
+        const targets =
+          msg.targetDeviceIds === "all" ? this.registry.getOnlineDeviceIds() : msg.targetDeviceIds;
+        targets.forEach((deviceId) => this.sendCaptureRequestToDevice(deviceId));
+        break;
+      }
     }
+  }
+
+  private sendCaptureRequestToDevice(deviceId: string): void {
+    const ws = this.registry.getWs(deviceId);
+    if (!ws || ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ type: "captureImage" }));
   }
 
   private sendDriveToDevice(deviceId: string, cmd: DriveCommand, speedL: number, speedR: number): void {

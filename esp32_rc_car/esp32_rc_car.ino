@@ -1,15 +1,21 @@
 /*
  * ============================================================================
- * プロジェクト名: ESP32 フリート対応ラジコンカー (2WD) - 堅牢化版 (Robust V3)
+ * プロジェクト名: ESP32 フリート対応ラジコンカー (2WD) - 堅牢化版 (Robust V4)
  * 対策項目:
  *   1. 【ヒープ断片化対策】String完全排除・ゼロ動的メモリ確保（Zero Allocation）
- *   2. 【I2Cバスハング対策】Wire.setTimeOut(25ms) 設定でモーターブラシノイズによるフリーズ防止
- *   3. 【ゾンビ接続キル】通信途絶時の自動切断・アドバタイズ強制復旧(BLE時)/自動再接続(WS時)
- *   4. 【テレメトリ可視化】OLEDに稼働時間(Uptime)・残ヒープ(Heap)を常時表示
- *   5. 【互換性】ESP32 Arduino Core v2.x / v3.x 両対応
- *   6. 【フリート管理】Wi-Fi + WebSocketをメイン通信経路とし、複数台を
+ *   2. 【ゾンビ接続キル】通信途絶時の自動切断・アドバタイズ強制復旧(BLE時)/自動再接続(WS時)
+ *   3. 【テレメトリ可視化】オンボードTFT(ST7789 170x320)に稼働時間(Uptime)・残ヒープ(Heap)を常時表示
+ *   4. 【互換性】ESP32 Arduino Core v2.x / v3.x 両対応
+ *   5. 【フリート管理】Wi-Fi + WebSocketをメイン通信経路とし、複数台を
  *      フリートハブから識別・一括/個別制御できるようにする。BLE/Classic BTは
  *      デバッグ・フォールバック用としてTRANSPORT_MODEで切替可能。
+ *   6. 【カメラ】OV2640(JPEG出力)によるスナップショット送信 (captureImage要求 -> imageFrame応答)
+ *
+ * V4 ハードウェア変更 (V3からの再設計):
+ *   - 表示: 外付けOLED(SSD1306, I2C) -> ideaspark ESP32基板オンボード一体型TFT(ST7789V3, SPI, 170x320)
+ *   - カメラ: OV7670 -> OV2640 (センサー内蔵JPEGエンコーダによりペイロードを大幅削減)
+ *   - オンボードTFTがGPIO2/4/15/18/23/32を専有するため、モーター方向ピンとカメラピンを全面再配置。
+ *     モーター方向ピンは各モーター1本+外付けインバータIC(74HC04等、IN1/IN2またはIN3/IN4の相補生成用)に削減。
  * ============================================================================
  */
 
@@ -18,6 +24,9 @@
 #define MODE_BLE        1
 #define MODE_CLASSIC_BT 2
 #define TRANSPORT_MODE MODE_WEBSOCKET
+
+// OV2640カメラ機能の有効/無効 (WebSocketモード時のみ有効)。カメラ未接続で検証する場合は0にする。
+#define CAMERA_ENABLED 1
 
 #if TRANSPORT_MODE == MODE_BLE
   #include <BLEDevice.h>
@@ -34,34 +43,84 @@
   #include "wifi_secrets.h"     // WIFI_SSID / WIFI_PASSWORD / FLEET_HUB_HOST / FLEET_HUB_PORT を定義 (gitignore対象)
 #endif
 
-#include <Wire.h>
+#include <SPI.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <Adafruit_ST7789.h>
 #include <esp_mac.h> // esp_read_mac() : WiFi/BT初期化前でもMACアドレスを取得可能
 
 // ----------------------------------------------------------------------------
-// OLEDディスプレイ設定 (SSD1306 128x64)
+// TFTディスプレイ設定 (ideaspark ESP32基板オンボード一体型 ST7789V3, 170x320)
+// メーカー公表のポートマッピング: DC=2, RST=4, CS=15, SCLK=18, MOSI=23, BLK=32
+// SCLK/MOSIはVSPI既定ピンと一致するが、既定のMISO(GPIO19)はカメラD7と競合するため
+// SPI.begin()でMISOを明示的に無効(-1)にしてから初期化する(displayは書き込み専用のため支障なし)。
 // ----------------------------------------------------------------------------
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-#define SCREEN_ADDRESS 0x3C
+#define TFT_DC      2
+#define TFT_RST     4
+#define TFT_CS      15
+#define TFT_SCLK    18
+#define TFT_MOSI    23
+#define TFT_BL      32
+#define TFT_PANEL_W 170
+#define TFT_PANEL_H 320
 
-#define OLED_SDA_PIN 21
-#define OLED_SCL_PIN 22
-
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
 // ----------------------------------------------------------------------------
 // ピンアサイン定義 (L298N 接続)
+// TFTがGPIO2/4/15/18/23/32を専有するため、方向ピンは各モーター1本に削減し、
+// もう一方のIN端子は外付けインバータIC(74HC04等)でこのピンの論理反転を入力する。
 // ----------------------------------------------------------------------------
-const int PIN_ENA = 14;  // 右モーター PWM
-const int PIN_IN1 = 27;  // 右モーター 方向1
-const int PIN_IN2 = 26;  // 右モーター 方向2
+const int PIN_ENA = 14;   // 右モーター PWM
+const int PIN_DIR_R = 27; // 右モーター 方向 (L298N IN1に直結、IN2はインバータ出力を接続)
 
-const int PIN_IN3 = 32;  // 左モーター 方向1
-const int PIN_IN4 = 33;  // 左モーター 方向2
-const int PIN_ENB = 25;  // 左モーター PWM
+const int PIN_DIR_L = 33; // 左モーター 方向 (L298N IN3に直結、IN4はインバータ出力を接続)
+const int PIN_ENB = 25;   // 左モーター PWM
+
+#if TRANSPORT_MODE == MODE_WEBSOCKET && CAMERA_ENABLED
+  #include "esp_camera.h"
+  #include "mbedtls/base64.h"
+
+  // ----------------------------------------------------------------------------
+  // OV2640カメラ ピンアサイン定義 (DVPパラレル+SCCB)
+  // TFTの専有ピン(2,4,15,18,23,32)およびモーターピン(14,25,27,33)を避けて再配置。
+  //
+  // 実機モジュール側シルク印刷 -> ESP32配線対応表 (18ピン品, XCLK/XVCLKピン無しタイプ):
+  //   3.3  -> ESP32 3V3          GND  -> ESP32 GND
+  //   SCL  -> GPIO22 (SCCBクロック)   SDA  -> GPIO21 (SCCBデータ)
+  //   VSYNC-> GPIO13             HREF -> GPIO17            DCLK -> GPIO12 (PCLK)
+  //   RST  -> ESP32 3V3に直結(Low活性のため常時解除、GPIO不要)
+  //   PWDN -> ESP32 GNDに直結(High活性のため常時給電、GPIO不要)
+  //   D0-D3-> GPIO34/35/36/39(入力専用)   D4-D7 -> GPIO26/5/16/19
+  //   NG   -> 未接続(NC)
+  //   ※本モジュールはXCLK/XVCLKピンを基板上に持たない(内蔵発振器で自走)ため配線不要。
+  // ----------------------------------------------------------------------------
+  #define CAM_PIN_D0    34  // 入力専用ピン
+  #define CAM_PIN_D1    35  // 入力専用ピン
+  #define CAM_PIN_D2    36  // 入力専用ピン
+  #define CAM_PIN_D3    39  // 入力専用ピン
+  #define CAM_PIN_D4    26
+  #define CAM_PIN_D5    5
+  #define CAM_PIN_D6    16
+  #define CAM_PIN_D7    19
+  #define CAM_PIN_VSYNC 13
+  #define CAM_PIN_HREF  17
+  #define CAM_PIN_PCLK  12  // モジュール表記: DCLK
+  #define CAM_PIN_XCLK  0   // モジュールにXCLKピンが無いため物理配線なし(ドライバ内部設定用の値のみ)
+  #define CAM_PIN_SIOD  21  // モジュール表記: SDA (SCCBデータ)
+  #define CAM_PIN_SIOC  22  // モジュール表記: SCL (SCCBクロック)
+  #define CAM_PIN_PWDN  -1  // モジュールのPWDNピンはGNDへ直結して使用(常時給電、GPIO制御なし)
+  #define CAM_PIN_RESET -1  // モジュールのRSTピンは3V3へ直結して使用(常時リセット解除、GPIO制御なし)
+  // 注意: RESET/PWDNをスタティックに固定しているため、EN(チップ)リセットだけではカメラの内部状態はリセットされない。
+  // 実運用(バッテリ電源ON/OFF)では毎回電源が完全に入り直るため問題ないが、
+  // 開発中のUSB再書き込み/ENボタン再起動後にカメラが失敗する場合は、USBを一度完全に抜き差ししてから再テストすること。
+
+  #define CAM_FRAME_WIDTH  320
+  #define CAM_FRAME_HEIGHT 240
+  #define CAM_JSON_BUF_SIZE 40000 // JPEG(QVGA/quality14)想定。実測に応じて調整可
+
+  char imageJsonBuf[CAM_JSON_BUF_SIZE];
+  bool cameraReady = false;
+#endif
 
 // ----------------------------------------------------------------------------
 // PWM制御パラメータ
@@ -135,48 +194,36 @@ void applyMotorControl(char cmd, int speedL, int speedR) {
   currentSpeedR = speedR;
 
   switch (cmd) {
-    case 'a': // 前進 (Forward)
-      digitalWrite(PIN_IN1, LOW);
-      digitalWrite(PIN_IN2, HIGH);
-      digitalWrite(PIN_IN3, LOW);
-      digitalWrite(PIN_IN4, HIGH);
+    case 'a': // 前進 (Forward): 両モーターとも正転
+      digitalWrite(PIN_DIR_R, LOW);
+      digitalWrite(PIN_DIR_L, LOW);
       writePWM(PIN_ENA, PWM_CH_RIGHT, speedR);
       writePWM(PIN_ENB, PWM_CH_LEFT, speedL);
       break;
 
-    case 'b': // 後退 (Reverse)
-      digitalWrite(PIN_IN1, HIGH);
-      digitalWrite(PIN_IN2, LOW);
-      digitalWrite(PIN_IN3, HIGH);
-      digitalWrite(PIN_IN4, LOW);
+    case 'b': // 後退 (Reverse): 両モーターとも逆転
+      digitalWrite(PIN_DIR_R, HIGH);
+      digitalWrite(PIN_DIR_L, HIGH);
       writePWM(PIN_ENA, PWM_CH_RIGHT, speedR);
       writePWM(PIN_ENB, PWM_CH_LEFT, speedL);
       break;
 
-    case 'c': // 右超信地旋回 (Turn Right)
-      digitalWrite(PIN_IN1, HIGH);
-      digitalWrite(PIN_IN2, LOW);
-      digitalWrite(PIN_IN3, LOW);
-      digitalWrite(PIN_IN4, HIGH);
+    case 'c': // 右超信地旋回 (Turn Right): 右逆転・左正転
+      digitalWrite(PIN_DIR_R, HIGH);
+      digitalWrite(PIN_DIR_L, LOW);
       writePWM(PIN_ENA, PWM_CH_RIGHT, speedR);
       writePWM(PIN_ENB, PWM_CH_LEFT, speedL);
       break;
 
-    case 'd': // 左超信地旋回 (Turn Left)
-      digitalWrite(PIN_IN1, LOW);
-      digitalWrite(PIN_IN2, HIGH);
-      digitalWrite(PIN_IN3, HIGH);
-      digitalWrite(PIN_IN4, LOW);
+    case 'd': // 左超信地旋回 (Turn Left): 右正転・左逆転
+      digitalWrite(PIN_DIR_R, LOW);
+      digitalWrite(PIN_DIR_L, HIGH);
       writePWM(PIN_ENA, PWM_CH_RIGHT, speedR);
       writePWM(PIN_ENB, PWM_CH_LEFT, speedL);
       break;
 
-    case 'e': // 停止 (Stop)
+    case 'e': // 停止 (Stop): PWMデューティ0で停止(方向ピンはそのままでよい)
     default:
-      digitalWrite(PIN_IN1, LOW);
-      digitalWrite(PIN_IN2, LOW);
-      digitalWrite(PIN_IN3, LOW);
-      digitalWrite(PIN_IN4, LOW);
       writePWM(PIN_ENA, PWM_CH_RIGHT, 0);
       writePWM(PIN_ENB, PWM_CH_LEFT, 0);
       currentSpeedL = 0;
@@ -218,61 +265,76 @@ void parseCommandPacketFast(const char* buf, size_t len) {
 }
 
 // ----------------------------------------------------------------------------
-// OLED画面描画処理 (I2Cタイムアウト保護付き)
+// TFT画面描画処理 (170x320 ST7789V3, setRotation(1)適用で320x170のランドスケープ表示)
+// 毎回全画面を黒で塗り潰してから再描画する(OLED版と同じ設計の踏襲)。
 // ----------------------------------------------------------------------------
-void updateOLED() {
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
+void updateDisplay() {
+  display.fillScreen(ST77XX_BLACK);
 
   // 1. ヘッダー (通信状態 & 稼働時間)
-  display.setTextSize(1);
-  display.setCursor(0, 0);
+  display.setTextSize(2);
+  display.setCursor(4, 4);
 #if TRANSPORT_MODE == MODE_WEBSOCKET
-  display.print(isDeviceConnected ? "[WS: OK]" : "[WS: WAIT]");
+  display.setTextColor(isDeviceConnected ? ST77XX_GREEN : ST77XX_RED);
+  display.print(isDeviceConnected ? "WS: OK" : "WS: WAIT");
 #elif TRANSPORT_MODE == MODE_BLE
-  display.print(isDeviceConnected ? "[BLE: OK]" : "[BLE: WAIT]");
+  display.setTextColor(isDeviceConnected ? ST77XX_GREEN : ST77XX_RED);
+  display.print(isDeviceConnected ? "BLE: OK" : "BLE: WAIT");
 #else
-  display.print(isDeviceConnected ? "[BT: OK]" : "[BT: WAIT]");
+  display.setTextColor(isDeviceConnected ? ST77XX_GREEN : ST77XX_RED);
+  display.print(isDeviceConnected ? "BT: OK" : "BT: WAIT");
 #endif
 
   // Uptime (分:秒)
   unsigned long sec = millis() / 1000;
-  display.setCursor(72, 0);
+  display.setTextColor(ST77XX_CYAN);
+  display.setCursor(220, 4);
   display.printf("%02lu:%02lu", (sec / 60) % 100, sec % 60);
 
   // 2. 現在のモード表示
-  display.setCursor(0, 14);
-  display.print("MODE: ");
+  display.setTextColor(ST77XX_YELLOW);
+  display.setCursor(4, 28);
   switch (currentCommand) {
-    case 'a': display.print("FORWARD "); break;
-    case 'b': display.print("REVERSE "); break;
-    case 'c': display.print("TURN-R  "); break;
-    case 'd': display.print("TURN-L  "); break;
-    case 'e': display.print("STOP    "); break;
-    default:  display.print("UNKNOWN "); break;
+    case 'a': display.print("MODE: FORWARD"); break;
+    case 'b': display.print("MODE: REVERSE"); break;
+    case 'c': display.print("MODE: TURN-R "); break;
+    case 'd': display.print("MODE: TURN-L "); break;
+    case 'e': display.print("MODE: STOP   "); break;
+    default:  display.print("MODE: UNKNOWN"); break;
   }
 
   // 3. モーター速度バーグラフ (L & R)
-  display.setCursor(0, 26);
+  display.setTextSize(1);
+  display.setTextColor(ST77XX_WHITE);
+  display.setCursor(4, 56);
   display.printf("L:%3d", currentSpeedL);
-  display.drawRect(36, 26, 90, 7, SSD1306_WHITE);
-  int barL = map(constrain(currentSpeedL, 0, 255), 0, 255, 0, 86);
-  if (barL > 0) display.fillRect(38, 28, barL, 3, SSD1306_WHITE);
+  display.drawRect(50, 54, 200, 12, ST77XX_WHITE);
+  int barL = map(constrain(currentSpeedL, 0, 255), 0, 255, 0, 196);
+  if (barL > 0) display.fillRect(52, 56, barL, 8, ST77XX_CYAN);
 
-  display.setCursor(0, 36);
+  display.setCursor(4, 74);
   display.printf("R:%3d", currentSpeedR);
-  display.drawRect(36, 36, 90, 7, SSD1306_WHITE);
-  int barR = map(constrain(currentSpeedR, 0, 255), 0, 255, 0, 86);
-  if (barR > 0) display.fillRect(38, 38, barR, 3, SSD1306_WHITE);
+  display.drawRect(50, 72, 200, 12, ST77XX_WHITE);
+  int barR = map(constrain(currentSpeedR, 0, 255), 0, 255, 0, 196);
+  if (barR > 0) display.fillRect(52, 74, barR, 8, ST77XX_CYAN);
 
-  // 4. 残ヒープ容量 & デバイスID (フリート内で他機と区別するため)
-  display.drawLine(0, 46, 127, 46, SSD1306_WHITE);
-  display.setCursor(0, 50);
+  // 4. カメラ状態
+  display.setCursor(4, 96);
+#if TRANSPORT_MODE == MODE_WEBSOCKET && CAMERA_ENABLED
+  display.setTextColor(cameraReady ? ST77XX_GREEN : ST77XX_RED);
+  display.print(cameraReady ? "CAM: READY" : "CAM: N/A  ");
+#else
+  display.setTextColor(ST77XX_WHITE);
+  display.print("CAM: DISABLED");
+#endif
+
+  // 5. 残ヒープ容量 & デバイスID (フリート内で他機と区別するため)
+  display.drawLine(0, 116, 319, 116, ST77XX_WHITE);
+  display.setTextColor(ST77XX_WHITE);
+  display.setCursor(4, 122);
   display.printf("HEAP:%luKB", ESP.getFreeHeap() / 1024);
-  display.setCursor(70, 50);
+  display.setCursor(140, 122);
   display.printf("%s", effectiveDisplayName());
-
-  display.display();
 }
 
 // ----------------------------------------------------------------------------
@@ -281,10 +343,12 @@ void updateOLED() {
 #if TRANSPORT_MODE == MODE_WEBSOCKET
   // --------------------------------------------------------------------------
   // フリートハブとのWebSocket通信 (JSONプロトコル)
-  // hello   (送信): {"type":"hello","deviceId":"rc-xxxxxx","name":"...","fw":"3.0.0"}
+  // hello   (送信): {"type":"hello","deviceId":"rc-xxxxxx","name":"...","fw":"4.0.0"}
   // telemetry(送信): {"type":"telemetry","cmd":"a","speedL":190,"speedR":190,"heap":150000,"uptimeMs":12345}
+  // imageFrame(送信): {"type":"imageFrame","deviceId":"rc-xxxxxx","width":320,"height":240,"format":"jpeg","dataB64":"..."}
   // drive   (受信): {"type":"drive","cmd":"a","speedL":190,"speedR":190}
   // setName (受信): {"type":"setName","name":"Car-Blue"}
+  // captureImage(受信): {"type":"captureImage"}
   // ping    (受信): {"type":"ping"}
   // --------------------------------------------------------------------------
   WebSocketsClient webSocket;
@@ -305,7 +369,7 @@ void updateOLED() {
     doc["type"] = "hello";
     doc["deviceId"] = deviceId;
     doc["name"] = effectiveDisplayName();
-    doc["fw"] = "3.0.0";
+    doc["fw"] = "4.0.0";
     char buf[128];
     size_t n = serializeJson(doc, buf, sizeof(buf));
     webSocket.sendTXT(buf, n);
@@ -325,6 +389,93 @@ void updateOLED() {
     webSocket.sendTXT(buf, n);
   }
 
+#if CAMERA_ENABLED
+  // --------------------------------------------------------------------------
+  // OV2640カメラ初期化 (JPEG出力・PSRAM非搭載を想定しQVGA/DRAMバッファで運用)
+  // --------------------------------------------------------------------------
+  bool setupCamera() {
+    camera_config_t config = {};
+    config.ledc_channel = LEDC_CHANNEL_2; // モーターPWM(ch0,1)と衝突しないチャンネルを使用
+    config.ledc_timer   = LEDC_TIMER_1;
+    config.pin_d0 = CAM_PIN_D0;
+    config.pin_d1 = CAM_PIN_D1;
+    config.pin_d2 = CAM_PIN_D2;
+    config.pin_d3 = CAM_PIN_D3;
+    config.pin_d4 = CAM_PIN_D4;
+    config.pin_d5 = CAM_PIN_D5;
+    config.pin_d6 = CAM_PIN_D6;
+    config.pin_d7 = CAM_PIN_D7;
+    config.pin_xclk = CAM_PIN_XCLK;
+    config.pin_pclk = CAM_PIN_PCLK;
+    config.pin_vsync = CAM_PIN_VSYNC;
+    config.pin_href = CAM_PIN_HREF;
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+    config.pin_sccb_sda = CAM_PIN_SIOD;
+    config.pin_sccb_scl = CAM_PIN_SIOC;
+#else
+    config.pin_sscb_sda = CAM_PIN_SIOD;
+    config.pin_sscb_scl = CAM_PIN_SIOC;
+#endif
+    config.pin_pwdn = CAM_PIN_PWDN;
+    config.pin_reset = CAM_PIN_RESET;
+    config.xclk_freq_hz = 20000000;
+    config.pixel_format = PIXFORMAT_JPEG;
+    config.frame_size = FRAMESIZE_QVGA;   // 320x240 (PSRAM非搭載を想定した安全側の解像度)
+    config.jpeg_quality = 14;             // 0(高画質/大容量)〜63(低画質/小容量)
+    config.fb_count = 1;
+    config.fb_location = CAMERA_FB_IN_DRAM;
+    config.grab_mode = CAMERA_GRAB_LATEST;
+
+    esp_err_t err = esp_camera_init(&config);
+    if (err != ESP_OK) {
+      Serial.printf("[WARN] Camera init failed: 0x%x\n", err);
+      return false;
+    }
+    Serial.println(F("[INFO] OV2640 Camera initialized (JPEG/QVGA)"));
+    return true;
+  }
+
+  // --------------------------------------------------------------------------
+  // 1フレーム撮影してJPEGをBase64化しWebSocketで送信 (Zero Allocation: 静的バッファに直接エンコード)
+  // --------------------------------------------------------------------------
+  void captureAndSendImage() {
+    if (!cameraReady) {
+      Serial.println(F("[WARN] captureImage requested but camera not ready"));
+      return;
+    }
+
+    camera_fb_t* fb = esp_camera_fb_get();
+    if (!fb) {
+      Serial.println(F("[WARN] esp_camera_fb_get() failed"));
+      return;
+    }
+
+    int headerLen = snprintf(imageJsonBuf, sizeof(imageJsonBuf),
+      "{\"type\":\"imageFrame\",\"deviceId\":\"%s\",\"width\":%d,\"height\":%d,\"format\":\"jpeg\",\"dataB64\":\"",
+      deviceId, fb->width, fb->height);
+
+    size_t availableForB64 = sizeof(imageJsonBuf) - headerLen - 3; // 末尾の \"} + 終端文字用
+    size_t encodedLen = 0;
+    int rc = mbedtls_base64_encode((unsigned char*)imageJsonBuf + headerLen, availableForB64, &encodedLen,
+                                    fb->buf, fb->len);
+
+    if (rc != 0) {
+      Serial.printf("[WARN] JPEG frame too large for buffer (fb->len=%u, avail=%u) - skipped\n",
+                    (unsigned)fb->len, (unsigned)availableForB64);
+      esp_camera_fb_return(fb);
+      return;
+    }
+
+    esp_camera_fb_return(fb);
+
+    size_t totalLen = headerLen + encodedLen;
+    imageJsonBuf[totalLen++] = '"';
+    imageJsonBuf[totalLen++] = '}';
+
+    webSocket.sendTXT(imageJsonBuf, totalLen);
+  }
+#endif
+
   void handleWebSocketMessage(const uint8_t* payload, size_t length) {
     StaticJsonDocument<160> doc;
     if (deserializeJson(doc, payload, length) != DeserializationError::Ok) return;
@@ -342,6 +493,10 @@ void updateOLED() {
     } else if (strcmp(type, "setName") == 0) {
       const char* name = doc["name"] | "";
       saveDisplayName(name);
+#if CAMERA_ENABLED
+    } else if (strcmp(type, "captureImage") == 0) {
+      captureAndSendImage();
+#endif
     }
     // "ping" はlastPacketTime更新のみで応答不要 (次回telemetryで生存確認)
   }
@@ -428,32 +583,32 @@ void setup() {
 
   generateDeviceId();
 
-  // 1. I2Cバス初期化 & タイムアウト設定 (ノイズによるバスハング防止)
-  Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
-  Wire.setTimeOut(25); // 25msタイムアウトで無限ロックを防止
+  // 1. TFT初期化 (MISOはカメラD7(GPIO19)と競合するため明示的に無効化してからSPIバスを開始)
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, HIGH); // バックライトON
+  SPI.begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);
+  display.init(TFT_PANEL_W, TFT_PANEL_H);
+  display.setRotation(1); // 320x170のランドスケープ表示に回転
+  display.fillScreen(ST77XX_BLACK);
+  display.setTextColor(ST77XX_WHITE);
+  display.setTextSize(2);
+  display.setCursor(4, 20);
+  display.println("ESP32 RC ROBUST V4");
+  display.setTextSize(1);
+  display.setCursor(4, 44);
+  display.println(deviceId);
 
-  // 2. OLED初期化
-  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    Serial.println(F("[WARN] OLED not detected or bus busy"));
-  } else {
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 20);
-    display.println("ESP32 RC ROBUST V3");
-    display.setCursor(0, 35);
-    display.println(deviceId);
-    display.display();
-  }
-
-  // 3. モーターピン初期化
-  pinMode(PIN_IN1, OUTPUT);
-  pinMode(PIN_IN2, OUTPUT);
-  pinMode(PIN_IN3, OUTPUT);
-  pinMode(PIN_IN4, OUTPUT);
+  // 2. モーターピン初期化 (方向ピンは各モーター1本。インバータICでIN2/IN4相当を生成)
+  pinMode(PIN_DIR_R, OUTPUT);
+  pinMode(PIN_DIR_L, OUTPUT);
 
   setupPWM();
   applyMotorControl('e', 0, 0);
+
+#if TRANSPORT_MODE == MODE_WEBSOCKET && CAMERA_ENABLED
+  // 3. OV2640カメラ初期化 (失敗してもモーター/表示系は継続動作させる)
+  cameraReady = setupCamera();
+#endif
 
 #if TRANSPORT_MODE == MODE_WEBSOCKET
   // 4. 保存済み表示名の復元 & Wi-Fi/WebSocket初期化
@@ -570,10 +725,10 @@ void loop() {
   }
 #endif
 
-  // ③ OLED定期更新 (200ms周期)
+  // ③ TFT定期更新 (200ms周期)
   if (now - lastDisplayTime > DISPLAY_INTERVAL_MS) {
     lastDisplayTime = now;
-    updateOLED();
+    updateDisplay();
   }
 
   // CPUタスク切り替えの隙間を確保

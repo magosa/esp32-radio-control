@@ -24,7 +24,17 @@ export interface TelemetryMessage {
   uptimeMs: number;
 }
 
-export type DeviceInboundMessage = HelloMessage | TelemetryMessage;
+// OV2640カメラのスナップショット (JPEG/Base64)
+export interface ImageFrameMessage {
+  type: "imageFrame";
+  deviceId: string;
+  width: number;
+  height: number;
+  format: "jpeg";
+  dataB64: string;
+}
+
+export type DeviceInboundMessage = HelloMessage | TelemetryMessage | ImageFrameMessage;
 
 // ---- Server -> Device (ESP32) ----
 
@@ -40,7 +50,11 @@ export interface SetNameMessage {
   name: string;
 }
 
-export type DeviceOutboundMessage = DriveMessage | SetNameMessage;
+export interface CaptureImageMessage {
+  type: "captureImage";
+}
+
+export type DeviceOutboundMessage = DriveMessage | SetNameMessage | CaptureImageMessage;
 
 // ---- 車両状態(フリートレジストリの1台分) ----
 
@@ -65,6 +79,8 @@ export interface VehicleState {
   mode: VehicleMode;
   lastSeen: number;
   telemetry: VehicleTelemetry | null;
+  // 最新のスナップショットを受信した時刻(ms epoch)。未取得のuseundefined。
+  lastImageAt?: number;
   // 外部トラッキング(将来拡張)導入時に位置情報を格納するための予約フィールド。現時点では未使用。
   position?: VehiclePosition;
 }
@@ -100,12 +116,19 @@ export interface RouteStopMessage {
   type: "routeStop";
 }
 
+// 指定した車両にスナップショット撮影を要求する (カメラ搬載機のみ対象)
+export interface ClientCaptureRequestMessage {
+  type: "clientCaptureRequest";
+  targetDeviceIds: string[] | "all";
+}
+
 export type ClientInboundMessage =
   | ClientCommandMessage
   | SetModeMessage
   | SetVehicleNameMessage
   | RouteStartMessage
-  | RouteStopMessage;
+  | RouteStopMessage
+  | ClientCaptureRequestMessage;
 
 // ---- Server -> 操作UI ----
 
@@ -122,4 +145,9 @@ export interface RouteStatusMessage {
   perVehicle: { deviceId: string; stepIndex: number }[];
 }
 
-export type ClientOutboundMessage = FleetStateMessage | RouteStatusMessage;
+// デバイスから到着したimageFrameに受信時刻を付与してクライアントへ中継する
+export interface ImageFrameBroadcastMessage extends ImageFrameMessage {
+  capturedAt: number;
+}
+
+export type ClientOutboundMessage = FleetStateMessage | RouteStatusMessage | ImageFrameBroadcastMessage;
