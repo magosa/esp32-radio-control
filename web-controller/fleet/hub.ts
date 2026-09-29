@@ -10,14 +10,13 @@ import type {
 } from "./protocol";
 
 const SWEEP_INTERVAL_MS = 1000;
-const STREAM_INTERVAL_MS = 400; // ライブ配信中のcaptureImage送信間隔(目安約2.5fps)
 
 // ESP32群(デバイス)と操作UI(クライアント)の両方のWebSocket接続を仲介するフリートハブ。
 export class FleetHub {
   private registry = new VehicleRegistry();
   private routeEngine: RouteEngine;
   private clients = new Set<WebSocket>();
-  private streamIntervals = new Map<string, NodeJS.Timeout>();
+  private streamingDeviceIds = new Set<string>();
 
   constructor() {
     this.routeEngine = new RouteEngine({
@@ -77,7 +76,7 @@ export class FleetHub {
 
     ws.on("close", () => {
       this.registry.markDisconnected(ws);
-      if (deviceId) this.stopStream(deviceId);
+      if (deviceId) this.streamingDeviceIds.delete(deviceId);
       this.broadcastFleetState();
     });
   }
@@ -153,24 +152,19 @@ export class FleetHub {
   }
 
   private startStream(deviceId: string): void {
-    if (this.streamIntervals.has(deviceId)) return; // すでに配信中
-    this.sendCaptureRequestToDevice(deviceId); // 初回は即座に1枚取得
-    const timer = setInterval(() => {
-      const ws = this.registry.getWs(deviceId);
-      if (!ws || ws.readyState !== ws.OPEN) {
-        this.stopStream(deviceId);
-        return;
-      }
-      this.sendCaptureRequestToDevice(deviceId);
-    }, STREAM_INTERVAL_MS);
-    this.streamIntervals.set(deviceId, timer);
+    if (this.streamingDeviceIds.has(deviceId)) return; // すでに配信中
+    const ws = this.registry.getWs(deviceId);
+    if (!ws || ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ type: "streamStart" }));
+    this.streamingDeviceIds.add(deviceId);
   }
 
   private stopStream(deviceId: string): void {
-    const timer = this.streamIntervals.get(deviceId);
-    if (!timer) return;
-    clearInterval(timer);
-    this.streamIntervals.delete(deviceId);
+    if (!this.streamingDeviceIds.has(deviceId)) return;
+    this.streamingDeviceIds.delete(deviceId);
+    const ws = this.registry.getWs(deviceId);
+    if (!ws || ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ type: "streamStop" }));
   }
 
   private sendCaptureRequestToDevice(deviceId: string): void {

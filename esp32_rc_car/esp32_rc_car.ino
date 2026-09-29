@@ -117,9 +117,19 @@ const int PIN_ENB = 25;   // 左モーター PWM
   #define CAM_FRAME_WIDTH  320
   #define CAM_FRAME_HEIGHT 240
   #define CAM_JSON_BUF_SIZE 40000 // JPEG(QVGA/quality14)想定。実測に応じて調整可
+  #define STREAM_MIN_INTERVAL_MS 200  // 連続配信の最小送信間隔(理論上限5fps。走行応答性とのトレードオフ)
+  #define STREAM_HUB_TIMEOUT_MS  5000 // 配信中にHubから何も届かない状態がこの時間続いたら自動停止
 
   char imageJsonBuf[CAM_JSON_BUF_SIZE];
   bool cameraReady = false;
+
+  // ライブ配信はCore0の専用タスクで実行し、モーター制御(Core1のloop)への影響を避ける。
+  // WebSocketsClientはスレッドセーフではないため、送受信の実アクセスはwsMutexで直列化する。
+  SemaphoreHandle_t wsMutex = NULL;
+  TaskHandle_t cameraStreamTaskHandle = NULL;
+  volatile bool streamingEnabled = false;   // streamStart/streamStopで切替
+  volatile bool captureRequested = false;   // 単発captureImage要求
+  volatile unsigned long lastStreamFrameAt = 0;
 #endif
 
 // ----------------------------------------------------------------------------
@@ -349,6 +359,8 @@ void updateDisplay() {
   // drive   (受信): {"type":"drive","cmd":"a","speedL":190,"speedR":190}
   // setName (受信): {"type":"setName","name":"Car-Blue"}
   // captureImage(受信): {"type":"captureImage"}
+  // streamStart(受信): {"type":"streamStart"} -> Core0タスクが200ms間隔で連続imageFrame送信を開始
+  // streamStop (受信): {"type":"streamStop"}  -> 連続配信を停止
   // ping    (受信): {"type":"ping"}
   // --------------------------------------------------------------------------
   WebSocketsClient webSocket;
@@ -372,7 +384,10 @@ void updateDisplay() {
     doc["fw"] = "4.0.0";
     char buf[128];
     size_t n = serializeJson(doc, buf, sizeof(buf));
-    webSocket.sendTXT(buf, n);
+    if (xSemaphoreTake(wsMutex, portMAX_DELAY)) {
+      webSocket.sendTXT(buf, n);
+      xSemaphoreGive(wsMutex);
+    }
   }
 
   void sendTelemetry() {
@@ -386,7 +401,10 @@ void updateDisplay() {
     doc["uptimeMs"] = millis();
     char buf[160];
     size_t n = serializeJson(doc, buf, sizeof(buf));
-    webSocket.sendTXT(buf, n);
+    if (xSemaphoreTake(wsMutex, portMAX_DELAY)) {
+      webSocket.sendTXT(buf, n);
+      xSemaphoreGive(wsMutex);
+    }
   }
 
 #if CAMERA_ENABLED
@@ -472,7 +490,41 @@ void updateDisplay() {
     imageJsonBuf[totalLen++] = '"';
     imageJsonBuf[totalLen++] = '}';
 
-    webSocket.sendTXT(imageJsonBuf, totalLen);
+    if (xSemaphoreTake(wsMutex, portMAX_DELAY)) {
+      webSocket.sendTXT(imageJsonBuf, totalLen);
+      xSemaphoreGive(wsMutex);
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Core0専用タスク: 単発撮影(captureRequested)と連続配信(streamingEnabled)を一本化して処理する。
+  // esp_camera_fb_get/return を複数コアから同時に呼ばないようにするための唯一の呼び出し元。
+  // --------------------------------------------------------------------------
+  void cameraStreamTask(void* pvParameters) {
+    for (;;) {
+      unsigned long now = millis();
+      bool doCapture = false;
+
+      if (captureRequested) {
+        captureRequested = false;
+        doCapture = true;
+      } else if (streamingEnabled) {
+        if (now - lastPacketTime > STREAM_HUB_TIMEOUT_MS) {
+          // Hubからの通信が一定時間途絶えた場合は配信を自動停止する(暴走防止)
+          streamingEnabled = false;
+          Serial.println(F("[WARN] Stream auto-stopped: Hub communication timeout"));
+        } else if (now - lastStreamFrameAt >= STREAM_MIN_INTERVAL_MS) {
+          lastStreamFrameAt = now;
+          doCapture = true;
+        }
+      }
+
+      if (doCapture && cameraReady) {
+        captureAndSendImage();
+      }
+
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
   }
 #endif
 
@@ -495,7 +547,13 @@ void updateDisplay() {
       saveDisplayName(name);
 #if CAMERA_ENABLED
     } else if (strcmp(type, "captureImage") == 0) {
-      captureAndSendImage();
+      captureRequested = true;
+    } else if (strcmp(type, "streamStart") == 0) {
+      streamingEnabled = true;
+      Serial.println(F("[INFO] Live stream started"));
+    } else if (strcmp(type, "streamStop") == 0) {
+      streamingEnabled = false;
+      Serial.println(F("[INFO] Live stream stopped"));
 #endif
     }
     // "ping" はlastPacketTime更新のみで応答不要 (次回telemetryで生存確認)
@@ -513,6 +571,9 @@ void updateDisplay() {
         isDeviceConnected = false;
         Serial.println(F("[INFO] Fleet Hub Disconnected -> Auto Reset to STOP"));
         applyMotorControl('e', 0, 0);
+#if CAMERA_ENABLED
+        streamingEnabled = false; // 通信切断時はライブ配信も即停止
+#endif
         strncpy(lastRawBuffer, "DISCONNECT", sizeof(lastRawBuffer));
         break;
       case WStype_TEXT:
@@ -608,6 +669,9 @@ void setup() {
 #if TRANSPORT_MODE == MODE_WEBSOCKET && CAMERA_ENABLED
   // 3. OV2640カメラ初期化 (失敗してもモーター/表示系は継続動作させる)
   cameraReady = setupCamera();
+  wsMutex = xSemaphoreCreateMutex();
+  // カメラ撮影・送信はCore0の専用タスクで行い、Core1のloop()(モーター制御/走行応答)への影響を避ける
+  xTaskCreatePinnedToCore(cameraStreamTask, "camStream", 8192, NULL, 1, &cameraStreamTaskHandle, 0);
 #endif
 
 #if TRANSPORT_MODE == MODE_WEBSOCKET
@@ -688,7 +752,14 @@ void setup() {
 // ----------------------------------------------------------------------------
 void loop() {
 #if TRANSPORT_MODE == MODE_WEBSOCKET
-  webSocket.loop();
+  #if CAMERA_ENABLED
+    if (xSemaphoreTake(wsMutex, portMAX_DELAY)) {
+      webSocket.loop();
+      xSemaphoreGive(wsMutex);
+    }
+  #else
+    webSocket.loop();
+  #endif
 #elif TRANSPORT_MODE == MODE_CLASSIC_BT
   isDeviceConnected = SerialBT.hasClient();
   if (SerialBT.available()) {

@@ -54,7 +54,16 @@ export interface CaptureImageMessage {
   type: "captureImage";
 }
 
-export type DeviceOutboundMessage = DriveMessage | SetNameMessage | CaptureImageMessage;
+// 連続ライブ配信の開始/停止 (ESP32側がCore0タスクで自律連写する)
+export interface StreamStartMessage {
+  type: "streamStart";
+}
+
+export interface StreamStopMessage {
+  type: "streamStop";
+}
+
+export type DeviceOutboundMessage = DriveMessage | SetNameMessage | CaptureImageMessage | StreamStartMessage | StreamStopMessage;
 
 // ---- 車両状態(フリートレジストリの1台分) ----
 
