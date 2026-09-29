@@ -10,12 +10,14 @@ import type {
 } from "./protocol";
 
 const SWEEP_INTERVAL_MS = 1000;
+const STREAM_INTERVAL_MS = 400; // ライブ配信中のcaptureImage送信間隔(目安約2.5fps)
 
 // ESP32群(デバイス)と操作UI(クライアント)の両方のWebSocket接続を仲介するフリートハブ。
 export class FleetHub {
   private registry = new VehicleRegistry();
   private routeEngine: RouteEngine;
   private clients = new Set<WebSocket>();
+  private streamIntervals = new Map<string, NodeJS.Timeout>();
 
   constructor() {
     this.routeEngine = new RouteEngine({
@@ -46,11 +48,14 @@ export class FleetHub {
   }
 
   private handleDeviceConnection(ws: WebSocket): void {
+    let deviceId: string | undefined;
+
     ws.on("message", (raw) => {
       const msg = this.parseJson<DeviceInboundMessage>(raw.toString());
       if (!msg) return;
 
       if (msg.type === "hello") {
+        deviceId = msg.deviceId;
         this.registry.registerHello(msg.deviceId, msg.name, ws);
         this.broadcastFleetState();
       } else if (msg.type === "telemetry") {
@@ -72,6 +77,7 @@ export class FleetHub {
 
     ws.on("close", () => {
       this.registry.markDisconnected(ws);
+      if (deviceId) this.stopStream(deviceId);
       this.broadcastFleetState();
     });
   }
@@ -135,7 +141,36 @@ export class FleetHub {
         targets.forEach((deviceId) => this.sendCaptureRequestToDevice(deviceId));
         break;
       }
+      case "clientStreamRequest": {
+        if (msg.action === "start") {
+          this.startStream(msg.deviceId);
+        } else {
+          this.stopStream(msg.deviceId);
+        }
+        break;
+      }
     }
+  }
+
+  private startStream(deviceId: string): void {
+    if (this.streamIntervals.has(deviceId)) return; // すでに配信中
+    this.sendCaptureRequestToDevice(deviceId); // 初回は即座に1枚取得
+    const timer = setInterval(() => {
+      const ws = this.registry.getWs(deviceId);
+      if (!ws || ws.readyState !== ws.OPEN) {
+        this.stopStream(deviceId);
+        return;
+      }
+      this.sendCaptureRequestToDevice(deviceId);
+    }, STREAM_INTERVAL_MS);
+    this.streamIntervals.set(deviceId, timer);
+  }
+
+  private stopStream(deviceId: string): void {
+    const timer = this.streamIntervals.get(deviceId);
+    if (!timer) return;
+    clearInterval(timer);
+    this.streamIntervals.delete(deviceId);
   }
 
   private sendCaptureRequestToDevice(deviceId: string): void {

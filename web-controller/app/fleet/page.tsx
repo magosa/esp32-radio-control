@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   Radio,
@@ -11,6 +11,8 @@ import {
   StopCircle,
   RotateCcw,
   Camera,
+  Video,
+  VideoOff,
 } from "lucide-react";
 import { useFleetSocket, type VehicleImage } from "@/hooks/useFleetSocket";
 import type { DriveCommand } from "@/fleet/protocol";
@@ -56,10 +58,35 @@ export default function FleetDashboardPage() {
     startRoute,
     stopRoute,
     requestSnapshot,
+    requestStream,
   } = useFleetSocket();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedRouteId, setSelectedRouteId] = useState<string>("");
+  const [streamingIds, setStreamingIds] = useState<Set<string>>(new Set());
+  const streamingIdsRef = useRef(streamingIds);
+  streamingIdsRef.current = streamingIds;
+
+  // 配信の止め忘れでESP32が撮影し続けないよう、アンマウント時に全配信を停止する
+  useEffect(() => {
+    return () => {
+      streamingIdsRef.current.forEach((deviceId) => requestStream(deviceId, "stop"));
+    };
+  }, [requestStream]);
+
+  const toggleStream = (deviceId: string) => {
+    setStreamingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(deviceId)) {
+        next.delete(deviceId);
+        requestStream(deviceId, "stop");
+      } else {
+        next.add(deviceId);
+        requestStream(deviceId, "start");
+      }
+      return next;
+    });
+  };
 
   const onlineCount = useMemo(() => vehicles.filter((v) => v.status === "online").length, [vehicles]);
 
@@ -234,6 +261,18 @@ export default function FleetDashboardPage() {
               >
                 <Camera className="w-3 h-3" />
                 スナップショット
+              </button>
+              <button
+                onClick={() => toggleStream(v.deviceId)}
+                disabled={v.status !== "online"}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1 border disabled:opacity-40 ${
+                  streamingIds.has(v.deviceId)
+                    ? "bg-rose-500/20 border-rose-500/40 text-rose-300"
+                    : "bg-slate-800 border-slate-700 text-slate-300"
+                }`}
+              >
+                {streamingIds.has(v.deviceId) ? <VideoOff className="w-3 h-3" /> : <Video className="w-3 h-3" />}
+                {streamingIds.has(v.deviceId) ? "ライブ停止" : "ライブ映像"}
               </button>
               <button
                 onClick={() => setMode(v.deviceId, v.mode === "auto" ? "manual" : "auto")}

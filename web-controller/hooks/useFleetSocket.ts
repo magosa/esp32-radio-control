@@ -123,6 +123,13 @@ export function useFleetSocket() {
     [send]
   );
 
+  const requestStream = useCallback(
+    (deviceId: string, action: "start" | "stop") => {
+      send({ type: "clientStreamRequest", deviceId, action });
+    },
+    [send]
+  );
+
   return {
     status,
     vehicles,
@@ -135,5 +142,6 @@ export function useFleetSocket() {
     startRoute,
     stopRoute,
     requestSnapshot,
+    requestStream,
   };
 }

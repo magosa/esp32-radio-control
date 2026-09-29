@@ -122,13 +122,21 @@ export interface ClientCaptureRequestMessage {
   targetDeviceIds: string[] | "all";
 }
 
+// 指定した車両のライブ映像配信(定期captureImage送信)を開始/停止する
+export interface ClientStreamRequestMessage {
+  type: "clientStreamRequest";
+  deviceId: string;
+  action: "start" | "stop";
+}
+
 export type ClientInboundMessage =
   | ClientCommandMessage
   | SetModeMessage
   | SetVehicleNameMessage
   | RouteStartMessage
   | RouteStopMessage
-  | ClientCaptureRequestMessage;
+  | ClientCaptureRequestMessage
+  | ClientStreamRequestMessage;
 
 // ---- Server -> 操作UI ----
 
