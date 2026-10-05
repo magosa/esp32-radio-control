@@ -15,7 +15,7 @@ import {
   VideoOff,
 } from "lucide-react";
 import { useFleetSocket, type VehicleImage } from "@/hooks/useFleetSocket";
-import type { DriveCommand } from "@/fleet/protocol";
+import type { DisplayLayoutMode, DriveCommand, ExpressionId } from "@/fleet/protocol";
 
 const SPEED = 190;
 
@@ -25,6 +25,24 @@ const DIRECTIONS: { label: string; cmd: DriveCommand }[] = [
   { label: "▶ 右旋回", cmd: "c" },
   { label: "◀ 左旋回", cmd: "d" },
   { label: "■ 停止", cmd: "e" },
+];
+
+const EXPRESSIONS: { label: string; id: ExpressionId }[] = [
+  { label: "😐 通常", id: "neutral" },
+  { label: "😊 ハッピー", id: "happy" },
+  { label: "😮 びっくり", id: "surprised" },
+  { label: "😕 困惑", id: "unsure" },
+  { label: "😴 眠そう", id: "sleepy" },
+  { label: "😟 不安", id: "worried" },
+  { label: "😱 ショック", id: "shocked" },
+  { label: "🥰 ラブ", id: "love" },
+  { label: "🤩 ワクワク", id: "excited" },
+];
+
+const DISPLAY_LAYOUTS: { label: string; id: DisplayLayoutMode }[] = [
+  { label: "分割", id: "split" },
+  { label: "全画面", id: "full" },
+  { label: "自動", id: "auto" },
 ];
 
 function VehicleSnapshot({ image }: { image?: VehicleImage }) {
@@ -59,6 +77,8 @@ export default function FleetDashboardPage() {
     stopRoute,
     requestSnapshot,
     requestStream,
+    requestExpression,
+    requestDisplayLayout,
   } = useFleetSocket();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -288,6 +308,31 @@ export default function FleetDashboardPage() {
               </button>
             </div>
             <VehicleSnapshot image={images[v.deviceId]} />
+            <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-800/60">
+              {EXPRESSIONS.map((ex) => (
+                <button
+                  key={ex.id}
+                  onClick={() => requestExpression([v.deviceId], ex.id)}
+                  disabled={v.status !== "online"}
+                  className="px-2 py-1 rounded-lg text-[11px] font-mono border bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700 disabled:opacity-40"
+                >
+                  {ex.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-800/60">
+              <span className="text-[10px] font-mono text-slate-500 self-center">画面レイアウト:</span>
+              {DISPLAY_LAYOUTS.map((layout) => (
+                <button
+                  key={layout.id}
+                  onClick={() => requestDisplayLayout([v.deviceId], layout.id)}
+                  disabled={v.status !== "online"}
+                  className="px-2 py-1 rounded-lg text-[11px] font-mono border bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700 disabled:opacity-40"
+                >
+                  {layout.label}
+                </button>
+              ))}
+            </div>
           </div>
         ))}
       </section>

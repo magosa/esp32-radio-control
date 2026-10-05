@@ -6,7 +6,9 @@ import type {
   ClientInboundMessage,
   ClientOutboundMessage,
   DeviceInboundMessage,
+  DisplayLayoutMode,
   DriveCommand,
+  ExpressionId,
 } from "./protocol";
 
 const SWEEP_INTERVAL_MS = 1000;
@@ -148,6 +150,18 @@ export class FleetHub {
         }
         break;
       }
+      case "clientExpressionRequest": {
+        const targets =
+          msg.targetDeviceIds === "all" ? this.registry.getOnlineDeviceIds() : msg.targetDeviceIds;
+        targets.forEach((deviceId) => this.sendExpressionToDevice(deviceId, msg.expression, msg.durationMs));
+        break;
+      }
+      case "clientDisplayLayoutRequest": {
+        const targets =
+          msg.targetDeviceIds === "all" ? this.registry.getOnlineDeviceIds() : msg.targetDeviceIds;
+        targets.forEach((deviceId) => this.sendDisplayLayoutToDevice(deviceId, msg.layout));
+        break;
+      }
     }
   }
 
@@ -171,6 +185,18 @@ export class FleetHub {
     const ws = this.registry.getWs(deviceId);
     if (!ws || ws.readyState !== ws.OPEN) return;
     ws.send(JSON.stringify({ type: "captureImage" }));
+  }
+
+  private sendExpressionToDevice(deviceId: string, expression: ExpressionId, durationMs?: number): void {
+    const ws = this.registry.getWs(deviceId);
+    if (!ws || ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ type: "setExpression", expression, durationMs }));
+  }
+
+  private sendDisplayLayoutToDevice(deviceId: string, layout: DisplayLayoutMode): void {
+    const ws = this.registry.getWs(deviceId);
+    if (!ws || ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ type: "setDisplayLayout", layout }));
   }
 
   private sendDriveToDevice(deviceId: string, cmd: DriveCommand, speedL: number, speedR: number): void {

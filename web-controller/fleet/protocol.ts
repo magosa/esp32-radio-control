@@ -5,6 +5,18 @@ export type DriveCommand = "a" | "b" | "c" | "d" | "e";
 export type VehicleMode = "manual" | "auto";
 export type VehicleStatus = "online" | "offline";
 
+// ロボット顔の表情ID (esp32_rc_car.ino の enum ExpressionId と同期させること)
+export type ExpressionId =
+  | "neutral"
+  | "happy"
+  | "surprised"
+  | "unsure"
+  | "sleepy"
+  | "worried"
+  | "shocked"
+  | "love"
+  | "excited";
+
 // ---- Device (ESP32) -> Server ----
 
 export interface HelloMessage {
@@ -63,7 +75,30 @@ export interface StreamStopMessage {
   type: "streamStop";
 }
 
-export type DeviceOutboundMessage = DriveMessage | SetNameMessage | CaptureImageMessage | StreamStartMessage | StreamStopMessage;
+// 手動で表情を指定する (durationMs省略時はファームウェア側デフォルトで自動判定表情に復帰)
+export interface SetExpressionMessage {
+  type: "setExpression";
+  expression: ExpressionId;
+  durationMs?: number;
+}
+
+// 画面レイアウトの指定 (esp32_rc_car.ino の FaceLayoutMode/fleetLayoutOverride と同期させること)
+// "split": 上半分顔+下半分センサー情報 / "full": 顔のみ全画面 / "auto": ファームウェアの自動判定に戻す
+export type DisplayLayoutMode = "split" | "full" | "auto";
+
+export interface SetDisplayLayoutMessage {
+  type: "setDisplayLayout";
+  layout: DisplayLayoutMode;
+}
+
+export type DeviceOutboundMessage =
+  | DriveMessage
+  | SetNameMessage
+  | CaptureImageMessage
+  | StreamStartMessage
+  | StreamStopMessage
+  | SetExpressionMessage
+  | SetDisplayLayoutMessage;
 
 // ---- 車両状態(フリートレジストリの1台分) ----
 
@@ -138,6 +173,21 @@ export interface ClientStreamRequestMessage {
   action: "start" | "stop";
 }
 
+// 指定した車両に手動表情を要求する
+export interface ClientExpressionRequestMessage {
+  type: "clientExpressionRequest";
+  targetDeviceIds: string[] | "all";
+  expression: ExpressionId;
+  durationMs?: number;
+}
+
+// 指定した車両に画面レイアウトの切り替えを要求する
+export interface ClientDisplayLayoutRequestMessage {
+  type: "clientDisplayLayoutRequest";
+  targetDeviceIds: string[] | "all";
+  layout: DisplayLayoutMode;
+}
+
 export type ClientInboundMessage =
   | ClientCommandMessage
   | SetModeMessage
@@ -145,7 +195,9 @@ export type ClientInboundMessage =
   | RouteStartMessage
   | RouteStopMessage
   | ClientCaptureRequestMessage
-  | ClientStreamRequestMessage;
+  | ClientStreamRequestMessage
+  | ClientExpressionRequestMessage
+  | ClientDisplayLayoutRequestMessage;
 
 // ---- Server -> 操作UI ----
 

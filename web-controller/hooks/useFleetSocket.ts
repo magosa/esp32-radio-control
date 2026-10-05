@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ClientInboundMessage,
   ClientOutboundMessage,
+  DisplayLayoutMode,
   DriveCommand,
+  ExpressionId,
   RouteStatusMessage,
   VehicleMode,
   VehicleState,
@@ -130,6 +132,20 @@ export function useFleetSocket() {
     [send]
   );
 
+  const requestExpression = useCallback(
+    (targetDeviceIds: string[] | "all", expression: ExpressionId, durationMs?: number) => {
+      send({ type: "clientExpressionRequest", targetDeviceIds, expression, durationMs });
+    },
+    [send]
+  );
+
+  const requestDisplayLayout = useCallback(
+    (targetDeviceIds: string[] | "all", layout: DisplayLayoutMode) => {
+      send({ type: "clientDisplayLayoutRequest", targetDeviceIds, layout });
+    },
+    [send]
+  );
+
   return {
     status,
     vehicles,
@@ -143,5 +159,7 @@ export function useFleetSocket() {
     stopRoute,
     requestSnapshot,
     requestStream,
+    requestExpression,
+    requestDisplayLayout,
   };
 }
