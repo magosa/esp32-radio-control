@@ -29,14 +29,21 @@ const DIRECTIONS: { label: string; cmd: DriveCommand }[] = [
 
 const EXPRESSIONS: { label: string; id: ExpressionId }[] = [
   { label: "😐 通常", id: "neutral" },
-  { label: "😊 ハッピー", id: "happy" },
-  { label: "😮 びっくり", id: "surprised" },
-  { label: "😕 困惑", id: "unsure" },
-  { label: "😴 眠そう", id: "sleepy" },
-  { label: "😟 不安", id: "worried" },
+  { label: "😊 嬉しい", id: "happy" },
+  { label: "😄 楽しい", id: "fun" },
+  { label: "😆 笑う", id: "laugh" },
+  { label: "😮 驚き", id: "surprised" },
+  { label: "🧐 好奇心", id: "curious" },
+  { label: "🤔 考え中", id: "thinking" },
+  { label: "😉 ウインク", id: "wink" },
+  { label: "😢 悲しい", id: "worried" },
+  { label: "😠 怒り", id: "angry" },
+  { label: "😴 眠い", id: "sleepy" },
+  { label: "🥰 大好き", id: "love" },
   { label: "😱 ショック", id: "shocked" },
-  { label: "🥰 ラブ", id: "love" },
-  { label: "🤩 ワクワク", id: "excited" },
+  { label: "🙅 ギブアップ", id: "giveup" },
+  { label: "☺️ 照れる", id: "shy" },
+  { label: "😏 余裕", id: "composed" },
 ];
 
 const DISPLAY_LAYOUTS: { label: string; id: DisplayLayoutMode }[] = [

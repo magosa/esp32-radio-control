@@ -56,15 +56,22 @@
 // 定義すると「undeclared」エラーになる。定義本佁E実裁Eは後方のセクションに記述する、E
 // ----------------------------------------------------------------------------
 enum ExpressionId {
-  EXPR_NEUTRAL = 0,
-  EXPR_HAPPY,
-  EXPR_SURPRISED,
-  EXPR_UNSURE,
-  EXPR_SLEEPY,
-  EXPR_WORRIED,
-  EXPR_SHOCKED,
-  EXPR_LOVE,      // 手動専用(封E��拡張)
-  EXPR_EXCITED,   // 手動専用(封E��拡張)
+  EXPR_NEUTRAL = 0,  // 1. 通常
+  EXPR_HAPPY,        // 2. 嘴しい
+  EXPR_FUN,          // 3. 楽しい
+  EXPR_LAUGH,        // 4. 笑う
+  EXPR_SURPRISED,    // 5. 驚き
+  EXPR_CURIOUS,      // 6. 好奇心
+  EXPR_THINKING,     // 7. 考え中
+  EXPR_WINK,         // 8. ウインク
+  EXPR_WORRIED,      // 9. 悲しい(通信断絶時の自動表情にも使用)
+  EXPR_ANGRY,        // 10. 怒り
+  EXPR_SLEEPY,       // 11. 眠い
+  EXPR_LOVE,         // 12. 大好き
+  EXPR_SHOCKED,      // 13. ショック(フェイルセーフ発動時)
+  EXPR_GIVEUP,       // 14. ギブアップ
+  EXPR_SHY,          // 15. 照れる
+  EXPR_COMPOSED,     // 16. 余裕
   EXPR_COUNT
 };
 
@@ -72,10 +79,22 @@ enum FaceLayoutMode { LAYOUT_SPLIT = 0, LAYOUT_FULL_FACE = 1 };            // �
 enum SplitBottomContent { SPLIT_BOTTOM_SENSOR = 0, SPLIT_BOTTOM_ALERT = 1 }; // 分割時、下半分に何を表示するか
 
 enum EyeSpecial {
-  EYE_SPECIAL_NONE = 0,   // 通常: パラメトリックな角丸四角形の目を描画
-  EYE_SPECIAL_X,          // SHOCKED: バツ目
-  EYE_SPECIAL_HEART,      // LOVE: ハート型
-  EYE_SPECIAL_WINK_RIGHT  // EXCITED: 右目ウインク+左目は通常描画
+  EYE_SPECIAL_NONE = 0,     // 通常: パラメトリックな角丸四角形の目(tired/angry/happyパラメータで変形)
+  EYE_SPECIAL_ARC_CLOSED,   // 笑って閉じた目(弧): happy/fun/laugh/shy
+  EYE_SPECIAL_SWIRL,        // 片目通常+片目渦巻き: curious
+  EYE_SPECIAL_DOTS,         // 片目通常+片目「…」: thinking
+  EYE_SPECIAL_WINK,         // 片目通常+片目ウインク: wink
+  EYE_SPECIAL_SHOCK_SWEAT,  // 丸目+眩+汗: shocked
+  EYE_SPECIAL_X,            // ×目: giveup
+  EYE_SPECIAL_HEART         // ハート型: love
+};
+
+// 目の形状に重ねて描く追加装飾(単体では使わず EyeSpecial と組み合わせて使用)
+enum EyeDecoration {
+  EYE_DECO_NONE = 0,
+  EYE_DECO_LASH,     // まつ毛: fun
+  EYE_DECO_BLUSH,    // 頼の赤面線: shy
+  EYE_DECO_SPARKLE   // キラッと光る線: composed
 };
 
 enum MouthShape {
@@ -87,7 +106,9 @@ enum MouthShape {
   MOUTH_WAVY_SAD,
   MOUTH_JAGGED,
   MOUTH_SMALL_O,
-  MOUTH_TRIANGLE
+  MOUTH_TRIANGLE,
+  MOUTH_LINE_SIDE, // 片側に寄った短い直線: thinking
+  MOUTH_SMIRK      // 片側だけ上がる非対称スマイル: wink/composed
 };
 
 struct ExpressionParams {
@@ -98,6 +119,7 @@ struct ExpressionParams {
   float eyeAngry;         // 0-1: 内側(鼻側)上まぶたが垂れ下がる量(怒り)
   float eyeHappy;         // 0-1: 下まぶたが中央から山形に持ち上がる量(笑顔)
   EyeSpecial eyeSpecial;  // 通常のパラメトリック描画を上書きする特殊表示
+  EyeDecoration eyeDecoration; // 目の形状に重ねて描く追加装飾(まつ毛/赤面/キラッ)
   MouthShape mouthShape;
   uint16_t eyeColor;
   uint16_t mouthColor;
@@ -128,6 +150,12 @@ const int SPLIT_BOTTOM_Y = TFT_PANEL_H / 2;         // 下半分(センサー情
 const int SPLIT_BOTTOM_H = TFT_PANEL_H - SPLIT_BOTTOM_Y;
 
 Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+
+// 画面下半分(センサー情報/NO LINKアラート)のオフスクリーンバッファ。直接displayへclear→redrawすると
+// 瞬間的な黒塗りが見えてちらつくため、他のキャンバスと同様に一括転送する。
+// ※setup()内で遅延確保する(グローバルオブジェクトのままだと非常に早い段階の静的初期化で
+// 大きなmallocが走り、esp_timerタスク生成用のヒープが足りず起動直後にpanic・リブートする)
+GFXcanvas16 *bottomCanvas = nullptr;
 
 // ----------------------------------------------------------------------------
 // ピンアサイン定義 (L298N 接綁E
@@ -373,57 +401,61 @@ void parseCommandPacketFast(const char* buf, size_t len) {
 // 画面下半分(分割レイアウト時)の描画処理。センサー情報の簡易版、または通信断絶時のアラートを表示する。
 // ----------------------------------------------------------------------------
 void updateSplitBottom(SplitBottomContent content) {
-  display.fillRect(0, SPLIT_BOTTOM_Y, TFT_PANEL_W, SPLIT_BOTTOM_H, ST77XX_BLACK);
-  display.drawLine(0, SPLIT_BOTTOM_Y, TFT_PANEL_W - 1, SPLIT_BOTTOM_Y, ST77XX_WHITE);
+  if (bottomCanvas == nullptr) return;
+  bottomCanvas->fillScreen(ST77XX_BLACK);
+  bottomCanvas->drawLine(0, 0, TFT_PANEL_W - 1, 0, ST77XX_WHITE);
 
   if (content == SPLIT_BOTTOM_ALERT) {
-    display.setTextSize(2);
-    display.setTextColor(ST77XX_RED);
-    display.setCursor(4, SPLIT_BOTTOM_Y + 14);
-    display.print("NO LINK");
-    display.setTextSize(1);
-    display.setTextColor(ST77XX_WHITE);
-    display.setCursor(4, SPLIT_BOTTOM_Y + 40);
-    display.print("Fleet Hub disconnected");
-    display.setCursor(4, SPLIT_BOTTOM_Y + 56);
-    display.printf("HEAP:%luKB", ESP.getFreeHeap() / 1024);
+    bottomCanvas->setTextSize(2);
+    bottomCanvas->setTextColor(ST77XX_RED);
+    bottomCanvas->setCursor(4, 14);
+    bottomCanvas->print("NO LINK");
+    bottomCanvas->setTextSize(1);
+    bottomCanvas->setTextColor(ST77XX_WHITE);
+    bottomCanvas->setCursor(4, 40);
+    bottomCanvas->print("Fleet Hub disconnected");
+    bottomCanvas->setCursor(4, 56);
+    bottomCanvas->printf("HEAP:%luKB", ESP.getFreeHeap() / 1024);
+    display.drawRGBBitmap(0, SPLIT_BOTTOM_Y, bottomCanvas->getBuffer(), TFT_PANEL_W, SPLIT_BOTTOM_H);
     return;
   }
 
   // 通常時: 通信状態 / モード / 速度バー(L,R)だけに絞った簡易表示
-  display.setTextSize(1);
-  display.setTextColor(isDeviceConnected ? ST77XX_GREEN : ST77XX_RED);
-  display.setCursor(4, SPLIT_BOTTOM_Y + 6);
+  bottomCanvas->setTextSize(1);
+  bottomCanvas->setTextColor(isDeviceConnected ? ST77XX_GREEN : ST77XX_RED);
+  bottomCanvas->setCursor(4, 6);
 #if TRANSPORT_MODE == MODE_WEBSOCKET
-  display.print(isDeviceConnected ? "WS: OK" : "WS: WAIT");
+  bottomCanvas->print(isDeviceConnected ? "WS: OK" : "WS: WAIT");
 #elif TRANSPORT_MODE == MODE_BLE
-  display.print(isDeviceConnected ? "BLE: OK" : "BLE: WAIT");
+  bottomCanvas->print(isDeviceConnected ? "BLE: OK" : "BLE: WAIT");
 #else
-  display.print(isDeviceConnected ? "BT: OK" : "BT: WAIT");
+  bottomCanvas->print(isDeviceConnected ? "BT: OK" : "BT: WAIT");
 #endif
 
-  display.setTextColor(ST77XX_YELLOW);
-  display.setCursor(90, SPLIT_BOTTOM_Y + 6);
+  bottomCanvas->setTextColor(ST77XX_YELLOW);
+  bottomCanvas->setCursor(90, 6);
   switch (currentCommand) {
-    case 'a': display.print("FORWARD"); break;
-    case 'b': display.print("REVERSE"); break;
-    case 'c': display.print("TURN-R"); break;
-    case 'd': display.print("TURN-L"); break;
-    default:  display.print("STOP"); break;
+    case 'a': bottomCanvas->print("FORWARD"); break;
+    case 'b': bottomCanvas->print("REVERSE"); break;
+    case 'c': bottomCanvas->print("TURN-R"); break;
+    case 'd': bottomCanvas->print("TURN-L"); break;
+    default:  bottomCanvas->print("STOP"); break;
   }
 
-  display.setTextColor(ST77XX_WHITE);
-  display.setCursor(4, SPLIT_BOTTOM_Y + 22);
-  display.printf("L:%3d", currentSpeedL);
-  display.drawRect(4, SPLIT_BOTTOM_Y + 34, 160, 10, ST77XX_WHITE);
+  bottomCanvas->setTextColor(ST77XX_WHITE);
+  bottomCanvas->setCursor(4, 22);
+  bottomCanvas->printf("L:%3d", currentSpeedL);
+  bottomCanvas->drawRect(4, 34, 160, 10, ST77XX_WHITE);
   int barL = map(constrain(currentSpeedL, 0, 255), 0, 255, 0, 156);
-  if (barL > 0) display.fillRect(6, SPLIT_BOTTOM_Y + 36, barL, 6, ST77XX_CYAN);
+  if (barL > 0) bottomCanvas->fillRect(6, 36, barL, 6, ST77XX_CYAN);
 
-  display.setCursor(4, SPLIT_BOTTOM_Y + 50);
-  display.printf("R:%3d", currentSpeedR);
-  display.drawRect(4, SPLIT_BOTTOM_Y + 62, 160, 10, ST77XX_WHITE);
+  bottomCanvas->setCursor(4, 50);
+  bottomCanvas->printf("R:%3d", currentSpeedR);
+  bottomCanvas->drawRect(4, 62, 160, 10, ST77XX_WHITE);
   int barR = map(constrain(currentSpeedR, 0, 255), 0, 255, 0, 156);
-  if (barR > 0) display.fillRect(6, SPLIT_BOTTOM_Y + 64, barR, 6, ST77XX_CYAN);
+  if (barR > 0) bottomCanvas->fillRect(6, 64, barR, 6, ST77XX_CYAN);
+
+  display.drawRGBBitmap(0, SPLIT_BOTTOM_Y, bottomCanvas->getBuffer(), TFT_PANEL_W, SPLIT_BOTTOM_H);
 }
 
 
@@ -442,16 +474,23 @@ void updateSplitBottom(SplitBottomContent content) {
 
 // 表惁E��タログ (plan.md の表参�E)。色はAdafruit_ST7789のRGB565マクロ/定数値、E
 const ExpressionParams EXPRESSION_TABLE[EXPR_COUNT] = {
-  // widthScale, heightScale, radiusScale, tired, angry, happy, special,          mouthShape,        eyeColor,      mouthColor,    blink, blinkMin,blinkMax, maxOpen, saccade, saccadeRange, saccadeDownOnly
-  /* EXPR_NEUTRAL   */ { 1.00f, 1.00f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_NONE,       MOUTH_LINE,        ST77XX_WHITE,  ST77XX_WHITE,  true,  3000, 6000, 1.00f, true,  0.40f, false },
-  /* EXPR_HAPPY     */ { 1.05f, 0.80f, 1.00f, 0.00f, 0.00f, 0.85f, EYE_SPECIAL_NONE,       MOUTH_SMILE_ARC,   ST77XX_CYAN,   ST77XX_YELLOW, true,  2200, 4200, 1.00f, true,  0.40f, false },
-  /* EXPR_SURPRISED */ { 1.30f, 1.30f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_NONE,       MOUTH_O,           ST77XX_WHITE,  0xF81F,        false, 0,    0,    1.00f, false, 0.00f, false },
-  /* EXPR_UNSURE    */ { 0.90f, 0.80f, 0.80f, 0.60f, 0.00f, 0.00f, EYE_SPECIAL_NONE,       MOUTH_ZIGZAG,      ST77XX_WHITE,  0xFD20,        true,  3000, 6000, 1.00f, true,  0.40f, true  },
-  /* EXPR_SLEEPY    */ { 1.00f, 0.30f, 1.00f, 0.80f, 0.00f, 0.00f, EYE_SPECIAL_NONE,       MOUTH_SLEEP_TILDE, 0x8438,        0x8410,        true,  6000, 9000, 0.45f, true,  0.20f, false },
-  /* EXPR_WORRIED   */ { 0.80f, 1.30f, 1.00f, 0.00f, 0.30f, 0.00f, EYE_SPECIAL_NONE,       MOUTH_WAVY_SAD,    0xAEDC,        ST77XX_BLUE,   true,  3000, 6000, 1.00f, true,  0.20f, false },
-  /* EXPR_SHOCKED   */ { 1.00f, 1.00f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_X,          MOUTH_JAGGED,      ST77XX_RED,    ST77XX_RED,    false, 0,    0,    1.00f, false, 0.00f, false },
-  /* EXPR_LOVE      */ { 1.00f, 1.00f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_HEART,      MOUTH_SMALL_O,     ST77XX_RED,    ST77XX_RED,    false, 0,    0,    1.00f, false, 0.00f, false },
-  /* EXPR_EXCITED   */ { 1.10f, 0.90f, 1.00f, 0.00f, 0.00f, 0.30f, EYE_SPECIAL_WINK_RIGHT, MOUTH_TRIANGLE,    ST77XX_CYAN,   ST77XX_YELLOW, true,  2200, 4200, 1.00f, true,  0.55f, false },
+  // widthScale, heightScale, radiusScale, tired, angry, happy, special,                 decoration,       mouthShape,        eyeColor,      mouthColor,    blink, blinkMin,blinkMax, maxOpen, saccade, saccadeRange, saccadeDownOnly
+  /* EXPR_NEUTRAL   */ { 1.00f, 1.00f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_NONE,       EYE_DECO_NONE,    MOUTH_LINE,        ST77XX_WHITE,  ST77XX_WHITE,  true,  3000, 6000, 1.00f, true,  0.40f, false },
+  /* EXPR_HAPPY     */ { 1.05f, 0.75f, 1.00f, 0.00f, 0.00f, 0.85f, EYE_SPECIAL_NONE,       EYE_DECO_NONE,    MOUTH_SMILE_ARC,   ST77XX_CYAN,   ST77XX_YELLOW, true,  2200, 4200, 1.00f, true,  0.40f, false },
+  /* EXPR_FUN       */ { 1.00f, 1.00f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_ARC_CLOSED, EYE_DECO_LASH,    MOUTH_SMILE_ARC,   ST77XX_CYAN,   ST77XX_YELLOW, false, 0,    0,    1.00f, false, 0.00f, false },
+  /* EXPR_LAUGH     */ { 1.30f, 1.00f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_ARC_CLOSED, EYE_DECO_NONE,    MOUTH_SMILE_ARC,   ST77XX_CYAN,   ST77XX_YELLOW, false, 0,    0,    1.00f, false, 0.00f, false },
+  /* EXPR_SURPRISED */ { 1.30f, 1.30f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_NONE,       EYE_DECO_NONE,    MOUTH_O,           ST77XX_WHITE,  0xF81F,        false, 0,    0,    1.00f, false, 0.00f, false },
+  /* EXPR_CURIOUS   */ { 1.00f, 0.90f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_SWIRL,      EYE_DECO_NONE,    MOUTH_ZIGZAG,      0xFD20,        0xAEDC,        true,  3000, 6000, 1.00f, true,  0.40f, false },
+  /* EXPR_THINKING  */ { 0.90f, 0.80f, 0.80f, 0.60f, 0.00f, 0.00f, EYE_SPECIAL_NONE,       EYE_DECO_NONE,    MOUTH_LINE_SIDE,   ST77XX_WHITE,  0xFD20,        true,  3000, 6000, 1.00f, true,  0.40f, true  },
+  /* EXPR_WINK      */ { 1.10f, 0.90f, 1.00f, 0.00f, 0.00f, 0.30f, EYE_SPECIAL_WINK,       EYE_DECO_NONE,    MOUTH_SMIRK,       ST77XX_CYAN,   ST77XX_YELLOW, true,  2200, 4200, 1.00f, true,  0.55f, false },
+  /* EXPR_WORRIED   */ { 0.85f, 0.90f, 0.80f, 0.70f, 0.00f, 0.00f, EYE_SPECIAL_NONE,       EYE_DECO_NONE,    MOUTH_WAVY_SAD,    0xAEDC,        ST77XX_BLUE,   true,  3000, 6000, 1.00f, true,  0.20f, false },
+  /* EXPR_ANGRY     */ { 1.00f, 0.65f, 0.30f, 0.00f, 1.00f, 0.00f, EYE_SPECIAL_NONE,       EYE_DECO_NONE,    MOUTH_LINE,        ST77XX_RED,    ST77XX_RED,    false, 0,    0,    1.00f, false, 0.00f, false },
+  /* EXPR_SLEEPY    */ { 1.00f, 0.30f, 1.00f, 0.80f, 0.00f, 0.00f, EYE_SPECIAL_NONE,       EYE_DECO_NONE,    MOUTH_SLEEP_TILDE, 0x8438,        0x8410,        true,  6000, 9000, 0.45f, true,  0.20f, false },
+  /* EXPR_LOVE      */ { 1.00f, 1.00f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_HEART,      EYE_DECO_NONE,    MOUTH_SMALL_O,     ST77XX_RED,    ST77XX_RED,    false, 0,    0,    1.00f, false, 0.00f, false },
+  /* EXPR_SHOCKED   */ { 1.00f, 1.00f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_SHOCK_SWEAT,EYE_DECO_NONE,    MOUTH_JAGGED,      ST77XX_RED,    ST77XX_RED,    false, 0,    0,    1.00f, false, 0.00f, false },
+  /* EXPR_GIVEUP    */ { 1.00f, 1.00f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_X,          EYE_DECO_NONE,    MOUTH_WAVY_SAD,    0x8410,        0x8410,        false, 0,    0,    1.00f, false, 0.00f, false },
+  /* EXPR_SHY       */ { 1.00f, 1.00f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_ARC_CLOSED, EYE_DECO_BLUSH,   MOUTH_LINE,        0xF81F,        0xF81F,        false, 0,    0,    1.00f, false, 0.00f, false },
+  /* EXPR_COMPOSED  */ { 1.00f, 0.55f, 1.00f, 0.00f, 0.00f, 0.00f, EYE_SPECIAL_NONE,       EYE_DECO_SPARKLE, MOUTH_SMIRK,       ST77XX_CYAN,   ST77XX_YELLOW, true,  4000, 7000, 0.65f, true,  0.35f, false },
 };
 
 // ----------------------------------------------------------------------------
@@ -552,7 +591,7 @@ ExpressionId deriveAutoExpression() {
   // ③ 走行状慁E
   switch (currentCommand) {
     case 'a': return EXPR_HAPPY;
-    case 'b': return EXPR_UNSURE;
+    case 'b': return EXPR_THINKING;
     case 'c':
     case 'd': return EXPR_SURPRISED;
     case 'e':
@@ -568,7 +607,7 @@ ExpressionId deriveAutoExpression() {
           int r = random(0, 100);
           if (r < 4)       idleExpressionChoice = EXPR_SURPRISED;
           else if (r < 40) idleExpressionChoice = EXPR_HAPPY;
-          else if (r < 55) idleExpressionChoice = EXPR_UNSURE;
+          else if (r < 55) idleExpressionChoice = EXPR_THINKING;
           else             idleExpressionChoice = EXPR_NEUTRAL;
         }
         nextIdleExpressionAt = now + random(3000, 6001);
@@ -619,6 +658,49 @@ void drawHeart(Adafruit_GFX &gfx, int cx, int cy, int r, uint16_t color) {
   gfx.fillTriangle(cx - r, cy - r / 4, cx + r, cy - r / 4, cx, cy + r, color);
 }
 
+// まつ毛(短い3本の斜線)。isLeftで左右対称に傾きを反転する
+void drawEyelash(Adafruit_GFX &gfx, int cx, int topY, uint16_t color, bool isLeft) {
+  int dir = isLeft ? -1 : 1;
+  for (int i = -1; i <= 1; i++) {
+    int x0 = cx + i * 6;
+    gfx.drawLine(x0, topY, x0 + dir * 3, topY - 6, color);
+  }
+}
+
+// 頬の赤面線(斜めの短い平行線3本)
+void drawBlush(Adafruit_GFX &gfx, int cx, int cy, uint16_t color) {
+  for (int i = -1; i <= 1; i++) {
+    gfx.drawLine(cx - 4, cy + i * 5 - 4, cx + 4, cy + i * 5 + 4, color);
+  }
+}
+
+// 渦巻き目(好奇心)。角度を増やしながら半径を広げる螺旋を短い線分の連なりで近似描画する
+void drawSwirl(Adafruit_GFX &gfx, int cx, int cy, int maxR, uint16_t color) {
+  int prevX = cx, prevY = cy;
+  for (int i = 1; i <= 24; i++) {
+    float angle = i * 0.9f;
+    float rr = maxR * (i / 24.0f);
+    int x = cx + (int)(rr * cos(angle));
+    int y = cy + (int)(rr * sin(angle));
+    gfx.drawLine(prevX, prevY, x, y, color);
+    prevX = x; prevY = y;
+  }
+}
+
+// 汗だれ(ショック時に目の外側へ描く短い縦線)
+void drawSweatLines(Adafruit_GFX &gfx, int x, int y, uint16_t color) {
+  gfx.drawLine(x, y, x - 3, y + 10, color);
+  gfx.drawLine(x + 4, y + 3, x + 2, y + 13, color);
+}
+
+// キラッと光る線(余裕の表情で目の脇に描く十字型の光)
+void drawSparkle(Adafruit_GFX &gfx, int cx, int cy, uint16_t color) {
+  gfx.drawLine(cx - 6, cy, cx + 6, cy, color);
+  gfx.drawLine(cx, cy - 6, cx, cy + 6, color);
+  gfx.drawLine(cx - 4, cy - 4, cx + 4, cy + 4, color);
+  gfx.drawLine(cx - 4, cy + 4, cx + 4, cy - 4, color);
+}
+
 // 1つの目を角丸四角形で描画し、怒り/眠気/笑顔のまぶた重なりを表現する。
 // isLeftEyeで鼻側(内側)がどちらの辺かを判定し、怒り/眠気の切り欠きを左右対称にする。
 void drawOneParametricEye(Adafruit_GFX &gfx, int cx, int cy, uint16_t color, float openness, bool isLeftEye) {
@@ -649,7 +731,8 @@ void drawOneParametricEye(Adafruit_GFX &gfx, int cx, int cy, uint16_t color, flo
   }
 }
 
-// 両目を描画する(EYE_SPECIAL_X/HEART/WINK_RIGHTは専用処理、それ以外はパラメトリック描画)
+// 両目を描画する。eyeSpecialが専用形状(X/HEART/SWIRL/DOTS/WINK/SHOCK_SWEAT/ARC_CLOSED)を持つ場合はそれを描画し、
+// NONEの場合はパラメトリック描画(drawOneParametricEye)を行う。最後にeyeDecorationで追加装飾を重ね描きする。
 void drawEyes(Adafruit_GFX &gfx, const ExpressionParams &p, float openness, int sx, int sy) {
   int r = FACE_EYE_RADIUS;
   switch (p.eyeSpecial) {
@@ -663,14 +746,61 @@ void drawEyes(Adafruit_GFX &gfx, const ExpressionParams &p, float openness, int 
       drawHeart(gfx, FACE_EYE_L_X, FACE_EYE_Y, r, p.eyeColor);
       drawHeart(gfx, FACE_EYE_R_X, FACE_EYE_Y, r, p.eyeColor);
       break;
-    case EYE_SPECIAL_WINK_RIGHT:
+    case EYE_SPECIAL_ARC_CLOSED: {
+      int rr = max(6, (int)(r * 0.85f * curEyeWidthScale));
+      drawArcUp(gfx, FACE_EYE_L_X, FACE_EYE_Y, rr, p.eyeColor);
+      drawArcUp(gfx, FACE_EYE_L_X, FACE_EYE_Y - 1, rr, p.eyeColor);
+      drawArcUp(gfx, FACE_EYE_R_X, FACE_EYE_Y, rr, p.eyeColor);
+      drawArcUp(gfx, FACE_EYE_R_X, FACE_EYE_Y - 1, rr, p.eyeColor);
+      break;
+    }
+    case EYE_SPECIAL_SWIRL:
+      drawOneParametricEye(gfx, FACE_EYE_L_X + sx, FACE_EYE_Y + sy, p.eyeColor, openness, true);
+      drawSwirl(gfx, FACE_EYE_R_X, FACE_EYE_Y, (int)(r * 0.8f), p.eyeColor);
+      break;
+    case EYE_SPECIAL_DOTS:
+      drawOneParametricEye(gfx, FACE_EYE_L_X + sx, FACE_EYE_Y + sy, p.eyeColor, openness, true);
+      gfx.fillCircle(FACE_EYE_R_X - 10, FACE_EYE_Y, 3, p.eyeColor);
+      gfx.fillCircle(FACE_EYE_R_X,      FACE_EYE_Y, 3, p.eyeColor);
+      gfx.fillCircle(FACE_EYE_R_X + 10, FACE_EYE_Y, 3, p.eyeColor);
+      break;
+    case EYE_SPECIAL_WINK:
       drawOneParametricEye(gfx, FACE_EYE_L_X + sx, FACE_EYE_Y + sy, p.eyeColor, openness, true);
       gfx.drawLine(FACE_EYE_R_X - r, FACE_EYE_Y, FACE_EYE_R_X + r, FACE_EYE_Y, p.eyeColor);
       gfx.drawLine(FACE_EYE_R_X - r, FACE_EYE_Y + 1, FACE_EYE_R_X + r, FACE_EYE_Y + 1, p.eyeColor);
       break;
+    case EYE_SPECIAL_SHOCK_SWEAT: {
+      int rr = (int)(r * 0.7f);
+      gfx.drawCircle(FACE_EYE_L_X, FACE_EYE_Y, rr, p.eyeColor);
+      gfx.drawCircle(FACE_EYE_L_X, FACE_EYE_Y, rr - 1, p.eyeColor);
+      gfx.fillCircle(FACE_EYE_L_X, FACE_EYE_Y, 3, p.eyeColor);
+      gfx.drawCircle(FACE_EYE_R_X, FACE_EYE_Y, rr, p.eyeColor);
+      gfx.drawCircle(FACE_EYE_R_X, FACE_EYE_Y, rr - 1, p.eyeColor);
+      gfx.fillCircle(FACE_EYE_R_X, FACE_EYE_Y, 3, p.eyeColor);
+      drawSweatLines(gfx, FACE_EYE_L_X - r - 8, FACE_EYE_Y - r, p.eyeColor);
+      drawSweatLines(gfx, FACE_EYE_R_X + r + 2, FACE_EYE_Y - r, p.eyeColor);
+      break;
+    }
     default:
       drawOneParametricEye(gfx, FACE_EYE_L_X + sx, FACE_EYE_Y + sy, p.eyeColor, openness, true);
       drawOneParametricEye(gfx, FACE_EYE_R_X + sx, FACE_EYE_Y + sy, p.eyeColor, openness, false);
+      break;
+  }
+
+  // 目の形状に重ねて描く追加装飾(まつ毛/赤面/キラッ)
+  switch (p.eyeDecoration) {
+    case EYE_DECO_LASH:
+      drawEyelash(gfx, FACE_EYE_L_X, FACE_EYE_Y - (int)(r * 0.85f), p.eyeColor, true);
+      drawEyelash(gfx, FACE_EYE_R_X, FACE_EYE_Y - (int)(r * 0.85f), p.eyeColor, false);
+      break;
+    case EYE_DECO_BLUSH:
+      drawBlush(gfx, FACE_EYE_L_X - r - 8, FACE_EYE_Y + 12, p.eyeColor);
+      drawBlush(gfx, FACE_EYE_R_X + r - 4, FACE_EYE_Y + 12, p.eyeColor);
+      break;
+    case EYE_DECO_SPARKLE:
+      drawSparkle(gfx, FACE_EYE_R_X + r + 10, FACE_EYE_Y - r - 4, p.eyeColor);
+      break;
+    default:
       break;
   }
 }
@@ -729,6 +859,14 @@ void drawMouth(Adafruit_GFX &gfx, MouthShape shape, uint16_t color, float intens
       break;
     case MOUTH_TRIANGLE:
       gfx.fillTriangle(cx - w, cy - 4, cx + w, cy - 4, cx, cy + 16, color);
+      break;
+    case MOUTH_LINE_SIDE:
+      gfx.drawLine(cx + 6, cy, cx + 6 + w / 2, cy, color);
+      gfx.drawLine(cx + 6, cy + 1, cx + 6 + w / 2, cy + 1, color);
+      break;
+    case MOUTH_SMIRK:
+      gfx.drawLine(cx - w, cy, cx, cy, color);
+      drawArcUp(gfx, cx + w / 2, cy, w / 2, color);
       break;
     case MOUTH_LINE:
     default:
@@ -1084,13 +1222,20 @@ void updateFace(FaceLayoutMode layout) {
   // Fleet Hubから渡される表情名(文字列)をExpressionIdへ変換する。未知の値はNEUTRAL扱いとする。
   ExpressionId expressionIdFromString(const char* name) {
     if (strcmp(name, "happy") == 0) return EXPR_HAPPY;
+    if (strcmp(name, "fun") == 0) return EXPR_FUN;
+    if (strcmp(name, "laugh") == 0) return EXPR_LAUGH;
     if (strcmp(name, "surprised") == 0) return EXPR_SURPRISED;
-    if (strcmp(name, "unsure") == 0) return EXPR_UNSURE;
-    if (strcmp(name, "sleepy") == 0) return EXPR_SLEEPY;
+    if (strcmp(name, "curious") == 0) return EXPR_CURIOUS;
+    if (strcmp(name, "thinking") == 0) return EXPR_THINKING;
+    if (strcmp(name, "wink") == 0) return EXPR_WINK;
     if (strcmp(name, "worried") == 0) return EXPR_WORRIED;
-    if (strcmp(name, "shocked") == 0) return EXPR_SHOCKED;
+    if (strcmp(name, "angry") == 0) return EXPR_ANGRY;
+    if (strcmp(name, "sleepy") == 0) return EXPR_SLEEPY;
     if (strcmp(name, "love") == 0) return EXPR_LOVE;
-    if (strcmp(name, "excited") == 0) return EXPR_EXCITED;
+    if (strcmp(name, "shocked") == 0) return EXPR_SHOCKED;
+    if (strcmp(name, "giveup") == 0) return EXPR_GIVEUP;
+    if (strcmp(name, "shy") == 0) return EXPR_SHY;
+    if (strcmp(name, "composed") == 0) return EXPR_COMPOSED;
     return EXPR_NEUTRAL;
   }
 
@@ -1239,6 +1384,9 @@ void setup() {
   display.setTextSize(1);
   display.setCursor(4, 44);
   display.println(deviceId);
+
+  // 起動最初期のヒープ圧迸を避けるため、分割レイアウト下半分キャンバスはここで遅延確保する
+  bottomCanvas = new GFXcanvas16(TFT_PANEL_W, SPLIT_BOTTOM_H);
 
   // 2. モーターピン初期匁E(方向ピンは吁E��ーター1本。インバ�EタICでIN2/IN4相当を生�E)
   pinMode(PIN_DIR_R, OUTPUT);

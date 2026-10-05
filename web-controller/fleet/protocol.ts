@@ -9,13 +9,20 @@ export type VehicleStatus = "online" | "offline";
 export type ExpressionId =
   | "neutral"
   | "happy"
+  | "fun"
+  | "laugh"
   | "surprised"
-  | "unsure"
-  | "sleepy"
+  | "curious"
+  | "thinking"
+  | "wink"
   | "worried"
-  | "shocked"
+  | "angry"
+  | "sleepy"
   | "love"
-  | "excited";
+  | "shocked"
+  | "giveup"
+  | "shy"
+  | "composed";
 
 // ---- Device (ESP32) -> Server ----
 
