@@ -24,7 +24,17 @@ export interface TelemetryMessage {
   uptimeMs: number;
 }
 
-export type DeviceInboundMessage = HelloMessage | TelemetryMessage;
+// OV2640カメラのスナップショット (JPEG/Base64)
+export interface ImageFrameMessage {
+  type: "imageFrame";
+  deviceId: string;
+  width: number;
+  height: number;
+  format: "jpeg";
+  dataB64: string;
+}
+
+export type DeviceInboundMessage = HelloMessage | TelemetryMessage | ImageFrameMessage;
 
 // ---- Server -> Device (ESP32) ----
 
@@ -40,7 +50,20 @@ export interface SetNameMessage {
   name: string;
 }
 
-export type DeviceOutboundMessage = DriveMessage | SetNameMessage;
+export interface CaptureImageMessage {
+  type: "captureImage";
+}
+
+// 連続ライブ配信の開始/停止 (ESP32側がCore0タスクで自律連写する)
+export interface StreamStartMessage {
+  type: "streamStart";
+}
+
+export interface StreamStopMessage {
+  type: "streamStop";
+}
+
+export type DeviceOutboundMessage = DriveMessage | SetNameMessage | CaptureImageMessage | StreamStartMessage | StreamStopMessage;
 
 // ---- 車両状態(フリートレジストリの1台分) ----
 
@@ -65,6 +88,8 @@ export interface VehicleState {
   mode: VehicleMode;
   lastSeen: number;
   telemetry: VehicleTelemetry | null;
+  // 最新のスナップショットを受信した時刻(ms epoch)。未取得のuseundefined。
+  lastImageAt?: number;
   // 外部トラッキング(将来拡張)導入時に位置情報を格納するための予約フィールド。現時点では未使用。
   position?: VehiclePosition;
 }
@@ -100,12 +125,27 @@ export interface RouteStopMessage {
   type: "routeStop";
 }
 
+// 指定した車両にスナップショット撮影を要求する (カメラ搬載機のみ対象)
+export interface ClientCaptureRequestMessage {
+  type: "clientCaptureRequest";
+  targetDeviceIds: string[] | "all";
+}
+
+// 指定した車両のライブ映像配信(定期captureImage送信)を開始/停止する
+export interface ClientStreamRequestMessage {
+  type: "clientStreamRequest";
+  deviceId: string;
+  action: "start" | "stop";
+}
+
 export type ClientInboundMessage =
   | ClientCommandMessage
   | SetModeMessage
   | SetVehicleNameMessage
   | RouteStartMessage
-  | RouteStopMessage;
+  | RouteStopMessage
+  | ClientCaptureRequestMessage
+  | ClientStreamRequestMessage;
 
 // ---- Server -> 操作UI ----
 
@@ -122,4 +162,9 @@ export interface RouteStatusMessage {
   perVehicle: { deviceId: string; stepIndex: number }[];
 }
 
-export type ClientOutboundMessage = FleetStateMessage | RouteStatusMessage;
+// デバイスから到着したimageFrameに受信時刻を付与してクライアントへ中継する
+export interface ImageFrameBroadcastMessage extends ImageFrameMessage {
+  capturedAt: number;
+}
+
+export type ClientOutboundMessage = FleetStateMessage | RouteStatusMessage | ImageFrameBroadcastMessage;

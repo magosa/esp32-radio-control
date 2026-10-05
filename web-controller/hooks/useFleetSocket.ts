@@ -17,11 +17,20 @@ export interface RouteInfo {
   label: string;
 }
 
+export interface VehicleImage {
+  dataB64: string;
+  width: number;
+  height: number;
+  format: "jpeg";
+  capturedAt: number;
+}
+
 export function useFleetSocket() {
   const [status, setStatus] = useState<FleetConnectionStatus>("disconnected");
   const [vehicles, setVehicles] = useState<VehicleState[]>([]);
   const [routeStatus, setRouteStatus] = useState<RouteStatusMessage | null>(null);
   const [availableRoutes, setAvailableRoutes] = useState<RouteInfo[]>([]);
+  const [images, setImages] = useState<Record<string, VehicleImage>>({});
 
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -48,6 +57,17 @@ export function useFleetSocket() {
         setVehicles(msg.vehicles);
       } else if (msg.type === "routeStatus") {
         setRouteStatus(msg);
+      } else if (msg.type === "imageFrame") {
+        setImages((prev) => ({
+          ...prev,
+          [msg.deviceId]: {
+            dataB64: msg.dataB64,
+            width: msg.width,
+            height: msg.height,
+            format: msg.format,
+            capturedAt: msg.capturedAt,
+          },
+        }));
       }
     };
 
@@ -96,15 +116,32 @@ export function useFleetSocket() {
     send({ type: "routeStop" });
   }, [send]);
 
+  const requestSnapshot = useCallback(
+    (deviceId: string) => {
+      send({ type: "clientCaptureRequest", targetDeviceIds: [deviceId] });
+    },
+    [send]
+  );
+
+  const requestStream = useCallback(
+    (deviceId: string, action: "start" | "stop") => {
+      send({ type: "clientStreamRequest", deviceId, action });
+    },
+    [send]
+  );
+
   return {
     status,
     vehicles,
     routeStatus,
     availableRoutes,
+    images,
     sendCommand,
     setMode,
     setVehicleName,
     startRoute,
     stopRoute,
+    requestSnapshot,
+    requestStream,
   };
 }

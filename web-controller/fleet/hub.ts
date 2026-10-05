@@ -16,6 +16,7 @@ export class FleetHub {
   private registry = new VehicleRegistry();
   private routeEngine: RouteEngine;
   private clients = new Set<WebSocket>();
+  private streamingDeviceIds = new Set<string>();
 
   constructor() {
     this.routeEngine = new RouteEngine({
@@ -46,11 +47,14 @@ export class FleetHub {
   }
 
   private handleDeviceConnection(ws: WebSocket): void {
+    let deviceId: string | undefined;
+
     ws.on("message", (raw) => {
       const msg = this.parseJson<DeviceInboundMessage>(raw.toString());
       if (!msg) return;
 
       if (msg.type === "hello") {
+        deviceId = msg.deviceId;
         this.registry.registerHello(msg.deviceId, msg.name, ws);
         this.broadcastFleetState();
       } else if (msg.type === "telemetry") {
@@ -62,11 +66,17 @@ export class FleetHub {
           uptimeMs: msg.uptimeMs,
         });
         this.broadcastFleetState();
+      } else if (msg.type === "imageFrame") {
+        const capturedAt = Date.now();
+        this.registry.updateLastImage(msg.deviceId, capturedAt);
+        this.broadcastFleetState();
+        this.broadcastToClients({ ...msg, capturedAt });
       }
     });
 
     ws.on("close", () => {
       this.registry.markDisconnected(ws);
+      if (deviceId) this.streamingDeviceIds.delete(deviceId);
       this.broadcastFleetState();
     });
   }
@@ -124,7 +134,43 @@ export class FleetHub {
         this.routeEngine.stop();
         break;
       }
+      case "clientCaptureRequest": {
+        const targets =
+          msg.targetDeviceIds === "all" ? this.registry.getOnlineDeviceIds() : msg.targetDeviceIds;
+        targets.forEach((deviceId) => this.sendCaptureRequestToDevice(deviceId));
+        break;
+      }
+      case "clientStreamRequest": {
+        if (msg.action === "start") {
+          this.startStream(msg.deviceId);
+        } else {
+          this.stopStream(msg.deviceId);
+        }
+        break;
+      }
     }
+  }
+
+  private startStream(deviceId: string): void {
+    if (this.streamingDeviceIds.has(deviceId)) return; // すでに配信中
+    const ws = this.registry.getWs(deviceId);
+    if (!ws || ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ type: "streamStart" }));
+    this.streamingDeviceIds.add(deviceId);
+  }
+
+  private stopStream(deviceId: string): void {
+    if (!this.streamingDeviceIds.has(deviceId)) return;
+    this.streamingDeviceIds.delete(deviceId);
+    const ws = this.registry.getWs(deviceId);
+    if (!ws || ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ type: "streamStop" }));
+  }
+
+  private sendCaptureRequestToDevice(deviceId: string): void {
+    const ws = this.registry.getWs(deviceId);
+    if (!ws || ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ type: "captureImage" }));
   }
 
   private sendDriveToDevice(deviceId: string, cmd: DriveCommand, speedL: number, speedR: number): void {
