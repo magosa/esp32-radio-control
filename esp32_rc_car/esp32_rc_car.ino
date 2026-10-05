@@ -114,8 +114,8 @@ const int PIN_ENB = 25;   // 左モーター PWM
   // 実運用(バッテリ電源ON/OFF)では毎回電源が完全に入り直るため問題ないが、
   // 開発中のUSB再書き込み/ENボタン再起動後にカメラが失敗する場合は、USBを一度完全に抜き差ししてから再テストすること。
 
-  #define CAM_FRAME_WIDTH  320
-  #define CAM_FRAME_HEIGHT 240
+  #define CAM_FRAME_WIDTH  160
+  #define CAM_FRAME_HEIGHT 120
   #define CAM_JSON_BUF_SIZE 40000 // JPEG(QVGA/quality14)想定。実測に応じて調整可
   #define STREAM_MIN_INTERVAL_MS 200  // 連続配信の最小送信間隔(理論上限5fps。走行応答性とのトレードオフ)
   #define STREAM_HUB_TIMEOUT_MS  5000 // 配信中にHubから何も届かない状態がこの時間続いたら自動停止
@@ -125,6 +125,7 @@ const int PIN_ENB = 25;   // 左モーター PWM
 
   // ライブ配信はCore0の専用タスクで実行し、モーター制御(Core1のloop)への影響を避ける。
   // WebSocketsClientはスレッドセーフではないため、送受信の実アクセスはwsMutexで直列化する。
+  // webSocket.loop()のコールバック(onWebSocketEvent->sendHello)が同一タスク内で再入してロックを取り直すため、必ず再帰可能ミューテックスを使用する。
   SemaphoreHandle_t wsMutex = NULL;
   TaskHandle_t cameraStreamTaskHandle = NULL;
   volatile bool streamingEnabled = false;   // streamStart/streamStopで切替
@@ -384,9 +385,9 @@ void updateDisplay() {
     doc["fw"] = "4.0.0";
     char buf[128];
     size_t n = serializeJson(doc, buf, sizeof(buf));
-    if (xSemaphoreTake(wsMutex, portMAX_DELAY)) {
+    if (xSemaphoreTakeRecursive(wsMutex, portMAX_DELAY)) {
       webSocket.sendTXT(buf, n);
-      xSemaphoreGive(wsMutex);
+      xSemaphoreGiveRecursive(wsMutex);
     }
   }
 
@@ -401,9 +402,9 @@ void updateDisplay() {
     doc["uptimeMs"] = millis();
     char buf[160];
     size_t n = serializeJson(doc, buf, sizeof(buf));
-    if (xSemaphoreTake(wsMutex, portMAX_DELAY)) {
+    if (xSemaphoreTakeRecursive(wsMutex, portMAX_DELAY)) {
       webSocket.sendTXT(buf, n);
-      xSemaphoreGive(wsMutex);
+      xSemaphoreGiveRecursive(wsMutex);
     }
   }
 
@@ -438,7 +439,7 @@ void updateDisplay() {
     config.pin_reset = CAM_PIN_RESET;
     config.xclk_freq_hz = 20000000;
     config.pixel_format = PIXFORMAT_JPEG;
-    config.frame_size = FRAMESIZE_QVGA;   // 320x240 (PSRAM非搭載を想定した安全側の解像度)
+    config.frame_size = FRAMESIZE_QQVGA;  // 160x120 (fps向上のためQVGAから縮小、データ量約1/4)
     config.jpeg_quality = 14;             // 0(高画質/大容量)〜63(低画質/小容量)
     config.fb_count = 1;
     config.fb_location = CAMERA_FB_IN_DRAM;
@@ -490,9 +491,9 @@ void updateDisplay() {
     imageJsonBuf[totalLen++] = '"';
     imageJsonBuf[totalLen++] = '}';
 
-    if (xSemaphoreTake(wsMutex, portMAX_DELAY)) {
+    if (xSemaphoreTakeRecursive(wsMutex, portMAX_DELAY)) {
       webSocket.sendTXT(imageJsonBuf, totalLen);
-      xSemaphoreGive(wsMutex);
+      xSemaphoreGiveRecursive(wsMutex);
     }
   }
 
@@ -669,7 +670,7 @@ void setup() {
 #if TRANSPORT_MODE == MODE_WEBSOCKET && CAMERA_ENABLED
   // 3. OV2640カメラ初期化 (失敗してもモーター/表示系は継続動作させる)
   cameraReady = setupCamera();
-  wsMutex = xSemaphoreCreateMutex();
+  wsMutex = xSemaphoreCreateRecursiveMutex();
   // カメラ撮影・送信はCore0の専用タスクで行い、Core1のloop()(モーター制御/走行応答)への影響を避ける
   xTaskCreatePinnedToCore(cameraStreamTask, "camStream", 8192, NULL, 1, &cameraStreamTaskHandle, 0);
 #endif
@@ -753,9 +754,9 @@ void setup() {
 void loop() {
 #if TRANSPORT_MODE == MODE_WEBSOCKET
   #if CAMERA_ENABLED
-    if (xSemaphoreTake(wsMutex, portMAX_DELAY)) {
+    if (xSemaphoreTakeRecursive(wsMutex, portMAX_DELAY)) {
       webSocket.loop();
-      xSemaphoreGive(wsMutex);
+      xSemaphoreGiveRecursive(wsMutex);
     }
   #else
     webSocket.loop();
