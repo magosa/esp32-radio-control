@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   Radio,
@@ -10,9 +10,12 @@ import {
   PlayCircle,
   StopCircle,
   RotateCcw,
+  Camera,
+  Video,
+  VideoOff,
 } from "lucide-react";
-import { useFleetSocket } from "@/hooks/useFleetSocket";
-import type { DriveCommand } from "@/fleet/protocol";
+import { useFleetSocket, type VehicleImage } from "@/hooks/useFleetSocket";
+import type { DisplayLayoutMode, DriveCommand, ExpressionId } from "@/fleet/protocol";
 
 const SPEED = 190;
 
@@ -24,20 +27,93 @@ const DIRECTIONS: { label: string; cmd: DriveCommand }[] = [
   { label: "■ 停止", cmd: "e" },
 ];
 
+const EXPRESSIONS: { label: string; id: ExpressionId }[] = [
+  { label: "😐 通常", id: "neutral" },
+  { label: "😊 嬉しい", id: "happy" },
+  { label: "😄 楽しい", id: "fun" },
+  { label: "😆 笑う", id: "laugh" },
+  { label: "😮 驚き", id: "surprised" },
+  { label: "🧐 好奇心", id: "curious" },
+  { label: "🤔 考え中", id: "thinking" },
+  { label: "😉 ウインク", id: "wink" },
+  { label: "😢 悲しい", id: "worried" },
+  { label: "😠 怒り", id: "angry" },
+  { label: "😴 眠い", id: "sleepy" },
+  { label: "🥰 大好き", id: "love" },
+  { label: "😱 ショック", id: "shocked" },
+  { label: "🙅 ギブアップ", id: "giveup" },
+  { label: "☺️ 照れる", id: "shy" },
+  { label: "😏 余裕", id: "composed" },
+];
+
+const DISPLAY_LAYOUTS: { label: string; id: DisplayLayoutMode }[] = [
+  { label: "分割", id: "split" },
+  { label: "全画面", id: "full" },
+  { label: "自動", id: "auto" },
+];
+
+function VehicleSnapshot({ image }: { image?: VehicleImage }) {
+  if (!image) return null;
+  return (
+    <div className="mt-2 rounded-lg overflow-hidden border border-slate-800 bg-black/40">
+      {/* OV2640はJPEG(センサー内蔵エンコード)を直接送信するため、data URIをそのままimgに設定するだけで表示できる */}
+      <img
+        src={`data:image/jpeg;base64,${image.dataB64}`}
+        alt="snapshot"
+        width={image.width}
+        height={image.height}
+        className="w-full h-auto block"
+      />
+      <div className="text-[10px] font-mono text-slate-500 px-2 py-1">
+        {new Date(image.capturedAt).toLocaleTimeString()} 取得
+      </div>
+    </div>
+  );
+}
+
 export default function FleetDashboardPage() {
   const {
     status,
     vehicles,
     routeStatus,
     availableRoutes,
+    images,
     sendCommand,
     setMode,
     startRoute,
     stopRoute,
+    requestSnapshot,
+    requestStream,
+    requestExpression,
+    requestDisplayLayout,
   } = useFleetSocket();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedRouteId, setSelectedRouteId] = useState<string>("");
+  const [streamingIds, setStreamingIds] = useState<Set<string>>(new Set());
+  const streamingIdsRef = useRef(streamingIds);
+  streamingIdsRef.current = streamingIds;
+
+  // 配信の止め忘れでESP32が撮影し続けないよう、アンマウント時に全配信を停止する
+  useEffect(() => {
+    return () => {
+      streamingIdsRef.current.forEach((deviceId) => requestStream(deviceId, "stop"));
+    };
+  }, [requestStream]);
+
+  const toggleStream = (deviceId: string) => {
+    setStreamingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(deviceId)) {
+        next.delete(deviceId);
+        requestStream(deviceId, "stop");
+      } else {
+        next.add(deviceId);
+        requestStream(deviceId, "start");
+      }
+      return next;
+    });
+  };
 
   const onlineCount = useMemo(() => vehicles.filter((v) => v.status === "online").length, [vehicles]);
 
@@ -185,37 +261,85 @@ export default function FleetDashboardPage() {
         {vehicles.map((v) => (
           <div
             key={v.deviceId}
-            className={`rounded-xl border p-3 flex items-center justify-between gap-3 ${
+            className={`rounded-xl border p-3 flex flex-col gap-2 ${
               v.status === "online" ? "border-slate-800 bg-slate-900/70" : "border-slate-900 bg-slate-950/60 opacity-60"
             }`}
           >
-            <label className="flex items-center gap-2 flex-1 min-w-0">
-              <input
-                type="checkbox"
-                checked={selectedIds.has(v.deviceId)}
-                onChange={() => toggleSelect(v.deviceId)}
-                disabled={v.status !== "online"}
-              />
-              <div className="min-w-0">
-                <div className="text-xs font-bold font-mono truncate">{v.name}</div>
-                <div className="text-[10px] font-mono text-slate-500 truncate">
-                  {v.deviceId} · {v.status === "online" ? "ONLINE" : "OFFLINE"}
-                  {v.telemetry && ` · cmd=${v.telemetry.cmd} L=${v.telemetry.speedL} R=${v.telemetry.speedR}`}
+            <div className="flex items-center justify-between gap-3">
+              <label className="flex items-center gap-2 flex-1 min-w-0">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(v.deviceId)}
+                  onChange={() => toggleSelect(v.deviceId)}
+                  disabled={v.status !== "online"}
+                />
+                <div className="min-w-0">
+                  <div className="text-xs font-bold font-mono truncate">{v.name}</div>
+                  <div className="text-[10px] font-mono text-slate-500 truncate">
+                    {v.deviceId} · {v.status === "online" ? "ONLINE" : "OFFLINE"}
+                    {v.telemetry && ` · cmd=${v.telemetry.cmd} L=${v.telemetry.speedL} R=${v.telemetry.speedR}`}
+                  </div>
                 </div>
-              </div>
-            </label>
-            <button
-              onClick={() => setMode(v.deviceId, v.mode === "auto" ? "manual" : "auto")}
-              disabled={v.status !== "online"}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1 border ${
-                v.mode === "auto"
-                  ? "bg-purple-500/20 border-purple-500/40 text-purple-300"
-                  : "bg-slate-800 border-slate-700 text-slate-300"
-              }`}
-            >
-              <RotateCcw className="w-3 h-3" />
-              {v.mode === "auto" ? "AUTO" : "MANUAL"}
-            </button>
+              </label>
+              <button
+                onClick={() => requestSnapshot(v.deviceId)}
+                disabled={v.status !== "online"}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1 border bg-slate-800 border-slate-700 text-slate-300 disabled:opacity-40"
+              >
+                <Camera className="w-3 h-3" />
+                スナップショット
+              </button>
+              <button
+                onClick={() => toggleStream(v.deviceId)}
+                disabled={v.status !== "online"}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1 border disabled:opacity-40 ${
+                  streamingIds.has(v.deviceId)
+                    ? "bg-rose-500/20 border-rose-500/40 text-rose-300"
+                    : "bg-slate-800 border-slate-700 text-slate-300"
+                }`}
+              >
+                {streamingIds.has(v.deviceId) ? <VideoOff className="w-3 h-3" /> : <Video className="w-3 h-3" />}
+                {streamingIds.has(v.deviceId) ? "ライブ停止" : "ライブ映像"}
+              </button>
+              <button
+                onClick={() => setMode(v.deviceId, v.mode === "auto" ? "manual" : "auto")}
+                disabled={v.status !== "online"}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1 border ${
+                  v.mode === "auto"
+                    ? "bg-purple-500/20 border-purple-500/40 text-purple-300"
+                    : "bg-slate-800 border-slate-700 text-slate-300"
+                }`}
+              >
+                <RotateCcw className="w-3 h-3" />
+                {v.mode === "auto" ? "AUTO" : "MANUAL"}
+              </button>
+            </div>
+            <VehicleSnapshot image={images[v.deviceId]} />
+            <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-800/60">
+              {EXPRESSIONS.map((ex) => (
+                <button
+                  key={ex.id}
+                  onClick={() => requestExpression([v.deviceId], ex.id)}
+                  disabled={v.status !== "online"}
+                  className="px-2 py-1 rounded-lg text-[11px] font-mono border bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700 disabled:opacity-40"
+                >
+                  {ex.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-800/60">
+              <span className="text-[10px] font-mono text-slate-500 self-center">画面レイアウト:</span>
+              {DISPLAY_LAYOUTS.map((layout) => (
+                <button
+                  key={layout.id}
+                  onClick={() => requestDisplayLayout([v.deviceId], layout.id)}
+                  disabled={v.status !== "online"}
+                  className="px-2 py-1 rounded-lg text-[11px] font-mono border bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700 disabled:opacity-40"
+                >
+                  {layout.label}
+                </button>
+              ))}
+            </div>
           </div>
         ))}
       </section>

@@ -24,6 +24,7 @@ export class VehicleRegistry {
         mode: existing?.state.mode ?? "manual",
         lastSeen: Date.now(),
         telemetry: existing?.state.telemetry ?? null,
+        lastImageAt: existing?.state.lastImageAt,
       },
     });
   }
@@ -34,6 +35,12 @@ export class VehicleRegistry {
     record.state.status = "online";
     record.state.lastSeen = Date.now();
     record.state.telemetry = telemetry;
+  }
+
+  updateLastImage(deviceId: string, timestamp: number): void {
+    const record = this.vehicles.get(deviceId);
+    if (!record) return;
+    record.state.lastImageAt = timestamp;
   }
 
   markDisconnected(ws: WebSocket): void {
