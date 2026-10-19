@@ -9,13 +9,11 @@
  *   5. 【フリート管琁E��Wi-Fi + WebSocketをメイン通信経路とし、褁E��台めE
  *      フリートハブから識別・一括/個別制御できるようにする、ELE/Classic BTは
  *      チE��チE��・フォールバック用としてTRANSPORT_MODEで刁E��可能、E
- *   6. 【カメラ】OV2640(JPEG出劁EによるスナップショチE��送信 (captureImage要汁E-> imageFrame応筁E
  *
  * V4 ハ�Eドウェア変更 (V3からの再設訁E:
  *   - 表示: 外付けOLED(SSD1306, I2C) -> ideaspark ESP32基板オンボ�Eド一体型TFT(ST7789V3, SPI, 170x320)
- *   - カメラ: OV7670 -> OV2640 (センサー冁E��JPEGエンコーダによりペイロードを大幁E��渁E
- *   - オンボ�EドTFTがGPIO2/4/15/18/23/32を専有するため、モーター方向ピンとカメラピンを�E面再�E置、E
- *     モーター方向ピンは吁E��ーター1本+外付けインバ�EタIC(74HC04等、IN1/IN2また�EIN3/IN4の相補生成用)に削減、E
+ *   - 本個体はTFT表示とL298Nモーター駁E��のみを担当する(カメラ/LEDは搭載しなぁE��別個佁E。
+ *     モーター方向ピンはL298Nの6ピン(ENA/IN1/IN2/ENB/IN3/IN4)を直接制御する標準方式、E
  * ============================================================================
  */
 
@@ -24,10 +22,6 @@
 #define MODE_BLE        1
 #define MODE_CLASSIC_BT 2
 #define TRANSPORT_MODE MODE_WEBSOCKET
-
-// OV2640カメラ機�Eの有効/無効 (WebSocketモード時のみ有効)。カメラ未接続で検証する場合�E0にする、E
-// 表惁E��ボット化(ロード�EチE�E)に伴ぁE��カメラは別のESP32基板に刁E��する方針�Eためこ�E個体では無効化、E
-#define CAMERA_ENABLED 0
 
 #if TRANSPORT_MODE == MODE_BLE
   #include <BLEDevice.h>
@@ -158,78 +152,23 @@ Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 GFXcanvas16 *bottomCanvas = nullptr;
 
 // ----------------------------------------------------------------------------
-// ピンアサイン定義 (L298N 接綁E
-// TFTがGPIO2/4/15/18/23/32を専有するため、方向ピンは吁E��ーター1本に削減し、E
-// もう一方のIN端子�E外付けインバ�EタIC(74HC04筁Eでこ�Eピンの論理反転を�E力する、E
+// ピンアサイン定義 (L298N 接続、6ピン直接制御)
+// TFTがGPIO2/4/15/18/23/32を専有するため、空いているGPIOに方向ピンを割り当てる、E
 // ----------------------------------------------------------------------------
 const int PIN_ENA = 14;   // 右モーター PWM
-const int PIN_DIR_R = 27; // 右モーター 方吁E(L298N IN1に直結、IN2はインバ�Eタ出力を接綁E
+const int PIN_IN1  = 27;  // 右モーター 方向1 (L298N IN1)
+const int PIN_IN2  = 26;  // 右モーター 方向2 (L298N IN2)
 
-const int PIN_DIR_L = 33; // 左モーター 方吁E(L298N IN3に直結、IN4はインバ�Eタ出力を接綁E
+const int PIN_IN3  = 33;  // 左モーター 方向1 (L298N IN3)
+const int PIN_IN4  = 19;  // 左モーター 方向2 (L298N IN4)
 const int PIN_ENB = 25;   // 左モーター PWM
 
 #if TRANSPORT_MODE == MODE_WEBSOCKET
   // WebSocketsClientはスレチE��セーフではなぁE��め、E��受信の実アクセス(sendHello/sendTelemetry/
-  // captureAndSendImage/webSocket.loop())はwsMutexで直列化する。カメラ無効時もsendHello/
-  // sendTelemetryから参�Eされるため、CAMERA_ENABLEDに関係なく常に用意する、E
+  // webSocket.loop())はwsMutexで直列化する。
   // webSocket.loop()のコールバック(onWebSocketEvent->sendHello)が同一タスク冁E��再�EしてロチE��めE
   // 取り直すため、忁E��再帰可能ミューチE��クスを使用する、E
   SemaphoreHandle_t wsMutex = NULL;
-#endif
-
-#if TRANSPORT_MODE == MODE_WEBSOCKET && CAMERA_ENABLED
-  #include "esp_camera.h"
-  #include "mbedtls/base64.h"
-
-  // ----------------------------------------------------------------------------
-  // OV2640カメラ ピンアサイン定義 (DVPパラレル+SCCB)
-  // TFTの専有ピン(2,4,15,18,23,32)およびモーターピン(14,25,27,33)を避けて再�E置、E
-  //
-  // 実機モジュール側シルク印刷 -> ESP32配線対応表 (18ピン品E XCLK/XVCLKピン無しタイチE:
-  //   3.3  -> ESP32 3V3          GND  -> ESP32 GND
-  //   SCL  -> GPIO22 (SCCBクロチE��)   SDA  -> GPIO21 (SCCBチE�Eタ)
-  //   VSYNC-> GPIO13             HREF -> GPIO17            DCLK -> GPIO12 (PCLK)
-  //   RST  -> ESP32 3V3に直絁ELow活性のため常時解除、GPIO不要E
-  //   PWDN -> ESP32 GNDに直絁EHigh活性のため常時給電、GPIO不要E
-  //   D0-D3-> GPIO34/35/36/39(入力専用)   D4-D7 -> GPIO26/5/16/19
-  //   NG   -> 未接綁ENC)
-  //   ※本モジュールはXCLK/XVCLKピンを基板上に持たなぁE冁E��発振器で自走)ため配線不要、E
-  // ----------------------------------------------------------------------------
-  #define CAM_PIN_D0    34  // 入力専用ピン
-  #define CAM_PIN_D1    35  // 入力専用ピン
-  #define CAM_PIN_D2    36  // 入力専用ピン
-  #define CAM_PIN_D3    39  // 入力専用ピン
-  #define CAM_PIN_D4    26
-  #define CAM_PIN_D5    5
-  #define CAM_PIN_D6    16
-  #define CAM_PIN_D7    19
-  #define CAM_PIN_VSYNC 13
-  #define CAM_PIN_HREF  17
-  #define CAM_PIN_PCLK  12  // モジュール表訁E DCLK
-  #define CAM_PIN_XCLK  0   // モジュールにXCLKピンが無ぁE��め物琁E�E線なぁEドライバ�E部設定用の値のみ)
-  #define CAM_PIN_SIOD  21  // モジュール表訁E SDA (SCCBチE�Eタ)
-  #define CAM_PIN_SIOC  22  // モジュール表訁E SCL (SCCBクロチE��)
-  #define CAM_PIN_PWDN  -1  // モジュールのPWDNピンはGNDへ直結して使用(常時給電、GPIO制御なぁE
-  #define CAM_PIN_RESET -1  // モジュールのRSTピンは3V3へ直結して使用(常時リセチE��解除、GPIO制御なぁE
-  // 注愁E RESET/PWDNをスタチE��チE��に固定してぁE��ため、EN(チッチEリセチE��だけではカメラの冁E��状態�EリセチE��されなぁE��E
-  // 実運用(バッチE��電源ON/OFF)では毎回電源が完�Eに入り直るため問題なぁE��、E
-  // 開発中のUSB再書き込み/ENボタン再起動後にカメラが失敗する場合�E、USBを一度完�Eに抜き差ししてから再テストすること、E
-
-  #define CAM_FRAME_WIDTH  160
-  #define CAM_FRAME_HEIGHT 120
-  #define CAM_JSON_BUF_SIZE 40000 // JPEG(QVGA/quality14)想定。実測に応じて調整可
-  #define STREAM_MIN_INTERVAL_MS 200  // 連続�E信の最小送信間隔(琁E��上限5fps。走行応答性とのトレードオチE
-  #define STREAM_HUB_TIMEOUT_MS  5000 // 配信中にHubから何も届かなぁE��態がこ�E時間続いたら自動停止
-
-  char imageJsonBuf[CAM_JSON_BUF_SIZE];
-  bool cameraReady = false;
-
-  // ライブ�E信はCore0の専用タスクで実行し、モーター制御(Core1のloop)への影響を避ける、E
-  // esp_camera_fb_get/returnを褁E��コアから同時に呼ばなぁE��ぁE��撮影はこ�Eタスクに一本化する、E
-  TaskHandle_t cameraStreamTaskHandle = NULL;
-  volatile bool streamingEnabled = false;   // streamStart/streamStopで刁E��
-  volatile bool captureRequested = false;   // 単発captureImage要汁E
-  volatile unsigned long lastStreamFrameAt = 0;
 #endif
 
 // ----------------------------------------------------------------------------
@@ -327,36 +266,48 @@ void applyMotorControl(char cmd, int speedL, int speedR) {
   currentSpeedR = speedR;
 
   switch (cmd) {
-    case 'a': // 前進 (Forward): 両モーターとも正転
-      digitalWrite(PIN_DIR_R, LOW);
-      digitalWrite(PIN_DIR_L, LOW);
+    case 'a': // 前進 (Forward)
+      digitalWrite(PIN_IN1, LOW);
+      digitalWrite(PIN_IN2, HIGH);
+      digitalWrite(PIN_IN3, LOW);
+      digitalWrite(PIN_IN4, HIGH);
       writePWM(PIN_ENA, PWM_CH_RIGHT, speedR);
       writePWM(PIN_ENB, PWM_CH_LEFT, speedL);
       break;
 
-    case 'b': // 後退 (Reverse): 両モーターとも送E��
-      digitalWrite(PIN_DIR_R, HIGH);
-      digitalWrite(PIN_DIR_L, HIGH);
+    case 'b': // 後退 (Reverse)
+      digitalWrite(PIN_IN1, HIGH);
+      digitalWrite(PIN_IN2, LOW);
+      digitalWrite(PIN_IN3, HIGH);
+      digitalWrite(PIN_IN4, LOW);
       writePWM(PIN_ENA, PWM_CH_RIGHT, speedR);
       writePWM(PIN_ENB, PWM_CH_LEFT, speedL);
       break;
 
-    case 'c': // 右趁E��地旋回 (Turn Right): 右送E��・左正転
-      digitalWrite(PIN_DIR_R, HIGH);
-      digitalWrite(PIN_DIR_L, LOW);
+    case 'c': // 右超信地旋回 (Turn Right)
+      digitalWrite(PIN_IN1, HIGH);
+      digitalWrite(PIN_IN2, LOW);
+      digitalWrite(PIN_IN3, LOW);
+      digitalWrite(PIN_IN4, HIGH);
       writePWM(PIN_ENA, PWM_CH_RIGHT, speedR);
       writePWM(PIN_ENB, PWM_CH_LEFT, speedL);
       break;
 
-    case 'd': // 左趁E��地旋回 (Turn Left): 右正転・左送E��
-      digitalWrite(PIN_DIR_R, LOW);
-      digitalWrite(PIN_DIR_L, HIGH);
+    case 'd': // 左超信地旋回 (Turn Left)
+      digitalWrite(PIN_IN1, LOW);
+      digitalWrite(PIN_IN2, HIGH);
+      digitalWrite(PIN_IN3, HIGH);
+      digitalWrite(PIN_IN4, LOW);
       writePWM(PIN_ENA, PWM_CH_RIGHT, speedR);
       writePWM(PIN_ENB, PWM_CH_LEFT, speedL);
       break;
 
-    case 'e': // 停止 (Stop): PWMチE��ーチE��0で停止(方向ピンはそ�Eままでよい)
+    case 'e': // 停止 (Stop)
     default:
+      digitalWrite(PIN_IN1, LOW);
+      digitalWrite(PIN_IN2, LOW);
+      digitalWrite(PIN_IN3, LOW);
+      digitalWrite(PIN_IN4, LOW);
       writePWM(PIN_ENA, PWM_CH_RIGHT, 0);
       writePWM(PIN_ENB, PWM_CH_LEFT, 0);
       currentSpeedL = 0;
@@ -1098,127 +1049,6 @@ void updateFace(FaceLayoutMode layout) {
     }
   }
 
-#if CAMERA_ENABLED
-  // --------------------------------------------------------------------------
-  // OV2640カメラ初期匁E(JPEG出力�EPSRAM非搭載を想定しQVGA/DRAMバッファで運用)
-  // --------------------------------------------------------------------------
-  bool setupCamera() {
-    camera_config_t config = {};
-    config.ledc_channel = LEDC_CHANNEL_2; // モーターPWM(ch0,1)と衝突しなぁE��ャンネルを使用
-    config.ledc_timer   = LEDC_TIMER_1;
-    config.pin_d0 = CAM_PIN_D0;
-    config.pin_d1 = CAM_PIN_D1;
-    config.pin_d2 = CAM_PIN_D2;
-    config.pin_d3 = CAM_PIN_D3;
-    config.pin_d4 = CAM_PIN_D4;
-    config.pin_d5 = CAM_PIN_D5;
-    config.pin_d6 = CAM_PIN_D6;
-    config.pin_d7 = CAM_PIN_D7;
-    config.pin_xclk = CAM_PIN_XCLK;
-    config.pin_pclk = CAM_PIN_PCLK;
-    config.pin_vsync = CAM_PIN_VSYNC;
-    config.pin_href = CAM_PIN_HREF;
-#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
-    config.pin_sccb_sda = CAM_PIN_SIOD;
-    config.pin_sccb_scl = CAM_PIN_SIOC;
-#else
-    config.pin_sscb_sda = CAM_PIN_SIOD;
-    config.pin_sscb_scl = CAM_PIN_SIOC;
-#endif
-    config.pin_pwdn = CAM_PIN_PWDN;
-    config.pin_reset = CAM_PIN_RESET;
-    config.xclk_freq_hz = 20000000;
-    config.pixel_format = PIXFORMAT_JPEG;
-    config.frame_size = FRAMESIZE_QQVGA;  // 160x120 (fps向上�EためQVGAから縮小、データ量紁E/4)
-    config.jpeg_quality = 14;             // 0(高画質/大容釁E、E3(低画質/小容釁E
-    config.fb_count = 1;
-    config.fb_location = CAMERA_FB_IN_DRAM;
-    config.grab_mode = CAMERA_GRAB_LATEST;
-
-    esp_err_t err = esp_camera_init(&config);
-    if (err != ESP_OK) {
-      Serial.printf("[WARN] Camera init failed: 0x%x\n", err);
-      return false;
-    }
-    Serial.println(F("[INFO] OV2640 Camera initialized (JPEG/QVGA)"));
-    return true;
-  }
-
-  // --------------------------------------------------------------------------
-  // 1フレーム撮影してJPEGをBase64化しWebSocketで送信 (Zero Allocation: 静的バッファに直接エンコーチE
-  // --------------------------------------------------------------------------
-  void captureAndSendImage() {
-    if (!cameraReady) {
-      Serial.println(F("[WARN] captureImage requested but camera not ready"));
-      return;
-    }
-
-    camera_fb_t* fb = esp_camera_fb_get();
-    if (!fb) {
-      Serial.println(F("[WARN] esp_camera_fb_get() failed"));
-      return;
-    }
-
-    int headerLen = snprintf(imageJsonBuf, sizeof(imageJsonBuf),
-      "{\"type\":\"imageFrame\",\"deviceId\":\"%s\",\"width\":%d,\"height\":%d,\"format\":\"jpeg\",\"dataB64\":\"",
-      deviceId, fb->width, fb->height);
-
-    size_t availableForB64 = sizeof(imageJsonBuf) - headerLen - 3; // 末尾の \"} + 終端斁E��用
-    size_t encodedLen = 0;
-    int rc = mbedtls_base64_encode((unsigned char*)imageJsonBuf + headerLen, availableForB64, &encodedLen,
-                                    fb->buf, fb->len);
-
-    if (rc != 0) {
-      Serial.printf("[WARN] JPEG frame too large for buffer (fb->len=%u, avail=%u) - skipped\n",
-                    (unsigned)fb->len, (unsigned)availableForB64);
-      esp_camera_fb_return(fb);
-      return;
-    }
-
-    esp_camera_fb_return(fb);
-
-    size_t totalLen = headerLen + encodedLen;
-    imageJsonBuf[totalLen++] = '"';
-    imageJsonBuf[totalLen++] = '}';
-
-    if (xSemaphoreTakeRecursive(wsMutex, portMAX_DELAY)) {
-      webSocket.sendTXT(imageJsonBuf, totalLen);
-      xSemaphoreGiveRecursive(wsMutex);
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // Core0専用タスク: 単発撮影(captureRequested)と連続�E信(streamingEnabled)を一本化して処琁E��る、E
-  // esp_camera_fb_get/return を褁E��コアから同時に呼ばなぁE��ぁE��するための唯一の呼び出し�E、E
-  // --------------------------------------------------------------------------
-  void cameraStreamTask(void* pvParameters) {
-    for (;;) {
-      unsigned long now = millis();
-      bool doCapture = false;
-
-      if (captureRequested) {
-        captureRequested = false;
-        doCapture = true;
-      } else if (streamingEnabled) {
-        if (now - lastPacketTime > STREAM_HUB_TIMEOUT_MS) {
-          // Hubからの通信が一定時間途絶えた場合�E配信を�E動停止する(暴走防止)
-          streamingEnabled = false;
-          Serial.println(F("[WARN] Stream auto-stopped: Hub communication timeout"));
-        } else if (now - lastStreamFrameAt >= STREAM_MIN_INTERVAL_MS) {
-          lastStreamFrameAt = now;
-          doCapture = true;
-        }
-      }
-
-      if (doCapture && cameraReady) {
-        captureAndSendImage();
-      }
-
-      vTaskDelay(pdMS_TO_TICKS(10));
-    }
-  }
-#endif
-
   // Fleet Hubから渡される表情名(文字列)をExpressionIdへ変換する。未知の値はNEUTRAL扱いとする。
   ExpressionId expressionIdFromString(const char* name) {
     if (strcmp(name, "happy") == 0) return EXPR_HAPPY;
@@ -1271,16 +1101,6 @@ void updateFace(FaceLayoutMode layout) {
       } else {
         fleetLayoutOverrideActive = false; // "auto": 自動判定(起動直後分割/通常全画面/断絶時アラート)に戻す
       }
-#if CAMERA_ENABLED
-    } else if (strcmp(type, "captureImage") == 0) {
-      captureRequested = true;
-    } else if (strcmp(type, "streamStart") == 0) {
-      streamingEnabled = true;
-      Serial.println(F("[INFO] Live stream started"));
-    } else if (strcmp(type, "streamStop") == 0) {
-      streamingEnabled = false;
-      Serial.println(F("[INFO] Live stream stopped"));
-#endif
     }
     // "ping" はlastPacketTime更新のみで応答不要E(次回telemetryで生存確誁E
   }
@@ -1297,9 +1117,6 @@ void updateFace(FaceLayoutMode layout) {
         isDeviceConnected = false;
         Serial.println(F("[INFO] Fleet Hub Disconnected -> Auto Reset to STOP"));
         applyMotorControl('e', 0, 0);
-#if CAMERA_ENABLED
-        streamingEnabled = false; // 通信刁E��時�Eライブ�E信も即停止
-#endif
         strncpy(lastRawBuffer, "DISCONNECT", sizeof(lastRawBuffer));
         break;
       case WStype_TEXT:
@@ -1370,7 +1187,7 @@ void setup() {
 
   generateDeviceId();
 
-  // 1. TFT初期匁E(MISOはカメラD7(GPIO19)と競合するため�E示皁E��無効化してからSPIバスを開姁E
+  // 1. TFT初期化(MISOは未使用のため明示的に無効化してからSPIバスを開始)
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH); // バックライチEN
   SPI.begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);
@@ -1388,27 +1205,22 @@ void setup() {
   // 起動最初期のヒープ圧迸を避けるため、分割レイアウト下半分キャンバスはここで遅延確保する
   bottomCanvas = new GFXcanvas16(TFT_PANEL_W, SPLIT_BOTTOM_H);
 
-  // 2. モーターピン初期匁E(方向ピンは吁E��ーター1本。インバ�EタICでIN2/IN4相当を生�E)
-  pinMode(PIN_DIR_R, OUTPUT);
-  pinMode(PIN_DIR_L, OUTPUT);
+  // 2. モーターピン初期化(L298Nを6ピンで直接制御: ENA/IN1/IN2/ENB/IN3/IN4)
+  pinMode(PIN_IN1, OUTPUT);
+  pinMode(PIN_IN2, OUTPUT);
+  pinMode(PIN_IN3, OUTPUT);
+  pinMode(PIN_IN4, OUTPUT);
 
   setupPWM();
   applyMotorControl('e', 0, 0);
 
 #if TRANSPORT_MODE == MODE_WEBSOCKET
-  // 3. WebSocket送受信直列化用ミューチE��クス (カメラ無効時もsendHello/sendTelemetryが使用)
+  // 3. WebSocket送受信直列化用ミューテックス
   wsMutex = xSemaphoreCreateRecursiveMutex();
 #endif
 
-#if TRANSPORT_MODE == MODE_WEBSOCKET && CAMERA_ENABLED
-  // 3b. OV2640カメラ初期匁E(失敗してもモーター/表示系は継続動作させる)
-  cameraReady = setupCamera();
-  // カメラ撮影・送信はCore0の専用タスクで行い、Core1のloop()(モーター制御/走行応筁Eへの影響を避ける
-  xTaskCreatePinnedToCore(cameraStreamTask, "camStream", 8192, NULL, 1, &cameraStreamTaskHandle, 0);
-#endif
-
 #if TRANSPORT_MODE == MODE_WEBSOCKET
-  // 4. 保存済み表示名�E復允E& Wi-Fi/WebSocket初期匁E
+  // 4. 保存済み表示名の復允E& Wi-Fi/WebSocket初期匁E
   preferences.begin("fleet", true);
   String savedName = preferences.getString("name", "");
   preferences.end();
