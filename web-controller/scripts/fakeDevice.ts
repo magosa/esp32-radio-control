@@ -4,15 +4,9 @@ import WebSocket from "ws";
 import jpeg from "jpeg-js";
 import type { DriveCommand } from "../fleet/protocol";
 
-const [, , idArg, nameArg] = process.argv;
-const deviceId = idArg || `rc-sim${Math.floor(Math.random() * 1000)}`;
-const name = nameArg || deviceId;
+const [, , idArg, nameArg, roleArg = "drive"] = process.argv;
 const host = process.env.FLEET_HUB_HOST || "localhost";
 const port = process.env.FLEET_HUB_PORT || "3000";
-
-let currentCmd: DriveCommand = "e";
-let speedL = 0;
-let speedR = 0;
 
 // OV2640(JPEG出力)を模した疑似フレームを都度生成する(グラデーション柄のQVGA JPEG)
 const CAM_WIDTH = 320;
@@ -34,40 +28,70 @@ function buildDummyJpegB64(): string {
   return Buffer.from(encoded.data).toString("base64");
 }
 
-function connect(): void {
+function simulateDevice(deviceId: string, name: string, role: "drive" | "camera" | "legacy"): void {
+  let currentCmd: DriveCommand = "e";
+  let speedL = 0;
+  let speedR = 0;
+  let lastDrive = 0;
+  let lastHubMessage = 0;
+  let streaming = false;
+  let displayName = name;
+  function connect(): void {
   const ws = new WebSocket(`ws://${host}:${port}/ws/device`);
 
   ws.on("open", () => {
     console.log(`[${deviceId}] connected`);
-    ws.send(JSON.stringify({ type: "hello", deviceId, name, fw: "sim-1.0.0" }));
+    streaming = false;
+    currentCmd = "e";
+    speedL = speedR = 0;
+    lastHubMessage = Date.now();
+    ws.send(JSON.stringify({ type: "hello", deviceId, name: displayName, fw: "sim-2.0.0",
+      ...(role === "legacy" ? {} : { capabilities: role === "camera" ? ["camera"] : ["drive", "display"] }) }));
   });
+
+  const sendFrame = () => {
+    if (ws.readyState !== ws.OPEN || role !== "camera") return;
+    ws.send(JSON.stringify({ type: "imageFrame", deviceId, width: CAM_WIDTH,
+      height: CAM_HEIGHT, format: "jpeg", dataB64: buildDummyJpegB64() }));
+  };
 
   ws.on("message", (raw) => {
     const msg = JSON.parse(raw.toString());
-    if (msg.type === "drive") {
+    lastHubMessage = Date.now();
+    if (msg.type === "drive" && role !== "camera") {
+      lastDrive = Date.now();
       currentCmd = msg.cmd;
       speedL = msg.speedL;
       speedR = msg.speedR;
       console.log(`[${deviceId}] drive -> ${currentCmd} L=${speedL} R=${speedR}`);
     } else if (msg.type === "setName") {
+      displayName = msg.name;
       console.log(`[${deviceId}] setName -> ${msg.name}`);
-    } else if (msg.type === "captureImage") {
+    } else if (msg.type === "captureImage" && role === "camera") {
       console.log(`[${deviceId}] captureImage -> sending dummy JPEG frame`);
-      ws.send(
-        JSON.stringify({
-          type: "imageFrame",
-          deviceId,
-          width: CAM_WIDTH,
-          height: CAM_HEIGHT,
-          format: "jpeg",
-          dataB64: buildDummyJpegB64(),
-        })
-      );
+      sendFrame();
+    } else if (msg.type === "streamStart" && role === "camera") {
+      streaming = true;
+    } else if (msg.type === "streamStop") {
+      streaming = false;
     }
   });
 
+  const streamTimer = setInterval(() => {
+    if (streaming && Date.now() - lastHubMessage > 5000) streaming = false;
+    if (streaming) sendFrame();
+    if (role !== "camera" && currentCmd !== "e" && Date.now() - lastDrive > 1500) {
+      currentCmd = "e";
+      speedL = speedR = 0;
+    }
+  }, 200);
+
   const telemetryTimer = setInterval(() => {
     if (ws.readyState === ws.OPEN) {
+      if (role === "camera") {
+        ws.send(JSON.stringify({ type: "heartbeat", deviceId }));
+        return;
+      }
       ws.send(
         JSON.stringify({
           type: "telemetry",
@@ -83,6 +107,10 @@ function connect(): void {
   }, 1000);
 
   ws.on("close", () => {
+    streaming = false;
+    currentCmd = "e";
+    speedL = speedR = 0;
+    clearInterval(streamTimer);
     clearInterval(telemetryTimer);
     console.log(`[${deviceId}] disconnected, retrying in 3s`);
     setTimeout(connect, 3000);
@@ -91,7 +119,18 @@ function connect(): void {
   ws.on("error", (err) => {
     console.error(`[${deviceId}] error`, err.message);
   });
+  }
+
+  console.log(`Simulating ${role} ${deviceId} (${name}) -> ws://${host}:${port}/ws/device`);
+  connect();
 }
 
-console.log(`Simulating device ${deviceId} (${name}) -> ws://${host}:${port}/ws/device`);
-connect();
+if (idArg === "--fleet") {
+  simulateDevice("demo-drive-1", "Robot One", "drive");
+  simulateDevice("demo-drive-2", "Robot Two", "legacy");
+  simulateDevice("demo-camera-1", "XIAO Camera", "camera");
+} else {
+  if (!["drive", "camera", "legacy"].includes(roleArg)) throw new Error("Role must be drive, camera or legacy");
+  const deviceId = idArg || `rc-sim${Math.floor(Math.random() * 1000)}`;
+  simulateDevice(deviceId, nameArg || deviceId, roleArg as "drive" | "camera" | "legacy");
+}

@@ -118,7 +118,7 @@ function VehicleSnapshot({ image }: { image?: VehicleImage }) {
 }
 
 export default function FleetDashboardPage() {
-  const { status, vehicles, routeStatus, availableRoutes, images, sendCommand, setMode,
+  const { status, vehicles, devices, robots, assignment, assignCamera, routeStatus, availableRoutes, images, sendCommand, setMode,
     startRoute, stopRoute, requestSnapshot, requestStream, requestExpression, requestDisplayLayout } = useFleetSocket();
   const [selectionMode, setSelectionMode] = useState<"single" | "group">("single");
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -126,9 +126,9 @@ export default function FleetDashboardPage() {
   const [query, setQuery] = useState("");
   const [speed, setSpeed] = useState(190);
   const [selectedRouteId, setSelectedRouteId] = useState("");
-  const [streamingIds, setStreamingIds] = useState<Set<string>>(new Set());
   const [driveSession, setDriveSession] = useState(0);
   const { appearance, theme, style } = useFleetAppearance();
+  const streamingIds = new Set(devices.filter((device) => device.streaming).map((device) => device.deviceId));
   const streamingRef = useRef(streamingIds);
   streamingRef.current = streamingIds;
 
@@ -139,6 +139,11 @@ export default function FleetDashboardPage() {
   const connected = status === "connected";
   const online = vehicles.filter((vehicle) => vehicle.status === "online");
   const focused = vehicles.find((vehicle) => vehicle.deviceId === focusedId);
+  const focusedRobot = robots.find((robot) => robot.driveDeviceId === focusedId);
+  const camera = devices.find((device) => device.deviceId === focusedRobot?.cameraDeviceId);
+  const cameraReady = connected && camera?.status === "online";
+  const cameras = devices.filter((device) => device.capabilities.includes("camera"));
+  const focusedAssignment = assignment?.robotId === focusedRobot?.robotId ? assignment : null;
   const targets = vehicles.filter((vehicle) => selectionMode === "single"
     ? vehicle.deviceId === focusedId : selectedIds.has(vehicle.deviceId));
   const targetKey = JSON.stringify(targets.map((vehicle) => vehicle.deviceId).sort());
@@ -167,10 +172,7 @@ export default function FleetDashboardPage() {
     sendCommand("all", "e", 0, 0);
   };
   const toggleStream = (deviceId: string) => {
-    const next = new Set(streamingIds);
-    if (next.has(deviceId)) { next.delete(deviceId); requestStream(deviceId, "stop"); }
-    else { next.add(deviceId); requestStream(deviceId, "start"); }
-    setStreamingIds(next);
+    requestStream(deviceId, streamingIds.has(deviceId) ? "stop" : "start");
   };
   const blockReason = !connected ? "ハブ未接続" : !targets.length ? "操作対象未選択"
     : targets.some((vehicle) => vehicle.status !== "online") ? "操作対象に未接続のロボットがあります"
@@ -280,14 +282,29 @@ export default function FleetDashboardPage() {
                 <option value="" disabled>レイアウトを送信…</option><option value="split">分割</option><option value="full">全画面</option><option value="auto">自動</option>
               </select></label>
             </details>}
-            {selectionMode === "single" && focused && <details className={styles.settings}>
+            {selectionMode === "single" && focused && focusedRobot && <details className={styles.settings}>
               <summary>カメラ</summary>
+              <label>カメラの紐付け<select aria-label="カメラの紐付け" value={focusedRobot.cameraDeviceId ?? ""}
+                disabled={!connected || !!assignment?.pending}
+                onChange={(event) => assignCamera(focusedRobot.robotId, event.target.value || null)}>
+                <option value="">未割当</option>
+                {cameras.map((device) => {
+                  const owner = robots.find((robot) => robot.cameraDeviceId === device.deviceId);
+                  return <option key={device.deviceId} value={device.deviceId} disabled={!!owner && owner.robotId !== focusedRobot.robotId}>
+                    {device.name} ({device.deviceId}){owner && owner.robotId !== focusedRobot.robotId ? ` · ${owner.name}に割当済み` : device.status === "offline" ? " · 未接続" : ""}
+                  </option>;
+                })}
+              </select></label>
+              {focusedAssignment && <p className={styles.assignmentStatus} role={focusedAssignment.error ? "alert" : "status"}>
+                {focusedAssignment.pending ? "保存中…" : focusedAssignment.error || "保存しました"}
+              </p>}
+              {focusedRobot.cameraDeviceId && !cameraReady && <p className={styles.cameraWarning} role="status"><TriangleAlert aria-hidden="true" />カメラ未接続</p>}
               <div className={styles.cameraActions}>
-                <button className={styles.secondary} disabled={!connected || focused.status !== "online"} onClick={() => requestSnapshot(focused.deviceId)}><Camera />撮影</button>
-                <button className={styles.secondary} disabled={!connected || focused.status !== "online"} aria-pressed={streamingIds.has(focused.deviceId)} onClick={() => toggleStream(focused.deviceId)}>
-                  {streamingIds.has(focused.deviceId) ? <VideoOff /> : <Video />}{streamingIds.has(focused.deviceId) ? "配信停止" : "ライブ"}
+                <button className={styles.secondary} disabled={!cameraReady} onClick={() => camera && requestSnapshot(camera.deviceId)}><Camera />撮影</button>
+                <button className={styles.secondary} disabled={!cameraReady} aria-pressed={!!camera && streamingIds.has(camera.deviceId)} onClick={() => camera && toggleStream(camera.deviceId)}>
+                  {camera && streamingIds.has(camera.deviceId) ? <VideoOff /> : <Video />}{camera && streamingIds.has(camera.deviceId) ? "配信停止" : "ライブ"}
                 </button>
-              </div><VehicleSnapshot image={images[focused.deviceId]} />
+              </div><VehicleSnapshot image={cameraReady && camera ? images[camera.deviceId] : undefined} />
             </details>}
           </div>
         </div>

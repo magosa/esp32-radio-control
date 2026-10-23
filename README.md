@@ -1,206 +1,52 @@
-# ESP32 Bluetooth ラジコンカー (2WD) 製作マニュアル
+# ESP32 Radio Control
 
-本ドキュメントは、0.96インチOLEDディスプレイ搭載ESP32開発ボード、L298Nモータードライバー、TTモーター（2輪駆動）、および9V電池ボックス（スイッチ付き）を使用してBluetoothラジコンカーを製作するための完全ガイドです。
+走行・LCD用ESP32とカメラ用ESP32を分離し、Fleet Hubで1台のロボットとして管理します。
+カメラの割当は画面で変更でき、Hub再起動後も保存されます。
 
----
+## 起動
 
-## 1. 全体配線図 (Mermaid)
+Node.js 20以降とnpmを使用します。
 
-```mermaid
-graph TD
-    subgraph Power_Source ["電源: 9V電池BOX (スイッチ付)"]
-        BAT_RED["赤線 (+9V)"]
-        BAT_BLK["黒線 (GND)"]
-    end
-
-    subgraph L298N_Board ["L298N モータードライバー"]
-        L_12V["12V 端子 (電源入力)"]
-        L_GND["GND 端子"]
-        L_5V["5V 端子 (降圧5V出力)"]
-        L_REG_JMP["5Vレギュレータジャンパ [装着のまま]"]
-        
-        L_ENA["ENA (右PWM) [ジャンパ外す]"]
-        L_IN1["IN1 (右方向1)"]
-        L_IN2["IN2 (右方向2)"]
-        L_IN3["IN3 (左方向1)"]
-        L_IN4["IN4 (左方向2)"]
-        L_ENB["ENB (左PWM) [ジャンパ外す]"]
-
-        OUT12["OUT1 / OUT2 端子"]
-        OUT34["OUT3 / OUT4 端子"]
-    end
-
-    subgraph ESP32_Board ["ESP32 (0.96\" OLED搭載ボード)"]
-        ESP_5V["5V (または VIN) 端子"]
-        ESP_GND["GND 端子"]
-        
-        G14["GPIO 14"]
-        G27["GPIO 27"]
-        G26["GPIO 26"]
-        G32["GPIO 32"]
-        G33["GPIO 33"]
-        G25["GPIO 25"]
-    end
-
-    subgraph Motors ["TTモーター (2WD)"]
-        MOT_R["右側 TTモーター"]
-        MOT_L["左側 TTモーター"]
-    end
-
-    %% 電源結線
-    BAT_RED --> L_12V
-    BAT_BLK --> L_GND
-
-    L_5V -->|安定5V給電| ESP_5V
-    L_GND ---|共通GND| ESP_GND
-
-    %% 信号線結線
-    G14 -->|PWM制御| L_ENA
-    G27 --> L_IN1
-    G26 --> L_IN2
-    G32 --> L_IN3
-    G33 --> L_IN4
-    G25 -->|PWM制御| L_ENB
-
-    %% モーター出力
-    OUT12 --> MOT_R
-    OUT34 --> MOT_L
+```sh
+npm --prefix web-controller ci
+npm run dev
 ```
 
----
+Fleet: <http://localhost:3000/fleet>。Bluetooth直接操作: <http://localhost:3000>。
+HubはESP32から到達できるPCで起動します。この開発PCと同じとは限りません。
+本番相当の起動は `npm run build` の後に `npm start` です。
 
-## 2. 配線・接続手順
+## 配置
 
-### 2.1 L298Nのジャンパーピン設定（重要）
-1. **ENA / ENB ジャンパーピン**: **必ず取り外してください**。
-   - 初期状態では `ENA` と `ENB` に黒い小さな短絡ソケットが挿さっています。これを抜き、露出したピンヘッダにESP32からのジャンパー線を挿します。
-2. **5Vレギュレータ有効化ジャンパー（5V-EN）**: **挿したまま（有効）にしてください**。
-   - 電源端子台の後ろにあるジャンパーです。これを挿しておくことで、9V電池からL298N内蔵レギュレータによって安定した **5.0V** が生成され、`5V` 端子からESP32へ電源を供給できます。
+| パス | 用途 |
+| --- | --- |
+| [web-controller](web-controller) | Next.js画面、WebSocket Hub、ルート、シミュレータ |
+| [firmware/esp32_rc_car](firmware/esp32_rc_car) | ideaspark ESP32: L298N走行＋ST7789 LCD。WebSocket／BLE／Classic BT |
+| [firmware/camera_xiao_s3](firmware/camera_xiao_s3) | XIAO ESP32S3 Sense: Wi-Fiカメラ専用 |
+| [firmware/diagnostics](firmware/diagnostics) | 実機診断スケッチ。本番FWではありません |
+| [scripts](scripts) | シリアル診断などの保守スクリプト |
+| [docs/firmware.md](docs/firmware.md) | 配線、依存ライブラリ、ビルド、書き込み前の確認 |
+| [docs/fleet.md](docs/fleet.md) | ロボット構成、通信、保存、シミュレーション、運用 |
+| [docs/migration.md](docs/migration.md) | 移行内容、互換性、段階的な適用・切り戻し |
+| [archive/workshop/ARCHIVE.md](archive/workshop/ARCHIVE.md) | 旧OLED／Bluetooth教材・Slidev・図・Archify |
 
----
+## 検証
 
-### 2.2 ピン接続詳細一覧表
-
-#### ① 電源・グランド接続
-| 接続元 | 接続先 | 役割 | 備考 |
-| :--- | :--- | :--- | :--- |
-| 9V電池BOX **赤線 (+)** | L298N **12V 端子台** | モーター駆動主電源 | スイッチONで通電 |
-| 9V電池BOX **黒線 (-)** | L298N **GND 端子台** | 電源マイナス | ESP32のGND線と一緒にネジ留め |
-| ESP32 **GND** | L298N **GND 端子台** | 共通GND | 基準電位の統一（必須） |
-| L298N **5V 端子台** | ESP32 **5V (または VIN)** | ESP32動作電源 | L298N内蔵レギュレータから5V受電 |
-
-#### ② 制御信号線接続
-| ESP32 GPIO | L298N 端子 | 信号種別 | 制御内容 |
-| :---: | :---: | :---: | :--- |
-| **GPIO 14** | **ENA** | PWM (30kHz, 8bit) | 右モーター速度制御 (0〜255) |
-| **GPIO 27** | **IN1** | デジタル出力 | 右モーター正転/逆転 |
-| **GPIO 26** | **IN2** | デジタル出力 | 右モーター正転/逆転 |
-| **GPIO 32** | **IN3** | デジタル出力 | 左モーター正転/逆転 |
-| **GPIO 33** | **IN4** | デジタル出力 | 左モーター正転/逆転 |
-| **GPIO 25** | **ENB** | PWM (30kHz, 8bit) | 左モーター速度制御 (0〜255) |
-
-#### ③ モーター接続
-| L298N 出力端子台 | 接続先 | 備考 |
-| :---: | :---: | :--- |
-| **OUT1 / OUT2** | 右側 TTモーター | 前進時に前方に回転しない場合は線を左右入れ替え |
-| **OUT3 / OUT4** | 左側 TTモーター | 前進時に前方に回転しない場合は線を左右入れ替え |
-
-> [!NOTE]
-> 0.96インチOLEDディスプレイは基板上で既に配線（I2C: SDA=GPIO21, SCL=GPIO22）されているため、外部配線は一切不要です。
-
----
-
-## 3. Arduino IDE 開発環境の準備
-
-### 3.1 ボードパッケージの確認
-1. Arduino IDE を起動し、**「ツール」 > 「ボード」 > 「ESP32 Arduino」** から **「ESP32 Dev Module」** を選択します。
-2. 書き込み設定:
-   - **Upload Speed**: 921600 (または 115200)
-   - **Flash Frequency**: 80MHz
-   - **Partition Scheme**: Huge APP (3MB No OTA/1MB SPIFFS) ※BluetoothとOLEDの両方を含むため、プログラム容量に余裕を持たせる設定を推奨
-
-### 3.2 必要ライブラリのインストール
-Arduino IDE の **「ツール」 > 「ライブラリを管理...」**（または左メニューのライブラリアイコン）を開き、以下を検索してインストールします。
-1. **`Adafruit SSD1306`** (by Adafruit)
-2. **`Adafruit GFX Library`** (by Adafruit)
-   - ※インストール時に依存ライブラリ（`Adafruit BusIO` 等）のインストールを求められたら「Install all」を選択してください。
-3. `BluetoothSerial` および `Wire` は ESP32 ボードパッケージに標準内蔵されています。
-
-### 3.3 プログラム書き込み
-1. PCとESP32をUSBケーブルで接続します。
-2. `esp32_rc_car.ino` を開き、左上の **「書き込み（右矢印ボタン）」** をクリックします。
-3. 書き込みが完了すると、OLEDに `ESP32 RC CAR Initializing...` と表示された後、`[BT: WAITING...]` 画面に遷移します。
-
----
-
-## 4. 動作確認・テスト手順（Android端末）
-
-専用アプリ（MIT App Inventor）を作成する前に、まずはGoogle Playの無料シリアル端末アプリを使って簡単に動作確認ができます。
-
-### 4.1 アプリのインストールとペアリング
-1. Android端末の Google Play から **「Serial Bluetooth Terminal」**（開発元: Kai Morich）をインストールします。
-2. Android端末の「設定」 > 「Bluetooth」を開き、新しいデバイスを探して **`ESP32_RC_Car`** とペアリングします（PINコードは通常不要です）。
-
-### 4.2 アプリからの接続と操作テスト
-1. 「Serial Bluetooth Terminal」アプリを起動します。
-2. 左上メニュー（≡）から **「Devices」** を選択し、**「ESP32_RC_Car」** をタップします。
-3. アプリ画面上部の「接続アイコン」をタップすると接続が確立します。
-   - このとき、車体の **OLED画面が `[BT: CONNECTED]` に変化** します！
-4. 画面下のテキスト入力欄に以下のコマンドを入力して送信ボタンを押します：
-   - `a,180,180;` ➡ **前進**（両輪が前進回転、OLEDに `MODE: FORWARD` とバー表示）
-   - `b,180,180;` ➡ **後退**（両輪が後退回転）
-   - `c,180,180;` ➡ **右旋回**
-   - `d,180,180;` ➡ **左旋回**
-   - `e,0,0;` ➡ **停止**（OLEDに `MODE: STOP` 表示）
-
-> [!TIP]
-> **ボタンマクロの登録**:
-> 「Serial Bluetooth Terminal」アプリの下部にあるボタン（M1〜M6）を長押しすると、名前と送信コマンドを登録できます。
-> - M1: `前進` (`a,200,200;`)
-> - M2: `後退` (`b,200,200;`)
-> - M3: `右旋回` (`c,200,200;`)
-> - M4: `左旋回` (`d,200,200;`)
-> - M5: `停止` (`e,0,0;`)
-> これを登録するだけで、画面上のボタンタップで簡単にラジコン走行テストが可能です。
-
----
-
-## 5. 電源に関するトラブルシューティング
-
-- **現象**: コマンドを送った瞬間にESP32が再起動する（OLED画面が初期化画面に戻る）。
-  - **原因**: 006P 9V乾電池は内部抵抗が高いため、モーター始動時の突入電流で瞬間的に電圧が低下し、ESP32の「Brownout Detector（低電圧リセット保護）」が発動しています。
-  - **対策**:
-    1. プログラム内のPWM速度を低め（例: `150` など）から徐々に上げる。
-    2. ESP32のUSB端子に一時的にモバイルバッテリーやPCのUSB給電を接続し、ESP32電源とモーター電源を分離する（この場合、L298Nの5V端子とESP32の5V端子の接続線は外してください。GNDは共通のままにします）。
-    3. より大容量の電池（単三電池6本ボックス等）に変更する。
-
----
-
-## 6. フリート管理システム (複数台ラジコンのWebSocket群制御)
-
-`v2` より、複数台のESP32ラジコンをブラウザから一括制御する **フリート管理システム** を追加しました。従来のBluetooth接続は「レガシー/デバッグ用フォールバック」として引き続き利用できます。
-
-### 6.1 概要
-- 通信方式: 各ESP32は `TRANSPORT_MODE = MODE_WEBSOCKET`（デフォルト）でWi-Fi経由により`web-controller`のフリートハブサーバーへ常時接続します。
-- デバイスID: 各機体のWi-Fi MACアドレス下位3バイトから `rc-xxxxxx` 形式の一意なIDを自動生成し、表示名はブラウザから変更・保存（NVS）できます。
-- サーバー: `web-controller/server.ts`（Next.jsをラップするNode.jsカスタムサーバー）が `/ws/device`（ESP32用）と `/ws/client`（操作UI用）の2つのWebSocketエンドポイントを提供します。
-- フリートダッシュボード: `http://<サーバー>/fleet` で、接続中の車両一覧・個別/一括の手動操作・manual⇔auto切り替え・オープンループ(時間ベース)ルート実行(`web-controller/fleet/routes/*.json`)ができます。
-- Bluetooth接続(既存の `/` ページ)は `TRANSPORT_MODE = MODE_BLE` または `MODE_CLASSIC_BT` でファームウェアをビルドした場合のレガシー/デバッグ用フォールバックとして維持されています。
-
-### 6.2 ファームウェア側の設定
-1. `esp32_rc_car/wifi_secrets.example.h` を `esp32_rc_car/wifi_secrets.h` としてコピーし、`WIFI_SSID` / `WIFI_PASSWORD` / `FLEET_HUB_HOST` / `FLEET_HUB_PORT` を環境に合わせて設定します（このファイルは `.gitignore` 済みです）。
-2. Arduino IDEのライブラリマネージャーで **arduinoWebSockets**（Links2004）と **ArduinoJson**（bblanchon）を追加インストールします。
-3. `esp32_rc_car/esp32_rc_car.ino` 冒頭の `TRANSPORT_MODE` を `MODE_WEBSOCKET` のままにして書き込みます。
-
-### 6.3 サーバー側の起動
-```powershell
-cd web-controller
-npm install
-npm run dev            # カスタムサーバー(server.ts)を起動し、http://localhost:3000 で待受
+```sh
+npm test
+npm run test:appearance
+npm run typecheck
+npm run build
+npm run sim:device -- --fleet
 ```
-実機を用意しなくても、疑似ESP32クライアントで動作確認できます。
-```powershell
-npm run sim:device -- rc-car1 "Car1"
-```
-ブラウザで `http://localhost:3000/fleet` を開くと、接続中の車両一覧・一括/個別操作・ルート実行UIが表示されます。
 
+最後のコマンドは走行機2台（うち1台は旧hello形式）とカメラ1台を接続します。
+本番Hubに疑似デバイスを接続しないでください。詳細は [Fleet運用](docs/fleet.md) を参照してください。
+
+## 安全・機密情報
+
+- カメラ断は警告のみです。走行機自身の通信断フェイルセーフは独立して維持します。
+- 動作試験前は車輪を浮かせてください。ビルドやnpmテストは実機へアップロードしません。
+- 各スケッチの `wifi_secrets.h`、Hubの `web-controller/data/` はGit対象外です。
+- Hubには認証がありません。信頼できる閉域LAN専用で、インターネットへ公開しないでください。
+- 過去のGit履歴に含まれた認証情報は削除コミットだけでは消えません。該当するWi-Fi認証情報は更新してください。

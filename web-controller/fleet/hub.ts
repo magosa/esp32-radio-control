@@ -1,7 +1,9 @@
 import type { IncomingMessage } from "http";
+import path from "node:path";
 import type { WebSocket, WebSocketServer } from "ws";
 import { VehicleRegistry } from "./registry";
 import { RouteEngine } from "./routeEngine";
+import { isDeviceDescription, RobotStore } from "./robotStore";
 import type {
   ClientInboundMessage,
   ClientOutboundMessage,
@@ -9,26 +11,49 @@ import type {
   DisplayLayoutMode,
   DriveCommand,
   ExpressionId,
+  FleetStateMessage,
 } from "./protocol";
 
 const SWEEP_INTERVAL_MS = 1000;
 
 // ESP32群(デバイス)と操作UI(クライアント)の両方のWebSocket接続を仲介するフリートハブ。
 export class FleetHub {
-  private registry = new VehicleRegistry();
+  private registry: VehicleRegistry;
+  private store: RobotStore;
   private routeEngine: RouteEngine;
   private clients = new Set<WebSocket>();
   private streamingDeviceIds = new Set<string>();
+  private sweepTimer: NodeJS.Timeout;
 
-  constructor() {
+  constructor(store = new RobotStore(path.join(process.env.FLEET_DATA_DIR || path.join(process.cwd(), "data"), "fleet.json"))) {
+    this.store = store;
+    this.registry = new VehicleRegistry(store.getDevices());
     this.routeEngine = new RouteEngine({
       sendDrive: (deviceId, cmd, speedL, speedR) => this.sendDriveToDevice(deviceId, cmd, speedL, speedR),
       onStatus: (status) => this.broadcastToClients({ type: "routeStatus", ...status }),
     });
 
-    setInterval(() => {
-      if (this.registry.sweepOffline()) this.broadcastFleetState();
+    this.sweepTimer = setInterval(() => {
+      const timedOutSockets = this.registry.sweepOffline();
+      if (timedOutSockets.length > 0) {
+        if (this.registry.getAllStates().some((state) => state.status === "offline" && state.mode === "auto")) {
+          this.routeEngine.stop();
+        }
+        this.broadcastFleetState();
+        timedOutSockets.forEach((ws) => ws.terminate());
+      }
+      this.streamingDeviceIds.forEach((deviceId) => {
+        const device = this.registry.getDeviceState(deviceId);
+        if (device?.status !== "online") this.stopStream(deviceId);
+        else this.sendToDevice(deviceId, { type: "ping" }, "camera");
+      });
     }, SWEEP_INTERVAL_MS);
+  }
+
+  dispose(): void {
+    clearInterval(this.sweepTimer);
+    this.routeEngine.stop();
+    Array.from(this.streamingDeviceIds).forEach((deviceId) => this.stopStream(deviceId));
   }
 
   attach(wss: WebSocketServer): void {
@@ -56,10 +81,23 @@ export class FleetHub {
       if (!msg) return;
 
       if (msg.type === "hello") {
-        deviceId = msg.deviceId;
-        this.registry.registerHello(msg.deviceId, msg.name, ws);
+        const description = { deviceId: msg.deviceId, name: msg.name, fw: msg.fw,
+          capabilities: msg.capabilities ?? ["drive", "display"] };
+        if (deviceId || !isDeviceDescription(description)) return ws.close(1008, "Invalid hello");
+        try {
+          this.store.register(description);
+        } catch {
+          return ws.close(1011, "Device registration failed");
+        }
+        deviceId = description.deviceId;
+        this.registry.registerHello(deviceId, description.name, ws, description.capabilities, description.fw);
         this.broadcastFleetState();
-      } else if (msg.type === "telemetry") {
+      } else if (!deviceId || msg.deviceId !== deviceId || this.registry.getWs(deviceId) !== ws) {
+        ws.close(1008, "Device identity mismatch");
+      } else if (msg.type === "heartbeat") {
+        this.registry.touch(deviceId);
+        this.broadcastFleetState();
+      } else if (msg.type === "telemetry" && this.registry.hasCapability(deviceId, "drive")) {
         this.registry.updateTelemetry(msg.deviceId, {
           cmd: msg.cmd,
           speedL: msg.speedL,
@@ -68,7 +106,10 @@ export class FleetHub {
           uptimeMs: msg.uptimeMs,
         });
         this.broadcastFleetState();
-      } else if (msg.type === "imageFrame") {
+      } else if (msg.type === "imageFrame" && this.registry.hasCapability(deviceId, "camera")
+        && msg.format === "jpeg" && typeof msg.dataB64 === "string" && msg.dataB64.length <= 512000
+        && Number.isInteger(msg.width) && msg.width > 0 && msg.width <= 4096
+        && Number.isInteger(msg.height) && msg.height > 0 && msg.height <= 4096) {
         const capturedAt = Date.now();
         this.registry.updateLastImage(msg.deviceId, capturedAt);
         this.broadcastFleetState();
@@ -77,38 +118,69 @@ export class FleetHub {
     });
 
     ws.on("close", () => {
+      if (deviceId && this.registry.getWs(deviceId) !== ws) return;
       this.registry.markDisconnected(ws);
-      if (deviceId) this.streamingDeviceIds.delete(deviceId);
+      if (deviceId) {
+        this.streamingDeviceIds.delete(deviceId);
+        if (this.registry.hasCapability(deviceId, "drive") && this.routeEngine.isRunning()) this.routeEngine.stop();
+      }
       this.broadcastFleetState();
     });
   }
 
   private handleClientConnection(ws: WebSocket): void {
     this.clients.add(ws);
-    this.sendToClient(ws, { type: "fleetState", vehicles: this.registry.getAllStates() });
+    this.sendToClient(ws, this.getFleetState());
 
     ws.on("message", (raw) => {
       const msg = this.parseJson<ClientInboundMessage>(raw.toString());
       if (!msg) return;
-      this.handleClientMessage(msg);
+      try {
+        this.handleClientMessage(msg, ws);
+      } catch (error) {
+        this.sendToClient(ws, { type: "operationResult", requestId: "requestId" in msg && typeof msg.requestId === "string" ? msg.requestId : "",
+          ok: false, error: error instanceof Error ? error.message : "Request failed" });
+      }
     });
 
     ws.on("close", () => {
       this.clients.delete(ws);
+      if (this.clients.size === 0) Array.from(this.streamingDeviceIds).forEach((deviceId) => this.stopStream(deviceId));
     });
   }
 
-  private handleClientMessage(msg: ClientInboundMessage): void {
+  private handleClientMessage(msg: ClientInboundMessage, client: WebSocket): void {
     switch (msg.type) {
+      case "assignCamera": {
+        if (typeof msg.requestId !== "string" || typeof msg.robotId !== "string"
+          || !(msg.cameraDeviceId === null || typeof msg.cameraDeviceId === "string")) throw new Error("Invalid assignment");
+        const previous = this.store.getRobots().find((robot) => robot.robotId === msg.robotId)?.cameraDeviceId;
+        this.store.assignCamera(msg.robotId, msg.cameraDeviceId);
+        if (previous) this.stopStream(previous);
+        if (msg.cameraDeviceId) this.stopStream(msg.cameraDeviceId);
+        this.broadcastFleetState();
+        this.sendToClient(client, { type: "operationResult", requestId: msg.requestId, ok: true });
+        break;
+      }
       case "clientCommand": {
+        if (!["a", "b", "c", "d", "e"].includes(msg.cmd)
+          || !Number.isInteger(msg.speedL) || msg.speedL < 0 || msg.speedL > 255
+          || !Number.isInteger(msg.speedR) || msg.speedR < 0 || msg.speedR > 255) throw new Error("Invalid drive command");
         const requested =
           msg.targetDeviceIds === "all" ? this.registry.getOnlineDeviceIds() : msg.targetDeviceIds;
+        if (!Array.isArray(requested) || !requested.every((id) => typeof id === "string")) throw new Error("Invalid targets");
+        if (msg.cmd === "e" && (msg.targetDeviceIds === "all" || requested.some((id) => this.registry.getMode(id) === "auto"))) {
+          this.routeEngine.stop();
+        }
         // autoモード中の車両はルートエンジンが制御しているため、手動コマンドは無視する
-        const targets = requested.filter((id) => this.registry.getMode(id) !== "auto");
+        const targets = requested.filter((id) => msg.cmd === "e" || this.registry.getMode(id) !== "auto");
         targets.forEach((deviceId) => this.sendDriveToDevice(deviceId, msg.cmd, msg.speedL, msg.speedR));
         break;
       }
       case "setMode": {
+        if (msg.mode !== "manual" && msg.mode !== "auto") throw new Error("Invalid mode");
+        if (!this.registry.hasCapability(msg.deviceId, "drive")) return;
+        if (msg.mode === "manual" && this.routeEngine.isRunning()) this.routeEngine.stop();
         this.registry.setMode(msg.deviceId, msg.mode);
         if (msg.mode === "manual") {
           // ルート実行中に手動へ切り替えた場合、対象車両をまず安全に停止させる
@@ -118,6 +190,7 @@ export class FleetHub {
         break;
       }
       case "setVehicleName": {
+        if (typeof msg.name !== "string" || !msg.name.trim() || msg.name.length > 31) throw new Error("Invalid name");
         const ws = this.registry.getWs(msg.deviceId);
         if (ws && ws.readyState === ws.OPEN) {
           ws.send(JSON.stringify({ type: "setName", name: msg.name }));
@@ -125,6 +198,7 @@ export class FleetHub {
         break;
       }
       case "routeStart": {
+        if (typeof msg.routeId !== "string" || !/^[a-zA-Z0-9_-]+$/.test(msg.routeId)) throw new Error("Invalid route ID");
         const autoDeviceIds = this.registry
           .getAllStates()
           .filter((v) => v.status === "online" && v.mode === "auto")
@@ -138,7 +212,7 @@ export class FleetHub {
       }
       case "clientCaptureRequest": {
         const targets =
-          msg.targetDeviceIds === "all" ? this.registry.getOnlineDeviceIds() : msg.targetDeviceIds;
+          msg.targetDeviceIds === "all" ? this.registry.getAllDeviceStates().filter((device) => device.capabilities.includes("camera")).map((device) => device.deviceId) : msg.targetDeviceIds;
         targets.forEach((deviceId) => this.sendCaptureRequestToDevice(deviceId));
         break;
       }
@@ -148,6 +222,7 @@ export class FleetHub {
         } else {
           this.stopStream(msg.deviceId);
         }
+        this.broadcastFleetState();
         break;
       }
       case "clientExpressionRequest": {
@@ -168,7 +243,8 @@ export class FleetHub {
   private startStream(deviceId: string): void {
     if (this.streamingDeviceIds.has(deviceId)) return; // すでに配信中
     const ws = this.registry.getWs(deviceId);
-    if (!ws || ws.readyState !== ws.OPEN) return;
+    if (!this.registry.hasCapability(deviceId, "camera") || this.registry.getDeviceState(deviceId)?.status !== "online"
+      || !ws || ws.readyState !== ws.OPEN) return;
     ws.send(JSON.stringify({ type: "streamStart" }));
     this.streamingDeviceIds.add(deviceId);
   }
@@ -182,37 +258,46 @@ export class FleetHub {
   }
 
   private sendCaptureRequestToDevice(deviceId: string): void {
-    const ws = this.registry.getWs(deviceId);
-    if (!ws || ws.readyState !== ws.OPEN) return;
-    ws.send(JSON.stringify({ type: "captureImage" }));
+    this.sendToDevice(deviceId, { type: "captureImage" }, "camera");
   }
 
   private sendExpressionToDevice(deviceId: string, expression: ExpressionId, durationMs?: number): void {
-    const ws = this.registry.getWs(deviceId);
-    if (!ws || ws.readyState !== ws.OPEN) return;
-    ws.send(JSON.stringify({ type: "setExpression", expression, durationMs }));
+    this.sendToDevice(deviceId, { type: "setExpression", expression, durationMs }, "display");
   }
 
   private sendDisplayLayoutToDevice(deviceId: string, layout: DisplayLayoutMode): void {
-    const ws = this.registry.getWs(deviceId);
-    if (!ws || ws.readyState !== ws.OPEN) return;
-    ws.send(JSON.stringify({ type: "setDisplayLayout", layout }));
+    this.sendToDevice(deviceId, { type: "setDisplayLayout", layout }, "display");
   }
 
   private sendDriveToDevice(deviceId: string, cmd: DriveCommand, speedL: number, speedR: number): void {
+    this.sendToDevice(deviceId, { type: "drive", cmd, speedL, speedR }, "drive");
+  }
+
+  private sendToDevice(deviceId: string, message: object, capability: import("./protocol").DeviceCapability): void {
     const ws = this.registry.getWs(deviceId);
-    if (!ws || ws.readyState !== ws.OPEN) return;
-    ws.send(JSON.stringify({ type: "drive", cmd, speedL, speedR }));
+    if (!this.registry.hasCapability(deviceId, capability) || !ws || ws.readyState !== ws.OPEN
+      || this.registry.getDeviceState(deviceId)?.status !== "online") return;
+    ws.send(JSON.stringify(message));
+  }
+
+  private getFleetState(): FleetStateMessage {
+    return { type: "fleetState", vehicles: this.registry.getAllStates(),
+      devices: this.registry.getAllDeviceStates().map((device) => ({ ...device, streaming: device.status === "online" && this.streamingDeviceIds.has(device.deviceId) })),
+      robots: this.store.getRobots().map((robot) => {
+        const drive = this.registry.getDeviceState(robot.driveDeviceId);
+        return { ...robot, name: drive?.name || robot.driveDeviceId, status: drive?.status ?? "offline",
+          cameraStatus: robot.cameraDeviceId ? this.registry.getDeviceState(robot.cameraDeviceId)?.status ?? "offline" : "unassigned" };
+      }) };
   }
 
   private broadcastFleetState(): void {
-    this.broadcastToClients({ type: "fleetState", vehicles: this.registry.getAllStates() });
+    this.broadcastToClients(this.getFleetState());
   }
 
   private broadcastToClients(msg: ClientOutboundMessage): void {
     const payload = JSON.stringify(msg);
     this.clients.forEach((ws) => {
-      if (ws.readyState === ws.OPEN) ws.send(payload);
+      if (ws.readyState === ws.OPEN && (!("type" in msg && msg.type === "imageFrame") || ws.bufferedAmount < 512000)) ws.send(payload);
     });
   }
 
@@ -222,7 +307,8 @@ export class FleetHub {
 
   private parseJson<T>(text: string): T | null {
     try {
-      return JSON.parse(text) as T;
+      const value = JSON.parse(text);
+      return value && typeof value === "object" && !Array.isArray(value) ? value as T : null;
     } catch {
       return null;
     }

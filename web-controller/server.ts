@@ -13,7 +13,7 @@ app.prepare().then(() => {
     handle(req, res);
   });
 
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 600000 });
   const hub = new FleetHub();
   hub.attach(wss);
 

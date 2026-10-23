@@ -5,6 +5,21 @@ export type DriveCommand = "a" | "b" | "c" | "d" | "e";
 export type VehicleMode = "manual" | "auto";
 export type VehicleStatus = "online" | "offline";
 
+export type DeviceCapability = "drive" | "display" | "camera";
+
+export interface DeviceDescription {
+  deviceId: string;
+  name: string;
+  fw: string;
+  capabilities: DeviceCapability[];
+}
+
+export interface RobotDefinition {
+  robotId: string;
+  driveDeviceId: string;
+  cameraDeviceId: string | null;
+}
+
 // ロボット顔の表情ID (esp32_rc_car.ino の enum ExpressionId と同期させること)
 export type ExpressionId =
   | "neutral"
@@ -31,6 +46,7 @@ export interface HelloMessage {
   deviceId: string;
   name: string;
   fw: string;
+  capabilities?: DeviceCapability[];
 }
 
 export interface TelemetryMessage {
@@ -53,7 +69,12 @@ export interface ImageFrameMessage {
   dataB64: string;
 }
 
-export type DeviceInboundMessage = HelloMessage | TelemetryMessage | ImageFrameMessage;
+export interface HeartbeatMessage {
+  type: "heartbeat";
+  deviceId: string;
+}
+
+export type DeviceInboundMessage = HelloMessage | TelemetryMessage | ImageFrameMessage | HeartbeatMessage;
 
 // ---- Server -> Device (ESP32) ----
 
@@ -123,7 +144,19 @@ export interface VehiclePosition {
   heading: number;
 }
 
-export interface VehicleState {
+export interface PhysicalDeviceState extends DeviceDescription {
+  status: VehicleStatus;
+  lastSeen: number;
+  streaming?: boolean;
+}
+
+export interface RobotState extends RobotDefinition {
+  name: string;
+  status: VehicleStatus;
+  cameraStatus: VehicleStatus | "unassigned";
+}
+
+export interface VehicleState extends PhysicalDeviceState {
   deviceId: string;
   name: string;
   status: VehicleStatus;
@@ -204,13 +237,16 @@ export type ClientInboundMessage =
   | ClientCaptureRequestMessage
   | ClientStreamRequestMessage
   | ClientExpressionRequestMessage
-  | ClientDisplayLayoutRequestMessage;
+  | ClientDisplayLayoutRequestMessage
+  | { type: "assignCamera"; requestId: string; robotId: string; cameraDeviceId: string | null };
 
 // ---- Server -> 操作UI ----
 
 export interface FleetStateMessage {
   type: "fleetState";
   vehicles: VehicleState[];
+  devices: PhysicalDeviceState[];
+  robots: RobotState[];
 }
 
 export interface RouteStatusMessage {
@@ -226,4 +262,11 @@ export interface ImageFrameBroadcastMessage extends ImageFrameMessage {
   capturedAt: number;
 }
 
-export type ClientOutboundMessage = FleetStateMessage | RouteStatusMessage | ImageFrameBroadcastMessage;
+export interface OperationResultMessage {
+  type: "operationResult";
+  requestId: string;
+  ok: boolean;
+  error?: string;
+}
+
+export type ClientOutboundMessage = FleetStateMessage | RouteStatusMessage | ImageFrameBroadcastMessage | OperationResultMessage;

@@ -21,7 +21,9 @@
 #define MODE_WEBSOCKET  0
 #define MODE_BLE        1
 #define MODE_CLASSIC_BT 2
+#ifndef TRANSPORT_MODE
 #define TRANSPORT_MODE MODE_WEBSOCKET
+#endif
 
 #if TRANSPORT_MODE == MODE_BLE
   #include <BLEDevice.h>
@@ -169,6 +171,8 @@ const int PIN_ENB = 25;   // 左モーター PWM
   // webSocket.loop()のコールバック(onWebSocketEvent->sendHello)が同一タスク冁E��再�EしてロチE��めE
   // 取り直すため、忁E��再帰可能ミューチE��クスを使用する、E
   SemaphoreHandle_t wsMutex = NULL;
+  unsigned long lastWifiReconnectAttempt = 0;
+  const unsigned long WIFI_RECONNECT_INTERVAL_MS = 5000;
 #endif
 
 // ----------------------------------------------------------------------------
@@ -1019,12 +1023,15 @@ void updateFace(FaceLayoutMode layout) {
   }
 
   void sendHello() {
-    StaticJsonDocument<128> doc;
+    StaticJsonDocument<256> doc;
     doc["type"] = "hello";
     doc["deviceId"] = deviceId;
     doc["name"] = effectiveDisplayName();
-    doc["fw"] = "4.0.0";
-    char buf[128];
+    doc["fw"] = "4.1.0";
+    JsonArray capabilities = doc.createNestedArray("capabilities");
+    capabilities.add("drive");
+    capabilities.add("display");
+    char buf[256];
     size_t n = serializeJson(doc, buf, sizeof(buf));
     if (xSemaphoreTakeRecursive(wsMutex, portMAX_DELAY)) {
       webSocket.sendTXT(buf, n);
@@ -1227,6 +1234,7 @@ void setup() {
   strncpy(deviceDisplayName, savedName.c_str(), sizeof(deviceDisplayName) - 1);
 
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.printf("[INFO] Connecting to Wi-Fi: %s\n", WIFI_SSID);
   unsigned long wifiStart = millis();
@@ -1313,6 +1321,14 @@ void loop() {
 #endif
 
   unsigned long now = millis();
+
+#if TRANSPORT_MODE == MODE_WEBSOCKET
+  if (WiFi.status() != WL_CONNECTED && now - lastWifiReconnectAttempt >= WIFI_RECONNECT_INTERVAL_MS) {
+    lastWifiReconnectAttempt = now;
+    Serial.println(F("[WARN] Wi-Fi disconnected; retrying"));
+    WiFi.reconnect();
+  }
+#endif
 
   // ① フェイルセーフ�E琁E 走行中に通信パケチE��ぁE.5秒途絶えたら�E動停止
   if (currentCommand != 'e' && (now - lastPacketTime > FAILSAFE_TIMEOUT_MS)) {

@@ -1,0 +1,19 @@
+{
+  "name": "esp32-radio-control",
+  "version": "1.0.0",
+  "description": "本ドキュメントは、0.96インチOLEDディスプレイ搭載ESP32開発ボード、L298Nモータードライバー、TTモーター（2輪駆動）、および9V電池ボックス（スイッチ付き）を使用してBluetoothラジコンカーを製作するための完全ガイドです。",
+  "main": "index.js",
+  "scripts": {
+    "dev": "slidev --open",
+    "build": "slidev build",
+    "export": "slidev export"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@slidev/cli": "^52.19.1",
+    "@slidev/theme-default": "^0.25.0"
+  }
+}
