@@ -1,8 +1,10 @@
 ﻿"use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { TriangleAlert } from "lucide-react";
 import { useFleetSocket } from "@/hooks/useFleetSocket";
+import { useLocalizerRuntime } from "@/hooks/useLocalizerRuntime";
 import { TRACKING_LABEL } from "../tracking";
 import styles from "../console.module.css";
 
@@ -20,8 +22,20 @@ export default function FieldPage() {
   const [trails, setTrails] = useState<Record<string, [number, number][]>>({});
   const last = useRef<Record<string, string>>({});
   const connected = status === "connected";
+  const runtime = useLocalizerRuntime();
+  const preview = useRef<HTMLDivElement>(null);
+  const previewing = runtime.status === "running";
   const field = poseState?.field;
   const localizer = poseState?.localizer;
+
+  // このPCで検出中のときだけ、検出ループが描いているcanvasをマップの下に表示する。
+  useEffect(() => {
+    const host = preview.current;
+    if (!previewing || !host) return;
+    const canvas = runtime.getCanvas();
+    host.append(canvas);
+    return () => { if (canvas.parentElement === host) canvas.remove(); };
+  }, [previewing, runtime]);
 
   useEffect(() => {
     if (!poseState) return;
@@ -52,6 +66,7 @@ export default function FieldPage() {
 
   return <div className={styles.fieldPage}>
     {warnings.map((text) => <div key={text} className={styles.notice} role="status"><TriangleAlert aria-hidden="true" /><span>{text}</span></div>)}
+    {connected && !previewing && <p className={styles.muted}>カメラ映像と検出結果は<Link href="/localizer">測位画面</Link>で開始すると、この画面にも表示されます（Hub実行PCのみ）。</p>}
     <section className={styles.fieldCard} aria-label="フロアマップ">
       {field ? <svg className={styles.fieldMap} viewBox={`${-20} ${-20} ${field.widthMm + 40} ${field.heightMm + 40}`} role="img"
         aria-label="走行領域とロボットの位置">
@@ -76,6 +91,9 @@ export default function FieldPage() {
         })}
       </svg> : <p className={styles.empty}>{connected ? "測位設定を取得しています…" : "ハブ未接続"}</p>}
     </section>
+    {previewing && <section className={styles.fieldCard} aria-label="カメラ映像">
+      <div ref={preview} className={styles.localizerPreview} />
+    </section>}
     <section className={styles.fieldCard} aria-label="ロボットの位置一覧">
       <table className={styles.poseTable}>
         <thead><tr><th>ロボット</th><th>マーカー</th><th>状態</th><th>X mm</th><th>Y mm</th><th>向き °</th></tr></thead>

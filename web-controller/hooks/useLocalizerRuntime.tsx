@@ -137,12 +137,17 @@ function useLocalizerRuntimeState() {
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "localizerHello", camera: state.camera, width: state.width, height: state.height } satisfies LocalizerInboundMessage));
     };
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (generation !== state.generation) return;
       state.ws = null;
+      // Hubはロカライザーを1つしか受け付けない。置換された場合は再接続して取り合わない。
+      if (event.code === 1000 && event.reason === "Localizer replaced") {
+        halt("別のウィンドウまたはタブの測位に置き換えられました。", true);
+        return;
+      }
       state.wsTimer = window.setTimeout(() => { if (generation === state.generation) connectPublisher(generation); }, 2000);
     };
-  }, []);
+  }, [halt]);
 
   const start = useCallback(async () => {
     const state = run.current;
