@@ -346,3 +346,8 @@
 @media (max-width: 700px) {
   .poseTable th, .poseTable td { padding: 6px 4px; }
 }
+
+.toastStack { position: fixed; left: 50%; bottom: 16px; z-index: 20; display: grid; gap: 8px; width: min(560px, calc(100vw - 32px)); transform: translateX(-50%); pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; border: 1px solid currentColor; border-radius: var(--card-radius); background: linear-gradient(var(--warning), var(--warning)), var(--surface-strong); color: var(--warning-ink); font-size: var(--text-body); box-shadow: var(--shadow); }
+.toast span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast .iconButton { flex-shrink: 0; color: inherit; }

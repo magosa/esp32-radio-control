@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useRef, useState } from "react";
-import { TriangleAlert } from "lucide-react";
+import { TriangleAlert, X } from "lucide-react";
 import { useFleetSocket } from "@/hooks/useFleetSocket";
 import { TRACKING_LABEL } from "../tracking";
 import styles from "../console.module.css";
@@ -50,8 +50,18 @@ export default function FieldPage() {
   const outside = poseState?.poses.filter((pose) => pose.tracking === "tracking" && pose.insideField === false) ?? [];
   if (outside.length) warnings.push(`領域外: ${outside.map((pose) => nameOf(pose.robotId)).join("、")}`);
 
+  // 閉じた警告は条件が解消されるまで非表示にし、再発生時に再び出す。
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const warningKey = warnings.join("\n");
+  useEffect(() => {
+    setDismissed((previous) => {
+      const kept = previous.filter((text) => warningKey.split("\n").includes(text));
+      return kept.length === previous.length ? previous : kept;
+    });
+  }, [warningKey]);
+  const visibleWarnings = warnings.filter((text) => !dismissed.includes(text));
+
   return <div className={styles.fieldPage}>
-    {warnings.map((text) => <div key={text} className={styles.notice} role="status"><TriangleAlert aria-hidden="true" /><span>{text}</span></div>)}
     <section className={styles.fieldCard} aria-label="フロアマップ">
       {field ? <svg className={styles.fieldMap} viewBox={`${-20} ${-20} ${field.widthMm + 40} ${field.heightMm + 40}`} role="img"
         aria-label="走行領域とロボットの位置">
@@ -90,5 +100,12 @@ export default function FieldPage() {
       </table>
       {!poseState?.poses.length && <p className={styles.empty}>登録済みのロボットはありません</p>}
     </section>
+    <div className={styles.toastStack} aria-live="polite">
+      {visibleWarnings.map((text) => <div key={text} className={styles.toast} role="status">
+        <TriangleAlert aria-hidden="true" /><span>{text}</span>
+        <button className={styles.iconButton} aria-label="警告を閉じる" title="閉じる"
+          onClick={() => setDismissed((previous) => [...previous, text])}><X aria-hidden="true" /></button>
+      </div>)}
+    </div>
   </div>;
 }
