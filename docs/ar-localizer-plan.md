@@ -109,11 +109,18 @@
 
 ### PR1: URL・シェル再編（測位と無関係、回帰を分離）
 
-1. `/`→`/control`。現`/fleet`→`/control`、`/fleet/settings`→`/settings`、`/bluetooth`→`/direct/bluetooth`。`/field`、`/robots`、`/routes`、`/localizer`は空の枠から作成。
+状態: 実装済み（ブランチ `feat/ar-localizer`）。実装時に次の点を計画から変更しました。
+
+- `/field`、`/routes`、`/localizer` の空ページは作らず、それぞれを実装するPRで追加します（ナビにも未実装へのリンクを出さない）。
+- `server.ts` への `/ws/localizer` 追加はPR2に移しました（ハンドラーがない状態で接続口だけを開けないため）。
+- `/bluetooth` は直前のコミットで既に旧 `/` から分離済みだったため、`/direct/bluetooth` へさらに移動しました。
+- シェルのナビは「制御・ロボット・表示設定・Bluetooth」です。スマホ幅(320px)では全台停止ボタンが2段目に折り返されます（ナビが4項目になったため）。
+
+1. `/`→`/control`。現`/fleet`→`/control`、`/fleet/settings`→`/settings`、`/bluetooth`→`/direct/bluetooth`。新規は`/robots`のみ。
 2. [next.config.mjs](../web-controller/next.config.mjs)の`redirects()`で旧URLを互換維持。APIは`/api/routes`へ移し、旧`/api/fleet/routes`はredirect。
 3. ルートグループの共通layoutにヘッダー・ナビ・全台停止・外観適用を集約。[useFleetSocket.ts](../web-controller/hooks/useFleetSocket.ts)はContext Provider化し、遷移してもWebSocketを1本に保ちます。全台停止は全画面から押せること。
 4. カメラ紐付けなどの構成編集は`/robots`へ移動。`/control`には走行・スナップショット・ライブ・ルート実行を残します。
-5. [server.ts](../web-controller/server.ts)のupgrade許可に`/ws/localizer`を追加（PR2で使用）。`/ws/device`は維持。
+5. `/ws/device`は維持。`/ws/localizer`の受け口追加はPR2で行う。
 6. READMEの「Bluetoothは`/`」の記述を現状に合わせて修正。
 7. 完了条件: 既存機能の回帰なし、旧URLのredirect動作、外観・レイアウトの再検証（7節）。
 

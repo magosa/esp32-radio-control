@@ -131,7 +131,8 @@
 .brand { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; min-width: 0; }
 .brand h1 { margin: 0; font-size: var(--text-page); line-height: 1.4; font-weight: 700; }
 .connection { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-meta); color: var(--muted); white-space: nowrap; }
-.headerActions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.headerActions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+.headerActions a[aria-current="page"] { background: var(--selected); border-color: var(--selected-line); }
 .secondary, .primary, .emergency { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 16px; border-radius: 6px; border: 1px solid var(--line); font-weight: 600; white-space: nowrap; text-decoration: none; }
 .fleet :is(.secondary, .primary, .emergency) { font-size: var(--text-body); font-weight: 600; }
 .secondary { background: var(--surface); color: var(--ink); box-shadow: var(--shadow), var(--inset-highlight); }
@@ -267,7 +268,7 @@
   .fleet *, .fleet *::before { transition: none; animation: none; }
 }
 .fleet[data-motion="off"] *, .fleet[data-motion="off"] *::before { transition: none; animation: none; }
-.preferences { max-width: 720px; margin: 24px auto 0; display: grid; gap: var(--card-gap); }
+.preferences { max-width: 720px; margin: 24px auto 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--card-gap); }
 .preferenceCard { position: relative; padding: var(--card-padding); background: var(--glass-texture), var(--glass-fill); border: 1px solid var(--glass-border); border-radius: var(--card-radius); box-shadow: var(--glass-shadow), var(--inset-highlight); -webkit-backdrop-filter: blur(6px) saturate(var(--glass-saturation)); backdrop-filter: blur(6px) saturate(var(--glass-saturation)); }
 .preferenceCard h2 { font-size: var(--text-heading); line-height: 1.4; font-weight: 700; margin-bottom: 16px; }
 .preferenceCard .segmented button { display: flex; align-items: center; justify-content: center; gap: 8px; }
@@ -279,6 +280,10 @@
 .paletteOption small { font-size: var(--text-meta); font-family: "Consolas", monospace; color: var(--muted); }
 .swatch { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid #ffffff66; border-radius: 50%; color: #111928; }
 .preferenceRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.preferenceCard.robotCard h2 { margin-bottom: 4px; overflow-wrap: anywhere; }
+.robotCard label { display: block; margin-top: 16px; color: var(--muted); font-size: var(--text-meta); }
+.robotCard select { width: 100%; margin: 6px 0 12px; }
+.muted a { color: inherit; text-decoration: underline; }
 .preferenceRow h2 { margin-bottom: 0; }
 .motionToggle { position: relative; display: block; width: 52px; height: 44px; }
 .motionToggle input { position: absolute; inset: 0; width: 100% !important; height: 100% !important; opacity: 0; cursor: pointer; z-index: 1; }

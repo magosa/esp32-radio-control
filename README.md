@@ -12,7 +12,7 @@ npm --prefix web-controller ci
 npm run dev
 ```
 
-Fleet: <http://localhost:3000/fleet>。Bluetooth直接操作: <http://localhost:3000>。
+Fleet: <http://localhost:3000/control>。Bluetooth直接操作: <http://localhost:3000/direct/bluetooth>。
 HubはESP32から到達できるPCで起動します。この開発PCと同じとは限りません。
 本番相当の起動は `npm run build` の後に `npm start` です。
 

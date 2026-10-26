@@ -4,7 +4,7 @@ import { test } from "node:test";
 import postcss from "postcss";
 import { FLEET_PALETTES } from "../hooks/useFleetAppearance.ts";
 
-const stylesheet = postcss.parse(readFileSync(new URL("../app/fleet/fleet.module.css", import.meta.url), "utf8"));
+const stylesheet = postcss.parse(readFileSync(new URL("../app/(console)/console.module.css", import.meta.url), "utf8"));
 const themes = {};
 stylesheet.walkRules((rule) => {
   if (rule.selector !== ".fleet" && rule.selector !== '.fleet[data-theme="dark"]') return;

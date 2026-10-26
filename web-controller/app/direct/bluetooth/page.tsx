@@ -20,7 +20,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useFleetAppearance } from "@/hooks/useFleetAppearance";
-import fleetStyles from "../fleet/fleet.module.css";
+import fleetStyles from "../../(console)/console.module.css";
 import styles from "./bluetooth.module.css";
 
 type Direction = "forward" | "backward" | "left" | "right" | "stop";
@@ -174,7 +174,7 @@ export default function ControllerPage() {
 
           <nav className={fleetStyles.headerActions} aria-label="コントローラーナビゲーション">
             <Link
-              href="/fleet"
+              href="/control"
               className={fleetStyles.secondary}
             >
               <Users aria-hidden="true" />

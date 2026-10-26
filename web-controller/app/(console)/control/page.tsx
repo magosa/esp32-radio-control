@@ -3,13 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Square, Bluetooth,
-  Wifi, WifiOff, Search, Check, Camera, Video, VideoOff, Play, RotateCcw, Settings2, TriangleAlert,
+  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Square,
+  Search, Check, Camera, Video, VideoOff, Play, RotateCcw, TriangleAlert,
 } from "lucide-react";
 import { useFleetSocket, type VehicleImage } from "@/hooks/useFleetSocket";
-import { useFleetAppearance } from "@/hooks/useFleetAppearance";
 import type { DriveCommand, ExpressionId, DisplayLayoutMode } from "@/fleet/protocol";
-import styles from "./fleet.module.css";
+import styles from "../console.module.css";
 
 const EXPRESSIONS: { label: string; id: ExpressionId }[] = [
   { label: "通常", id: "neutral" }, { label: "嬉しい", id: "happy" },
@@ -117,17 +116,15 @@ function VehicleSnapshot({ image }: { image?: VehicleImage }) {
   </figure>;
 }
 
-export default function FleetDashboardPage() {
-  const { status, vehicles, devices, robots, assignment, assignCamera, routeStatus, availableRoutes, images, sendCommand, setMode,
-    startRoute, stopRoute, requestSnapshot, requestStream, requestExpression, requestDisplayLayout } = useFleetSocket();
+export default function ControlPage() {
+  const { status, vehicles, devices, robots, routeStatus, availableRoutes, images, sendCommand, setMode,
+    startRoute, stopRoute, requestSnapshot, requestStream, requestExpression, requestDisplayLayout, emergencyEpoch } = useFleetSocket();
   const [selectionMode, setSelectionMode] = useState<"single" | "group">("single");
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [speed, setSpeed] = useState(190);
   const [selectedRouteId, setSelectedRouteId] = useState("");
-  const [driveSession, setDriveSession] = useState(0);
-  const { appearance, theme, style } = useFleetAppearance();
   const streamingIds = new Set(devices.filter((device) => device.streaming).map((device) => device.deviceId));
   const streamingRef = useRef(streamingIds);
   streamingRef.current = streamingIds;
@@ -142,8 +139,6 @@ export default function FleetDashboardPage() {
   const focusedRobot = robots.find((robot) => robot.driveDeviceId === focusedId);
   const camera = devices.find((device) => device.deviceId === focusedRobot?.cameraDeviceId);
   const cameraReady = connected && camera?.status === "online";
-  const cameras = devices.filter((device) => device.capabilities.includes("camera"));
-  const focusedAssignment = assignment?.robotId === focusedRobot?.robotId ? assignment : null;
   const targets = vehicles.filter((vehicle) => selectionMode === "single"
     ? vehicle.deviceId === focusedId : selectedIds.has(vehicle.deviceId));
   const targetKey = JSON.stringify(targets.map((vehicle) => vehicle.deviceId).sort());
@@ -151,8 +146,6 @@ export default function FleetDashboardPage() {
     vehicle.status === "online" && vehicle.mode === "manual");
   const filtered = vehicles.filter((vehicle) => `${vehicle.name} ${vehicle.deviceId}`
     .toLowerCase().includes(query.toLowerCase()));
-  const connectionLabel = { connected: "ハブ接続中", connecting: "ハブ接続中…",
-    disconnected: "ハブ未接続", error: "ハブ接続エラー" }[status];
 
   const changeSelectionMode = (mode: "single" | "group") => {
     setSelectionMode(mode);
@@ -166,11 +159,6 @@ export default function FleetDashboardPage() {
       return next;
     });
   };
-  const emergencyStop = () => {
-    setDriveSession((previous) => previous + 1);
-    stopRoute();
-    sendCommand("all", "e", 0, 0);
-  };
   const toggleStream = (deviceId: string) => {
     requestStream(deviceId, streamingIds.has(deviceId) ? "stop" : "start");
   };
@@ -179,22 +167,7 @@ export default function FleetDashboardPage() {
     : targets.some((vehicle) => vehicle.mode !== "manual") ? "操作対象を手動モードに切り替えてください" : null;
   const showSelectionWarning = blockReason === "操作対象未選択";
 
-  return <main className={styles.fleet} data-theme={theme} data-motion={appearance.motion ? "on" : "off"} style={style}>
-    <header className={styles.header}>
-      <div className={styles.brand}><h1>フリート管理</h1>
-        <span className={styles.connection} role="status">
-          {connected ? <Wifi aria-hidden="true" /> : <WifiOff aria-hidden="true" />}{connectionLabel}
-        </span>
-      </div>
-      <nav className={styles.headerActions} aria-label="フリートナビゲーション">
-        <Link href="/bluetooth" className={styles.secondary} aria-label="Bluetooth" title="Bluetooth"><Bluetooth aria-hidden="true" /><span>Bluetooth</span></Link>
-        <Link href="/fleet/settings" className={styles.secondary} aria-label="表示設定" title="表示設定"><Settings2 aria-hidden="true" /><span>表示設定</span></Link>
-        <button className={styles.emergency} onClick={emergencyStop} disabled={!connected}>
-          <Square aria-hidden="true" />全台停止
-        </button>
-      </nav>
-    </header>
-
+  return <>
     <div className={styles.workspace}>
       <aside className={styles.roster} data-mode={selectionMode} aria-label="ロボット選択">
         <div className={styles.sectionHeading}><h2>ロボット</h2><span>{connected ? online.length : 0} / {vehicles.length} 台接続</span></div>
@@ -245,7 +218,7 @@ export default function FleetDashboardPage() {
         <div className={styles.controlBody}>
           <div className={styles.driving}>
             <div className={styles.sectionHeading}><h3>走行</h3><span>{canDrive ? "操作可能" : "操作不可"}</span></div>
-            <DrivePad key={driveSession} targetKey={targetKey} enabled={canDrive} speed={speed} sendCommand={sendCommand} />
+            <DrivePad key={emergencyEpoch} targetKey={targetKey} enabled={canDrive} speed={speed} sendCommand={sendCommand} />
             <label className={styles.speed}><span>速度 <output>{Math.round(speed / 255 * 100)}<small>%</small></output></span>
               <input type="range" min="0" max="255" step="1" value={speed} aria-label="走行速度"
                 onChange={(event) => setSpeed(Number(event.target.value))} />
@@ -284,20 +257,7 @@ export default function FleetDashboardPage() {
             </details>}
             {selectionMode === "single" && focused && focusedRobot && <details className={styles.settings}>
               <summary>カメラ</summary>
-              <label>カメラの紐付け<select aria-label="カメラの紐付け" value={focusedRobot.cameraDeviceId ?? ""}
-                disabled={!connected || !!assignment?.pending}
-                onChange={(event) => assignCamera(focusedRobot.robotId, event.target.value || null)}>
-                <option value="">未割当</option>
-                {cameras.map((device) => {
-                  const owner = robots.find((robot) => robot.cameraDeviceId === device.deviceId);
-                  return <option key={device.deviceId} value={device.deviceId} disabled={!!owner && owner.robotId !== focusedRobot.robotId}>
-                    {device.name} ({device.deviceId}){owner && owner.robotId !== focusedRobot.robotId ? ` · ${owner.name}に割当済み` : device.status === "offline" ? " · 未接続" : ""}
-                  </option>;
-                })}
-              </select></label>
-              {focusedAssignment && <p className={styles.assignmentStatus} role={focusedAssignment.error ? "alert" : "status"}>
-                {focusedAssignment.pending ? "保存中…" : focusedAssignment.error || "保存しました"}
-              </p>}
+              {!focusedRobot.cameraDeviceId && <p className={styles.muted}>カメラは<Link href="/robots">ロボット構成</Link>で紐付けます。</p>}
               {focusedRobot.cameraDeviceId && !cameraReady && <p className={styles.cameraWarning} role="status"><TriangleAlert aria-hidden="true" />カメラ未接続</p>}
               <div className={styles.cameraActions}>
                 <button className={styles.secondary} disabled={!cameraReady} onClick={() => camera && requestSnapshot(camera.deviceId)}><Camera />撮影</button>
@@ -323,5 +283,5 @@ export default function FleetDashboardPage() {
         </section>
       </section>
     </div>
-  </main>;
+  </>;
 }

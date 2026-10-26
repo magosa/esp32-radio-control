@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   ClientInboundMessage,
   ClientOutboundMessage,
@@ -29,7 +29,7 @@ export interface VehicleImage {
   capturedAt: number;
 }
 
-export function useFleetSocket() {
+function useFleetSocketConnection() {
   const [status, setStatus] = useState<FleetConnectionStatus>("disconnected");
   const [vehicles, setVehicles] = useState<VehicleState[]>([]);
   const [devices, setDevices] = useState<PhysicalDeviceState[]>([]);
@@ -43,7 +43,7 @@ export function useFleetSocket() {
   const assignmentSequence = useRef(0);
 
   useEffect(() => {
-    fetch("/api/fleet/routes")
+    fetch("/api/routes")
       .then((res) => res.json())
       .then((data) => setAvailableRoutes(data.routes ?? []))
       .catch(() => setAvailableRoutes([]));
@@ -187,6 +187,14 @@ export function useFleetSocket() {
     [send]
   );
 
+  // 操作パッドが保持中の入力を破棄できるよう、全台停止ごとに世代を進める。
+  const [emergencyEpoch, setEmergencyEpoch] = useState(0);
+  const emergencyStop = useCallback(() => {
+    setEmergencyEpoch((previous) => previous + 1);
+    send({ type: "routeStop" });
+    send({ type: "clientCommand", targetDeviceIds: "all", cmd: "e", speedL: 0, speedR: 0 });
+  }, [send]);
+
   return {
     status,
     vehicles,
@@ -206,5 +214,22 @@ export function useFleetSocket() {
     requestStream,
     requestExpression,
     requestDisplayLayout,
+    emergencyEpoch,
+    emergencyStop,
   };
+}
+
+type FleetSocket = ReturnType<typeof useFleetSocketConnection>;
+const FleetSocketContext = createContext<FleetSocket | null>(null);
+
+// 画面遷移してもHubへのWebSocketを1本に保つため、シェルで1度だけ接続する。
+export function FleetSocketProvider({ children }: { children: ReactNode }) {
+  const socket = useFleetSocketConnection();
+  return <FleetSocketContext.Provider value={socket}>{children}</FleetSocketContext.Provider>;
+}
+
+export function useFleetSocket(): FleetSocket {
+  const socket = useContext(FleetSocketContext);
+  if (!socket) throw new Error("useFleetSocket must be used inside FleetSocketProvider");
+  return socket;
 }
