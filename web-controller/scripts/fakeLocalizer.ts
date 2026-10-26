@@ -49,8 +49,12 @@ function connect(): void {
       ws.send(JSON.stringify({ type: "poseFrame", frameId: ++frameId, capturedAt: Date.now(), referenceCount: referenceIds.length, referenceIds, extrinsicsOk: true, markers }));
     }, 100);
   });
-  ws.on("close", () => {
+  ws.on("close", (code) => {
     if (timer) clearInterval(timer);
+    if (code === 1013) {
+      console.error("[fake-localizer] another localizer is already connected to this Hub; exiting.");
+      process.exit(1);
+    }
     console.log("[fake-localizer] disconnected, retrying in 3s");
     setTimeout(connect, 3000);
   });

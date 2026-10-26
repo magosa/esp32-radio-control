@@ -205,3 +205,38 @@ test("Hub maps localizer frames to robots, throttles broadcasts and goes stale o
   });
 });
 
+
+test("Hub keeps the first active localizer and only replaces a silent one", (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  withTempDir((directory) => {
+    const hub = new FleetHub(new RobotStore(path.join(directory, "fleet.json")), new FieldConfigStore(path.join(directory, "field.json")));
+    try {
+      let connect: (socket: WebSocket, request: { url: string }) => void = () => {};
+      hub.attach({ on: (_event: string, handler: typeof connect) => { connect = handler; } } as never);
+      const client = fakeSocket(), first = fakeSocket(), intruder = fakeSocket(), later = fakeSocket();
+      connect(client.socket, { url: "/ws/client" });
+      connect(first.socket, { url: "/ws/localizer" });
+      first.receive({ type: "localizerHello", camera: "real", width: 1920, height: 1080 });
+
+      context.mock.timers.tick(1000);
+      connect(intruder.socket, { url: "/ws/localizer" });
+      assert.equal(intruder.state.closedWith, 1013, "an active localizer is not displaced");
+      intruder.receive({ type: "localizerHello", camera: "sim", width: 1, height: 1 });
+      const poseStates = () => client.messages.filter((m) => m.type === "poseState") as any[];
+      assert.equal(poseStates().at(-1).localizer.camera, "real");
+
+      first.receive({ type: "localizerStatus", state: "running" });
+      context.mock.timers.tick(2900);
+      connect(later.socket, { url: "/ws/localizer" });
+      assert.equal(later.state.closedWith, 1013, "recent traffic keeps the first connection alive");
+
+      context.mock.timers.tick(3100);
+      connect(later.socket, { url: "/ws/localizer" });
+      assert.equal(first.state.closedWith, 1000, "a silent connection is replaced");
+      later.receive({ type: "localizerHello", camera: "restarted", width: 1920, height: 1080 });
+      assert.equal(poseStates().at(-1).localizer.camera, "restarted");
+    } finally {
+      hub.dispose();
+    }
+  });
+});

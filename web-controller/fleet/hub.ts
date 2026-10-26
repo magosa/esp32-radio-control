@@ -20,6 +20,8 @@ import type {
 const SWEEP_INTERVAL_MS = 1000;
 // poseFrameは約10Hzで届くため、UIへのposeState配信はこの間隔に間引く。
 const POSE_BROADCAST_INTERVAL_MS = 100;
+// この時間何も届かない測位接続は無効とみなし、新しい接続を受け付ける。
+const LOCALIZER_IDLE_TIMEOUT_MS = 3000;
 
 function defaultDataDir(): string {
   return process.env.FLEET_DATA_DIR || path.join(process.cwd(), "data");
@@ -36,6 +38,7 @@ export class FleetHub {
   private fieldStore: FieldConfigStore;
   private poses = new PoseStore();
   private localizerWs: WebSocket | null = null;
+  private localizerLastMessageAt = 0;
   private poseBroadcastTimer: NodeJS.Timeout | null = null;
 
   constructor(store = new RobotStore(path.join(defaultDataDir(), "fleet.json")),
@@ -171,13 +174,23 @@ export class FleetHub {
   }
 
   private handleLocalizerConnection(ws: WebSocket): void {
-    // 俯瞰カメラは1つ。新しい接続が旧接続を置き換える。
-    if (this.localizerWs && this.localizerWs !== ws) this.localizerWs.close(1000, "Localizer replaced");
+    // 俯瞰カメラは1つ。先着を優先し、稼働中(直近に受信あり)の間は新規接続を拒否する。
+    // 疑似の測位や別タブが実カメラを奪うのを防ぎ、無言の半開き接続だけ置き換えられる。
+    const current = this.localizerWs;
+    if (current && current !== ws) {
+      if (current.readyState === current.OPEN && Date.now() - this.localizerLastMessageAt <= LOCALIZER_IDLE_TIMEOUT_MS) {
+        ws.close(1013, "Localizer already connected");
+        return;
+      }
+      current.close(1000, "Localizer replaced");
+    }
     this.localizerWs = ws;
+    this.localizerLastMessageAt = Date.now();
     let greeted = false;
 
     ws.on("message", (raw) => {
       if (this.localizerWs !== ws) return;
+      this.localizerLastMessageAt = Date.now();
       const msg = this.parseJson<Record<string, unknown>>(raw.toString());
       if (!msg) return;
       if (msg.type === "localizerHello") {

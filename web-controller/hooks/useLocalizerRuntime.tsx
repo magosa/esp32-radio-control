@@ -28,6 +28,8 @@ export interface CameraOption {
 
 const ROBOT_MARKER_SIZE_MM = 40;
 const FRAME_TIMEOUT_MS = 3000;
+// Hubが別の測位を優先して拒否(close 1013)した場合の再試行回数。半開き接続の失効待ちを見込む。
+const MAX_REJECTIONS = 5;
 const CSV_ROW_LIMIT = 100000;
 const CSV_HEADER = "schema,timestamp_ms,frame_id,robot_id,valid,x,y,yaw_deg,measured_size_mm,inside_field,extrinsics_ok";
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]", "::1"];
@@ -74,7 +76,7 @@ function useLocalizerRuntimeState() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const run = useRef({
     generation: 0, starting: false, stream: null as MediaStream | null, ws: null as WebSocket | null,
-    wsTimer: 0 as number, frameCallback: 0, pollTimer: 0 as number, watchdog: 0 as number, frameId: 0,
+    wsTimer: 0 as number, rejections: 0, frameCallback: 0, pollTimer: 0 as number, watchdog: 0 as number, frameId: 0,
     lastFrameAt: 0, lastVideoTime: -1, recording: false, rows: [] as string[], width: 0, height: 0,
     camera: "", wakeLock: null as WakeLockSentinel | null,
   });
@@ -135,15 +137,25 @@ function useLocalizerRuntimeState() {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${protocol}://${window.location.host}/ws/localizer`);
     state.ws = ws;
+    let openedAt = 0;
     ws.onopen = () => {
+      openedAt = Date.now();
       ws.send(JSON.stringify({ type: "localizerHello", camera: state.camera, width: state.width, height: state.height } satisfies LocalizerInboundMessage));
     };
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (generation !== state.generation) return;
       state.ws = null;
+      if (event.code === 1013) {
+        if (++state.rejections > MAX_REJECTIONS) {
+          halt("別の測位がすでにHubへ接続しているため、この測位は開始できません。先にそちらを停止してください。", true);
+          return;
+        }
+      } else if (openedAt && Date.now() - openedAt > 1500) {
+        state.rejections = 0;
+      }
       state.wsTimer = window.setTimeout(() => { if (generation === state.generation) connectPublisher(generation); }, 2000);
     };
-  }, []);
+  }, [halt]);
 
   const start = useCallback(async () => {
     const state = run.current;
@@ -180,6 +192,7 @@ function useLocalizerRuntimeState() {
       state.lastVideoTime = -1;
       state.lastFrameAt = performance.now();
       state.frameId = 0;
+      state.rejections = 0;
       connectPublisher(generation);
       try { state.wakeLock = await navigator.wakeLock?.request("screen") ?? null; } catch { state.wakeLock = null; }
       state.starting = false;
