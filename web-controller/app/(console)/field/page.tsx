@@ -76,7 +76,7 @@ export default function FieldPage() {
               <title>{`基準マーカー ${reference.id}: ${missing ? "未検出" : "検出"}`}</title>
             </rect>
             <text className={styles.fieldLabel} data-missing={missing} x={(reference.left ? 0 : field.widthMm) + (reference.left ? 24 : -24)}
-              y={(reference.top ? 0 : field.heightMm) + (reference.top ? 36 : -24)} textAnchor={reference.left ? "start" : "end"}>{missing ? `${reference.id} ×` : reference.id}</text>
+              y={(reference.top ? 0 : field.heightMm) + (reference.top ? 36 : -24)} textAnchor={reference.left ? "start" : "end"}>{reference.id}</text>
           </g>;
         })}
         {Object.entries(trails).map(([robotId, points]) => points.length > 1 && <polyline key={robotId} className={styles.fieldTrail}
