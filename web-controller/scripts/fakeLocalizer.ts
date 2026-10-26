@@ -45,7 +45,8 @@ function connect(): void {
           : { markerId, valid: true, x: 800 + 450 * Math.cos(angle), y: 450 + 250 * Math.sin(angle),
             yawDeg: ((angle * 180 / Math.PI + 90 + 180) % 360) - 180, insideField: true };
       });
-      ws.send(JSON.stringify({ type: "poseFrame", frameId: ++frameId, capturedAt: Date.now(), referenceCount: 4, extrinsicsOk: true, markers }));
+      const referenceIds = drop && Math.floor(t / 4) % 2 === 1 ? [40, 41, 43] : [40, 41, 42, 43];
+      ws.send(JSON.stringify({ type: "poseFrame", frameId: ++frameId, capturedAt: Date.now(), referenceCount: referenceIds.length, referenceIds, extrinsicsOk: true, markers }));
     }, 100);
   });
   ws.on("close", () => {

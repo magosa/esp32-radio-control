@@ -41,12 +41,15 @@ export default function FieldPage() {
   }, [poseState]);
 
   const nameOf = (robotId: string) => robots.find((robot) => robot.robotId === robotId)?.name ?? robotId;
+  // 測位中(最新フレームが届いている)でないときは検出状態が不明なので赤にしない。
+  const framesFresh = !!localizer?.connected && !!localizer.running && localizer.frameAgeMs !== null && localizer.frameAgeMs <= 1000;
+  const missingReferences = framesFresh ? REFERENCE_LABELS.map((reference) => reference.id).filter((id) => !localizer.referenceIds.includes(id)) : [];
   const warnings: string[] = [];
   if (!connected) warnings.push("ハブ未接続");
   else if (!localizer?.connected || !localizer.running) {
     warnings.push(`測位カメラが動作していません${localizer?.stopReason ? `（${localizer.stopReason}）` : ""}。「測位」画面で開始してください。`);
   } else if (!localizer.extrinsicsOk) warnings.push("基準マーカーが不足しています。座標は無効です。");
-  else if (localizer.referenceCount < 4) warnings.push(`基準マーカーが${localizer.referenceCount}/4枚です。精度が低下します。`);
+  else if (localizer.referenceCount < 4) warnings.push(`基準マーカーが${localizer.referenceCount}/4枚です（未検出: ${missingReferences.join("、")}）。精度が低下します。`);
   const outside = poseState?.poses.filter((pose) => pose.tracking === "tracking" && pose.insideField === false) ?? [];
   if (outside.length) warnings.push(`領域外: ${outside.map((pose) => nameOf(pose.robotId)).join("、")}`);
 
@@ -66,11 +69,16 @@ export default function FieldPage() {
       {field ? <svg className={styles.fieldMap} viewBox={`${-20} ${-20} ${field.widthMm + 40} ${field.heightMm + 40}`} role="img"
         aria-label="走行領域とロボットの位置">
         <rect className={styles.fieldSurface} x={0} y={0} width={field.widthMm} height={field.heightMm} />
-        {REFERENCE_LABELS.map((reference) => <g key={reference.id}>
-          <rect className={styles.fieldReference} x={(reference.left ? 0 : field.widthMm) - 16} y={(reference.top ? 0 : field.heightMm) - 16} width={32} height={32} />
-          <text className={styles.fieldLabel} x={(reference.left ? 0 : field.widthMm) + (reference.left ? 24 : -24)}
-            y={(reference.top ? 0 : field.heightMm) + (reference.top ? 36 : -24)} textAnchor={reference.left ? "start" : "end"}>{reference.id}</text>
-        </g>)}
+        {REFERENCE_LABELS.map((reference) => {
+          const missing = missingReferences.includes(reference.id);
+          return <g key={reference.id} data-missing={missing}>
+            <rect className={styles.fieldReference} data-missing={missing} x={(reference.left ? 0 : field.widthMm) - 16} y={(reference.top ? 0 : field.heightMm) - 16} width={32} height={32}>
+              <title>{`基準マーカー ${reference.id}: ${missing ? "未検出" : "検出"}`}</title>
+            </rect>
+            <text className={styles.fieldLabel} data-missing={missing} x={(reference.left ? 0 : field.widthMm) + (reference.left ? 24 : -24)}
+              y={(reference.top ? 0 : field.heightMm) + (reference.top ? 36 : -24)} textAnchor={reference.left ? "start" : "end"}>{missing ? `${reference.id} ×` : reference.id}</text>
+          </g>;
+        })}
         {Object.entries(trails).map(([robotId, points]) => points.length > 1 && <polyline key={robotId} className={styles.fieldTrail}
           points={points.map(([x, y]) => `${x},${field.heightMm - y}`).join(" ")} />)}
         {poseState?.poses.map((pose) => {

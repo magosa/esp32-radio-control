@@ -28,7 +28,10 @@ export function parsePoseFrame(value: Record<string, unknown>): PoseFrameMessage
   if (!Number.isInteger(value.frameId) || (value.frameId as number) < 0 || !isFiniteNumber(value.capturedAt)
     || !Number.isInteger(value.referenceCount) || (value.referenceCount as number) < 0 || (value.referenceCount as number) > 4
     || typeof value.extrinsicsOk !== "boolean" || !Array.isArray(value.markers)
-    || value.markers.length > MAX_MARKERS_PER_FRAME) return null;
+    || value.markers.length > MAX_MARKERS_PER_FRAME
+    || !Array.isArray(value.referenceIds) || value.referenceIds.length > 4
+    || !value.referenceIds.every((id) => Number.isInteger(id) && id >= 40 && id <= 43)
+    || new Set(value.referenceIds).size !== value.referenceIds.length) return null;
   const markers: LocalizerMarkerPose[] = [];
   for (const raw of value.markers as Record<string, unknown>[]) {
     if (!raw || typeof raw !== "object" || !isMarkerId(raw.markerId) || typeof raw.valid !== "boolean") return null;
@@ -42,7 +45,7 @@ export function parsePoseFrame(value: Record<string, unknown>): PoseFrameMessage
     }
   }
   return { type: "poseFrame", frameId: value.frameId as number, capturedAt: value.capturedAt as number,
-    referenceCount: value.referenceCount as number, extrinsicsOk: value.extrinsicsOk, markers };
+    referenceCount: value.referenceCount as number, referenceIds: value.referenceIds as number[], extrinsicsOk: value.extrinsicsOk, markers };
 }
 
 interface TrackedPose {
@@ -72,6 +75,7 @@ export class PoseStore {
   private camera: string | undefined;
   private stopReason: string | undefined;
   private referenceCount = 0;
+  private referenceIds: number[] = [];
   private extrinsicsOk = false;
   private lastFrameAt: number | null = null;
   private frameTimes: number[] = [];
@@ -102,6 +106,7 @@ export class PoseStore {
     const now = this.now();
     this.lastFrameAt = now;
     this.referenceCount = frame.referenceCount;
+    this.referenceIds = frame.referenceIds;
     this.extrinsicsOk = frame.extrinsicsOk;
     this.frameTimes = [...this.frameTimes, now].slice(-STATS_WINDOW);
     const latency = now - frame.capturedAt;
@@ -141,7 +146,7 @@ export class PoseStore {
     const span = this.frameTimes.length > 1 ? this.frameTimes[this.frameTimes.length - 1] - this.frameTimes[0] : 0;
     const active = frameAgeMs !== null && frameAgeMs <= 1000 && span > 0;
     return { connected: this.connected, running: this.running, camera: this.camera,
-      referenceCount: this.referenceCount, extrinsicsOk: this.extrinsicsOk, frameAgeMs,
+      referenceCount: this.referenceCount, referenceIds: this.referenceIds, extrinsicsOk: this.extrinsicsOk, frameAgeMs,
       fps: active ? (this.frameTimes.length - 1) / (span / 1000) : null,
       latencyMs: this.latencies.length ? median(this.latencies) : null, stopReason: this.stopReason };
   }
@@ -178,6 +183,7 @@ export class PoseStore {
     this.frameTimes = [];
     this.latencies = [];
     this.referenceCount = 0;
+    this.referenceIds = [];
     this.extrinsicsOk = false;
     this.stopReason = undefined;
   }

@@ -13,6 +13,7 @@ export interface LocalizerFrameSummary {
   width: number;
   height: number;
   referenceCount: number;
+  referenceIds: number[];
   complete: boolean;
   extrinsicsOk: boolean;
   detectedIds: number[];
@@ -205,11 +206,12 @@ function useLocalizerRuntimeState() {
         state.frameId++;
         state.width = width;
         state.height = height;
-        publish({ type: "poseFrame", frameId: state.frameId, capturedAt, referenceCount: result.referenceCount,
+        const referenceIds = Array.from(new Set(found.map((marker) => marker.id).filter((id) => id >= 40 && id <= 43)));
+        publish({ type: "poseFrame", frameId: state.frameId, capturedAt, referenceCount: result.referenceCount, referenceIds,
           extrinsicsOk: result.extrinsics_ok, markers: result.robots.map((robot) => robot.valid
             ? { markerId: robot.id, valid: true, x: robot.x, y: robot.y, yawDeg: robot.yaw_deg, insideField: robot.inside_field }
             : { markerId: robot.id, valid: false }) });
-        setSummary({ frameId: state.frameId, width, height, referenceCount: result.referenceCount, complete: result.complete,
+        setSummary({ frameId: state.frameId, width, height, referenceCount: result.referenceCount, referenceIds, complete: result.complete,
           extrinsicsOk: result.extrinsics_ok, detectedIds: found.map((marker) => marker.id), robots: result.robots,
           processingMs: performance.now() - started });
         if (state.recording) {

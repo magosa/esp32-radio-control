@@ -88,7 +88,8 @@ export default function LocalizerPage() {
       <p className={styles.localizerStatus} role="status" data-state={runtime.status}>{runtime.message}</p>
       {summary && <dl className={styles.localizerStats}>
         <div><dt>解像度</dt><dd>{summary.width}×{summary.height}</dd></div>
-        <div><dt>基準</dt><dd>{summary.referenceCount}/4</dd></div>
+        <div><dt>基準</dt><dd>{summary.referenceCount}/4{[40, 41, 42, 43].some((id) => !summary.referenceIds.includes(id))
+          && <span className={styles.missingRef}> 未検出: {[40, 41, 42, 43].filter((id) => !summary.referenceIds.includes(id)).join(", ")}</span>}</dd></div>
         <div><dt>検出ID</dt><dd>{summary.detectedIds.join(", ") || "なし"}</dd></div>
         <div><dt>処理</dt><dd>{summary.processingMs.toFixed(0)} ms</dd></div>
         <div><dt>周期(Hub)</dt><dd>{localizer?.fps ? `${localizer.fps.toFixed(1)} fps` : "—"}</dd></div>

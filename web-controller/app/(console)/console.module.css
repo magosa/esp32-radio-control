@@ -315,6 +315,11 @@
 .fieldSurface { fill: var(--surface-inset); stroke: var(--line); stroke-width: 3; }
 .fieldReference { fill: var(--muted); opacity: .6; }
 .fieldLabel { fill: var(--muted); font-size: 26px; font-family: "Consolas", monospace; }
+.fleet .fieldReference[data-missing="true"], .fleet .fieldLabel[data-missing="true"] { fill: #c62828; opacity: 1; }
+.fleet .fieldLabel[data-missing="true"] { font-weight: 700; }
+.fleet[data-theme="dark"] .fieldReference[data-missing="true"], .fleet[data-theme="dark"] .fieldLabel[data-missing="true"] { fill: #ff6b6b; }
+.missingRef { color: #c62828; font-weight: 700; }
+.fleet[data-theme="dark"] .missingRef { color: #ff8a8a; }
 .fieldTrail { fill: none; stroke: var(--primary-500); stroke-width: 4; stroke-linejoin: round; opacity: .55; }
 .fieldRobot rect { fill: var(--selected); stroke: var(--accent); stroke-width: 4; }
 .fieldRobot line { stroke: var(--accent); stroke-width: 6; stroke-linecap: round; }

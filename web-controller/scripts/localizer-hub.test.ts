@@ -19,7 +19,7 @@ function connectedStore(): PoseStore {
   return store;
 }
 const frame = (x: number, y: number, extra: Partial<PoseFrameMessage> = {}, markerId = 0): PoseFrameMessage => ({
-  type: "poseFrame", frameId: 1, capturedAt: Date.now(), referenceCount: 4, extrinsicsOk: true,
+  type: "poseFrame", frameId: 1, capturedAt: Date.now(), referenceCount: 4, referenceIds: [40, 41, 42, 43], extrinsicsOk: true,
   markers: [{ markerId, valid: true, x, y, yawDeg: 30, insideField: true }], ...extra,
 });
 
@@ -77,12 +77,15 @@ test("PoseStore accepts any position after a long gap and ordinary motion immedi
 });
 
 test("pose frames with invalid values are rejected", () => {
-  const valid = { frameId: 1, capturedAt: 1, referenceCount: 4, extrinsicsOk: true,
+  const valid = { frameId: 1, capturedAt: 1, referenceCount: 4, referenceIds: [40, 41, 42, 43], extrinsicsOk: true,
     markers: [{ markerId: 0, valid: true, x: 1, y: 2, yawDeg: 3 }] };
   assert.ok(parsePoseFrame(valid));
   assert.equal(parsePoseFrame({ ...valid, markers: [{ markerId: 9, valid: false }] }), null);
   assert.equal(parsePoseFrame({ ...valid, markers: [{ markerId: 0, valid: true, x: NaN, y: 2, yawDeg: 3 }] }), null);
   assert.equal(parsePoseFrame({ ...valid, referenceCount: 5 }), null);
+  assert.equal(parsePoseFrame({ ...valid, referenceIds: [40, 40] }), null);
+  assert.equal(parsePoseFrame({ ...valid, referenceIds: [3] }), null);
+  assert.equal(parsePoseFrame({ ...valid, referenceIds: undefined }), null);
   assert.equal(parsePoseFrame({ ...valid, markers: new Array(9).fill({ markerId: 0, valid: false }) }), null);
 });
 
@@ -173,7 +176,7 @@ test("Hub maps localizer frames to robots, throttles broadcasts and goes stale o
       assert.deepEqual(results.map((m) => [m.requestId, m.ok]), [["f1", true], ["m1", true], ["m2", false]]);
 
       connect(localizer.socket, { url: "/ws/localizer" });
-      localizer.receive({ type: "poseFrame", frameId: 1, capturedAt: Date.now(), referenceCount: 4, extrinsicsOk: true,
+      localizer.receive({ type: "poseFrame", frameId: 1, capturedAt: Date.now(), referenceCount: 4, referenceIds: [40, 41, 42, 43], extrinsicsOk: true,
         markers: [{ markerId: 0, valid: true, x: 800, y: 450, yawDeg: 90, insideField: true }] });
       assert.equal(localizer.state.closedWith, 1008, "hello is required first");
       const second = fakeSocket();
@@ -181,7 +184,7 @@ test("Hub maps localizer frames to robots, throttles broadcasts and goes stale o
       second.receive({ type: "localizerHello", camera: "cam", width: 1920, height: 1080 });
       const before = client.messages.length;
       for (let id = 2; id < 12; id++) {
-        second.receive({ type: "poseFrame", frameId: id, capturedAt: Date.now(), referenceCount: 4, extrinsicsOk: true,
+        second.receive({ type: "poseFrame", frameId: id, capturedAt: Date.now(), referenceCount: 4, referenceIds: [40, 41, 42, 43], extrinsicsOk: true,
           markers: [{ markerId: 0, valid: true, x: 800, y: 450, yawDeg: 90, insideField: true }] });
       }
       context.mock.timers.tick(100);
@@ -191,6 +194,7 @@ test("Hub maps localizer frames to robots, throttles broadcasts and goes stale o
       assert.equal(latest.poses[0].tracking, "tracking");
       assert.equal(latest.poses[0].xMm, 800);
       assert.equal(latest.localizer.camera, "cam");
+      assert.deepEqual(latest.localizer.referenceIds, [40, 41, 42, 43]);
 
       second.socket.close();
       assert.equal(poseStates().at(-1).poses[0].tracking, "stale");

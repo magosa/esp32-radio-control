@@ -303,6 +303,8 @@ export interface PoseFrameMessage {
   // フレームの撮影時刻(ms epoch)。Hubと同じPCの時計を使う。
   capturedAt: number;
   referenceCount: number;
+  // 検出できた基準マーカーのID(40-43)。未検出の四隅の判定に使う。
+  referenceIds: number[];
   extrinsicsOk: boolean;
   markers: LocalizerMarkerPose[];
 }
@@ -340,6 +342,8 @@ export interface LocalizerState {
   running: boolean;
   camera?: string;
   referenceCount: number;
+  // 最新フレームで検出できた基準マーカーID(40-43)
+  referenceIds: number[];
   extrinsicsOk: boolean;
   // 最新フレームの受信からの経過(ms)。未受信はnull。
   frameAgeMs: number | null;
