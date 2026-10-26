@@ -5,6 +5,9 @@
 | URL | 内容 |
 | --- | --- |
 | `/control` | 走行・手動／自動・ルート実行・表情・カメラ撮影／ライブ（旧 `/fleet`） |
+| `/field` | フロアマップ（ロボットの位置・向き・軌跡・追跡状態） |
+| `/robots` | ロボット構成（カメラの紐付け、測位マーカーID・高さ） |
+| `/localizer` | 俯瞰カメラの開始・停止、検出結果、領域設定、CSV記録 |
 | `/robots` | ロボット構成（カメラの紐付け） |
 | `/settings` | 表示設定（旧 `/fleet/settings`） |
 | `/direct/bluetooth` | Bluetooth直接操作（旧 `/bluetooth`） |
@@ -35,7 +38,9 @@ ESP32は従来どおり `/ws/device`、ブラウザーは `/ws/client` に接続
 変更できます。パスはHub起動プロセスの作業ディレクトリ基準なので、絶対パスを推奨します。
 ルートのnpmコマンドは `web-controller` を作業ディレクトリとして起動します。
 
-- バージョン1のJSONにデバイス情報とロボット構成のみ保存します。
+- バージョン1のJSONにデバイス情報とロボット構成（カメラ割当・測位マーカーID・マーカー高さ）のみ保存します。
+  マーカー項目がない旧ファイルは、読み込み時に「未割当・高さ 90mm」で補います。
+- 俯瞰カメラの設定（カメラ高さ・領域寸法・基準黒部）は同じディレクトリの `field.json` に保存します。
 - 接続状態、走行モード、映像、実行中ルートは復元しません。
 - 一時ファイルへの書き込み後に置換します。保存できなければメモリ上の割当も更新しません。
 - 不正な保存ファイルは自動で上書きせず、Hub起動を失敗させます。
@@ -71,7 +76,8 @@ ESP32は `/ws/device`、ブラウザーは `/ws/client` に接続します。
 | 撮影 | Hub→`captureImage`、カメラ→`imageFrame`（JPEG Base64） |
 | ライブ | Hub→`streamStart`／`streamStop`。配信中のカメラだけに`ping` |
 | カメラ生存確認 | カメラ→`heartbeat`。モーター用telemetryは不要 |
-| 構成編集 | UI→`assignCamera`（requestId／robotId／cameraDeviceId）。Hub→`operationResult` |
+| 構成編集 | UI→`assignCamera`（requestId／robotId／cameraDeviceId）、`assignMarker`（markerId／markerHeightMm）、`setFieldConfig`。Hub→`operationResult` |
+| 測位 | 俯瞰カメラ（`/ws/localizer`）→`localizerHello`／`poseFrame`／`localizerStatus`、Hub→UIは約10Hzの`poseState` |
 | 状態配信 | `fleetState`: 従来の走行機一覧`vehicles`＋物理一覧`devices`＋構成`robots` |
 
 Hubは接続socketのdeviceIdを固定し、他のdeviceIdを名乗る後続メッセージを拒否します。
@@ -88,6 +94,28 @@ Hubの受信上限600,000bytes、JPEG Base64上限512,000文字、XIAOのJPEG上
 走行FWは従来どおり1.5秒の受信途絶で停止します。Hubは走行機へ生存確認pingを送りません。
 手動操作の200ms再送と自動ルートの800ms再送は、停止・通信断の安全機構とは独立です。
 停止指示は自動モードでも届き、関連する自動ルートの再送・予約を取り消します。
+
+## 測位（俯瞰カメラとARUCOマーカー）
+
+計画と設計は [ar-localizer-plan.md](ar-localizer-plan.md) を参照してください。現在は表示・監視・追跡状態の提供までで、走行制御には使いません。
+
+- マーカー: `DICT_4X4_50`、基準ID40（左上）・41（右上）・42（右下）・43（左下）、ロボットID0〜3（最大4台）。
+  ロボット上ではマーカー画像の右方向をロボット前方に合わせます。黒部寸法は基準が設定値（初期33mm）、ロボットが40mmです。
+- 手順: 俯瞰USBカメラをHub実行PCへ接続 → `/robots` でマーカーIDとマーカー高さを設定 →
+  `/localizer` で領域設定を確認して保存 → カメラを選んで「開始」 → `/field` で確認。
+- 測位は**Hub実行PCのlocalhostで開いたページ**からのみ開始できます。検出ループはシェルで常駐し、同じタブで画面を移動しても続きます。
+  ウィンドウが背面・最小化されると検出が遅れる・止まることがあるため、警告を表示します。
+- Hubは`/ws/localizer`を、loopbackからの接続で、かつOriginがこのHubのlocalhost系のときだけ受け付けます。
+  `FLEET_LOCALIZER_ALLOW_REMOTE=1` で緩和できますが、偵の姿勢を送られるリスクがあるため非推奨です。
+- 追跡状態: 追跡中（最新フレームで検出）／未検出（フレームは届くがマーカーなし・飛び値を棄却）／
+  測位なし（フレームが0.5秒以上途絶・未接続・停止）／マーカー未割当。過去の座標は保持しません。
+  500mm/sを超える飛びは棄却し、同じ場所が3フレーム連続したときだけ受理します（暫定値）。
+- 基準マーカー: 検出できていない四隅のIDは、`/field` のマップで赤い四角で示し、トーストにもIDを表示します（`/localizer` も同様）。
+  測位が動作していないときは検出状態が不明なので赤にしません。
+- 測位接続は1つで、先着優先です。稼働中は別の接続（別タブや疑似 localizer）を拒否し（close 1013）、
+  3秒間何も届かない接続だけが新しい接続に置き換わります。拒否された測位画面は数回再試行して停止し、理由を表示します。
+- 座標: Hub内部はmm（原点左下、X右・Y上、向きは右0°・反時計回り正）。CSVは原本どおり`robot_pose/v3`の比率座標（1600×900）です。
+- 実機の絶対精度・検出率・遅延は未検証です。受入基準は計画書の「受入基準」を参照してください。
 
 ## 実機なしの確認
 
@@ -108,6 +136,8 @@ npm run sim:device -- --fleet
 
 <http://localhost:3117/control> を開きます。`--fleet` は走行用2台とカメラ用1台です。
 単体起動は `npm run sim:device -- <deviceId> <name> <drive|camera|legacy>` です。
+俯瞰カメラなしで測位UIを確認するには、続けて `npm run sim:localizer -- --assign --drop` を実行します（現在の場合は
+`FLEET_HUB_PORT` を合わせる）。`--assign` は先頭2台へマーカーID0/1を割り当て、`--drop` はマーカー1を周期的に隠します。
 シミュレータを終了しHubを再起動して、割当が残り接続状態は未接続へ戻ることも確認できます。
 自動テストは一時保存領域と偽socketを使用し、実機へ接続しません。
 

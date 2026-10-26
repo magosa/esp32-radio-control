@@ -9,6 +9,9 @@ interface StoredFleet {
 }
 
 const CAPABILITIES: DeviceCapability[] = ["drive", "display", "camera"];
+export const DEFAULT_MARKER_HEIGHT_MM = 90;
+export const MAX_MARKER_ID = 3;
+const MAX_MARKER_HEIGHT_MM = 1000;
 
 export function isDeviceDescription(value: unknown): value is DeviceDescription {
   if (!value || typeof value !== "object") return false;
@@ -33,6 +36,9 @@ export class RobotStore {
       throw new Error("Invalid fleet configuration");
     }
     this.validateRobots(loaded);
+    // version 1の旧ファイルにはマーカー項目がないため既定値で補う。
+    loaded.robots = loaded.robots.map((robot) => ({ ...robot, markerId: robot.markerId ?? null,
+      markerHeightMm: robot.markerHeightMm ?? DEFAULT_MARKER_HEIGHT_MM }));
     this.data = loaded;
   }
 
@@ -50,7 +56,8 @@ export class RobotStore {
     next.devices = next.devices.filter((known) => known.deviceId !== device.deviceId);
     next.devices.push(structuredClone(device));
     if (device.capabilities.includes("drive") && !next.robots.some((robot) => robot.driveDeviceId === device.deviceId)) {
-      next.robots.push({ robotId: `robot-${device.deviceId}`, driveDeviceId: device.deviceId, cameraDeviceId: null });
+      next.robots.push({ robotId: `robot-${device.deviceId}`, driveDeviceId: device.deviceId, cameraDeviceId: null,
+        markerId: null, markerHeightMm: DEFAULT_MARKER_HEIGHT_MM });
     }
     this.validateRobots(next);
     if (JSON.stringify(this.data) !== JSON.stringify(next)) this.save(next);
@@ -65,10 +72,22 @@ export class RobotStore {
     this.save(next);
   }
 
+  // markerHeightMm省略時は現在の高さを維持する。
+  assignMarker(robotId: string, markerId: number | null, markerHeightMm?: number): void {
+    const next = structuredClone(this.data);
+    const robot = next.robots.find((candidate) => candidate.robotId === robotId);
+    if (!robot) throw new Error("Robot not found");
+    robot.markerId = markerId;
+    if (markerHeightMm !== undefined) robot.markerHeightMm = markerHeightMm;
+    this.validateRobots(next);
+    this.save(next);
+  }
+
   private validateRobots(data: StoredFleet): void {
     const robotIds = new Set<string>();
     const driveIds = new Set<string>();
     const cameraIds = new Set<string>();
+    const markerIds = new Set<number>();
     for (const robot of data.robots) {
       if (!robot || typeof robot.robotId !== "string" || !robot.robotId || robotIds.has(robot.robotId)
         || typeof robot.driveDeviceId !== "string" || driveIds.has(robot.driveDeviceId)
@@ -77,6 +96,13 @@ export class RobotStore {
       }
       robotIds.add(robot.robotId);
       driveIds.add(robot.driveDeviceId);
+      if (robot.markerId !== undefined && robot.markerId !== null) {
+        if (!Number.isInteger(robot.markerId) || robot.markerId < 0 || robot.markerId > MAX_MARKER_ID
+          || markerIds.has(robot.markerId)) throw new Error("Marker ID invalid or already assigned");
+        markerIds.add(robot.markerId);
+      }
+      if (robot.markerHeightMm !== undefined && !(Number.isFinite(robot.markerHeightMm)
+        && robot.markerHeightMm > 0 && robot.markerHeightMm <= MAX_MARKER_HEIGHT_MM)) throw new Error("Invalid marker height");
       if (robot.cameraDeviceId !== null) {
         if (typeof robot.cameraDeviceId !== "string" || cameraIds.has(robot.cameraDeviceId)
           || !data.devices.some((device) => device.deviceId === robot.cameraDeviceId && device.capabilities.includes("camera"))) {

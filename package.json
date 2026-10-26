@@ -7,10 +7,11 @@
     "dev": "npm --prefix web-controller run dev",
     "build": "npm --prefix web-controller run build",
     "start": "npm --prefix web-controller run start",
-    "test": "npm --prefix web-controller run test:fleet",
+    "test": "npm --prefix web-controller run test:fleet && npm --prefix web-controller run test:localization",
     "test:appearance": "npm --prefix web-controller run test:appearance",
     "typecheck": "npm --prefix web-controller run typecheck",
     "sim:device": "npm --prefix web-controller run sim:device --",
+    "sim:localizer": "npm --prefix web-controller run sim:localizer --",
     "workshop:dev": "npm --prefix archive/workshop run dev",
     "workshop:build": "npm --prefix archive/workshop run build",
     "workshop:export": "npm --prefix archive/workshop run export"

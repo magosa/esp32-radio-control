@@ -4,6 +4,8 @@ import type { WebSocket, WebSocketServer } from "ws";
 import { VehicleRegistry } from "./registry";
 import { RouteEngine } from "./routeEngine";
 import { isDeviceDescription, RobotStore } from "./robotStore";
+import { FieldConfigStore, isFieldConfig } from "./fieldConfigStore";
+import { parseLocalizerHello, parsePoseFrame, PoseStore } from "./poseStore";
 import type {
   ClientInboundMessage,
   ClientOutboundMessage,
@@ -12,9 +14,18 @@ import type {
   DriveCommand,
   ExpressionId,
   FleetStateMessage,
+  PoseStateMessage,
 } from "./protocol";
 
 const SWEEP_INTERVAL_MS = 1000;
+// poseFrameは約10Hzで届くため、UIへのposeState配信はこの間隔に間引く。
+const POSE_BROADCAST_INTERVAL_MS = 100;
+// この時間何も届かない測位接続は無効とみなし、新しい接続を受け付ける。
+const LOCALIZER_IDLE_TIMEOUT_MS = 3000;
+
+function defaultDataDir(): string {
+  return process.env.FLEET_DATA_DIR || path.join(process.cwd(), "data");
+}
 
 // ESP32群(デバイス)と操作UI(クライアント)の両方のWebSocket接続を仲介するフリートハブ。
 export class FleetHub {
@@ -24,9 +35,16 @@ export class FleetHub {
   private clients = new Set<WebSocket>();
   private streamingDeviceIds = new Set<string>();
   private sweepTimer: NodeJS.Timeout;
+  private fieldStore: FieldConfigStore;
+  private poses = new PoseStore();
+  private localizerWs: WebSocket | null = null;
+  private localizerLastMessageAt = 0;
+  private poseBroadcastTimer: NodeJS.Timeout | null = null;
 
-  constructor(store = new RobotStore(path.join(process.env.FLEET_DATA_DIR || path.join(process.cwd(), "data"), "fleet.json"))) {
+  constructor(store = new RobotStore(path.join(defaultDataDir(), "fleet.json")),
+    fieldStore = new FieldConfigStore(path.join(defaultDataDir(), "field.json"))) {
     this.store = store;
+    this.fieldStore = fieldStore;
     this.registry = new VehicleRegistry(store.getDevices());
     this.routeEngine = new RouteEngine({
       sendDrive: (deviceId, cmd, speedL, speedR) => this.sendDriveToDevice(deviceId, cmd, speedL, speedR),
@@ -47,11 +65,14 @@ export class FleetHub {
         if (device?.status !== "online") this.stopStream(deviceId);
         else this.sendToDevice(deviceId, { type: "ping" }, "camera");
       });
+      // frameが途絶えたときもstaleへの遷移をUIへ届ける。
+      this.broadcastPoseState();
     }, SWEEP_INTERVAL_MS);
   }
 
   dispose(): void {
     clearInterval(this.sweepTimer);
+    if (this.poseBroadcastTimer) clearTimeout(this.poseBroadcastTimer);
     this.routeEngine.stop();
     Array.from(this.streamingDeviceIds).forEach((deviceId) => this.stopStream(deviceId));
   }
@@ -63,6 +84,8 @@ export class FleetHub {
         this.handleDeviceConnection(ws);
       } else if (pathname === "/ws/client") {
         this.handleClientConnection(ws);
+      } else if (pathname === "/ws/localizer") {
+        this.handleLocalizerConnection(ws);
       } else {
         ws.close();
       }
@@ -131,6 +154,7 @@ export class FleetHub {
   private handleClientConnection(ws: WebSocket): void {
     this.clients.add(ws);
     this.sendToClient(ws, this.getFleetState());
+    this.sendToClient(ws, this.getPoseState());
 
     ws.on("message", (raw) => {
       const msg = this.parseJson<ClientInboundMessage>(raw.toString());
@@ -149,8 +173,72 @@ export class FleetHub {
     });
   }
 
+  private handleLocalizerConnection(ws: WebSocket): void {
+    // 俯瞰カメラは1つ。先着を優先し、稼働中(直近に受信あり)の間は新規接続を拒否する。
+    // 疑似の測位や別タブが実カメラを奪うのを防ぎ、無言の半開き接続だけ置き換えられる。
+    const current = this.localizerWs;
+    if (current && current !== ws) {
+      if (current.readyState === current.OPEN && Date.now() - this.localizerLastMessageAt <= LOCALIZER_IDLE_TIMEOUT_MS) {
+        ws.close(1013, "Localizer already connected");
+        return;
+      }
+      current.close(1000, "Localizer replaced");
+    }
+    this.localizerWs = ws;
+    this.localizerLastMessageAt = Date.now();
+    let greeted = false;
+
+    ws.on("message", (raw) => {
+      if (this.localizerWs !== ws) return;
+      this.localizerLastMessageAt = Date.now();
+      const msg = this.parseJson<Record<string, unknown>>(raw.toString());
+      if (!msg) return;
+      if (msg.type === "localizerHello") {
+        const hello = parseLocalizerHello(msg);
+        if (!hello) return ws.close(1008, "Invalid hello");
+        greeted = true;
+        this.poses.onHello(hello);
+        this.broadcastPoseState();
+      } else if (!greeted) {
+        ws.close(1008, "Hello required");
+      } else if (msg.type === "poseFrame") {
+        const frame = parsePoseFrame(msg);
+        if (!frame) return;
+        this.poses.ingest(frame, this.fieldStore.get());
+        this.schedulePoseBroadcast();
+      } else if (msg.type === "localizerStatus" && (msg.state === "running" || msg.state === "stopped")) {
+        this.poses.onStatus(msg.state, typeof msg.reason === "string" ? msg.reason.slice(0, 200) : undefined);
+        this.broadcastPoseState();
+      }
+    });
+
+    ws.on("close", () => {
+      if (this.localizerWs !== ws) return;
+      this.localizerWs = null;
+      this.poses.onClosed();
+      this.broadcastPoseState();
+    });
+  }
+
   private handleClientMessage(msg: ClientInboundMessage, client: WebSocket): void {
     switch (msg.type) {
+      case "assignMarker": {
+        if (typeof msg.requestId !== "string" || typeof msg.robotId !== "string"
+          || !(msg.markerId === null || Number.isInteger(msg.markerId))
+          || !(msg.markerHeightMm === undefined || typeof msg.markerHeightMm === "number")) throw new Error("Invalid marker assignment");
+        this.store.assignMarker(msg.robotId, msg.markerId, msg.markerHeightMm);
+        this.broadcastFleetState();
+        this.broadcastPoseState();
+        this.sendToClient(client, { type: "operationResult", requestId: msg.requestId, ok: true });
+        break;
+      }
+      case "setFieldConfig": {
+        if (typeof msg.requestId !== "string" || !isFieldConfig(msg.config)) throw new Error("Invalid field configuration");
+        this.fieldStore.set(msg.config);
+        this.broadcastPoseState();
+        this.sendToClient(client, { type: "operationResult", requestId: msg.requestId, ok: true });
+        break;
+      }
       case "assignCamera": {
         if (typeof msg.requestId !== "string" || typeof msg.robotId !== "string"
           || !(msg.cameraDeviceId === null || typeof msg.cameraDeviceId === "string")) throw new Error("Invalid assignment");
@@ -292,6 +380,26 @@ export class FleetHub {
 
   private broadcastFleetState(): void {
     this.broadcastToClients(this.getFleetState());
+  }
+
+  private getPoseState(): PoseStateMessage {
+    return this.poses.snapshot(this.store.getRobots(), this.fieldStore.get());
+  }
+
+  private broadcastPoseState(): void {
+    if (this.poseBroadcastTimer) {
+      clearTimeout(this.poseBroadcastTimer);
+      this.poseBroadcastTimer = null;
+    }
+    this.broadcastToClients(this.getPoseState());
+  }
+
+  private schedulePoseBroadcast(): void {
+    if (this.poseBroadcastTimer) return;
+    this.poseBroadcastTimer = setTimeout(() => {
+      this.poseBroadcastTimer = null;
+      this.broadcastToClients(this.getPoseState());
+    }, POSE_BROADCAST_INTERVAL_MS);
   }
 
   private broadcastToClients(msg: ClientOutboundMessage): void {
