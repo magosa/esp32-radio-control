@@ -7,7 +7,7 @@ import {
   Search, Check, Camera, Video, VideoOff, Play, RotateCcw, TriangleAlert,
 } from "lucide-react";
 import { useFleetSocket, type VehicleImage } from "@/hooks/useFleetSocket";
-import type { DriveCommand, ExpressionId, DisplayLayoutMode } from "@/fleet/protocol";
+import type { DriveCommand, ExpressionId, DisplayLayoutMode, VehicleTelemetry } from "@/fleet/protocol";
 import styles from "../console.module.css";
 
 const EXPRESSIONS: { label: string; id: ExpressionId }[] = [
@@ -20,6 +20,22 @@ const EXPRESSIONS: { label: string; id: ExpressionId }[] = [
   { label: "ショック", id: "shocked" }, { label: "ギブアップ", id: "giveup" },
   { label: "照れる", id: "shy" }, { label: "余裕", id: "composed" },
 ];
+
+// テレメトリのPWM(0-255)を、前進回転を正・逆回転を負とする符号付き表示に変換する。
+// 右旋回(c)は右モーター逆回転、左旋回(d)は左モーター逆回転(esp32_rc_car.inoのapplyMotorControlと同期)。
+const MOTOR_DIRECTION: Record<DriveCommand, [number, number]> = {
+  a: [1, 1], b: [-1, -1], c: [1, -1], d: [-1, 1], e: [0, 0],
+};
+
+function motorOutput(telemetry: VehicleTelemetry | null | undefined): { left: string; right: string } {
+  if (!telemetry) return { left: "--", right: "--" };
+  const [left, right] = MOTOR_DIRECTION[telemetry.cmd] ?? [0, 0];
+  const format = (pwm: number, sign: number) => {
+    const value = pwm * sign;
+    return value > 0 ? `+${value}` : `${value}`;
+  };
+  return { left: format(telemetry.speedL, left), right: format(telemetry.speedR, right) };
+}
 
 const DIRECTIONS = [
   { cmd: "a", label: "前進", Icon: ArrowUp, position: styles.forward },
@@ -241,8 +257,8 @@ export default function ControlPage() {
             </div>) : <p className={styles.muted}>未選択</p>}
             {selectionMode === "single" && focused && <div className={styles.telemetry}>
               <h3>モーター出力</h3>
-              <dl><div><dt>左</dt><dd>{connected && focused.status === "online" ? focused.telemetry?.speedL ?? "--" : "--"}</dd></div>
-                <div><dt>右</dt><dd>{connected && focused.status === "online" ? focused.telemetry?.speedR ?? "--" : "--"}</dd></div></dl>
+              <dl><div><dt>左</dt><dd>{motorOutput(connected && focused.status === "online" ? focused.telemetry : null).left}</dd></div>
+                <div><dt>右</dt><dd>{motorOutput(connected && focused.status === "online" ? focused.telemetry : null).right}</dd></div></dl>
             </div>}
             {targets.length > 0 && <details className={styles.settings}>
               <summary>ディスプレイ設定</summary>
