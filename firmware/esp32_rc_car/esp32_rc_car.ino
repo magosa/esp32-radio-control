@@ -43,6 +43,9 @@
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
+#if CONFIG_IDF_TARGET_ESP32S3
+  #include <Arduino_GFX_Library.h>
+#endif
 #include <esp_mac.h> // esp_read_mac() : WiFi/BT初期化前でめEACアドレスを取得可能
 
 // ----------------------------------------------------------------------------
@@ -134,18 +137,40 @@ struct ExpressionParams {
 // SCLK/MOSIはVSPI既定ピンと一致するが、既定�EMISO(GPIO19)はカメラD7と競合するためE
 // SPI.begin()でMISOを�E示皁E��無効(-1)にしてから初期化すめEdisplayは書き込み専用のため支障なぁE、E
 // ----------------------------------------------------------------------------
-#define TFT_DC      2
-#define TFT_RST     4
-#define TFT_CS      15
-#define TFT_SCLK    18
-#define TFT_MOSI    23
-#define TFT_BL      32
+#if CONFIG_IDF_TARGET_ESP32S3
+  #define TFT_BL 38
+  Arduino_DataBus *tftBus = new Arduino_ESP32PAR8Q(
+    7, 6, 8, 9, 39, 40, 41, 42, 45, 46, 47, 48);
+  Arduino_GFX *tftDriver = new Arduino_ST7789(tftBus, 5, 0, true, 170, 320, 35, 0, 35, 0);
+
+  class FleetDisplay {
+  public:
+    void init(uint16_t, uint16_t) { tftDriver->begin(); }
+    void setRotation(uint8_t rotation) { tftDriver->setRotation(rotation); }
+    void fillScreen(uint16_t color) { tftDriver->fillScreen(color); }
+    void drawRGBBitmap(int16_t x, int16_t y, const uint16_t *bitmap, int16_t width, int16_t height) {
+      tftDriver->draw16bitRGBBitmap(x, y, bitmap, width, height);
+    }
+    void setTextColor(uint16_t color) { tftDriver->setTextColor(color); }
+    void setTextSize(uint8_t size) { tftDriver->setTextSize(size); }
+    void setCursor(int16_t x, int16_t y) { tftDriver->setCursor(x, y); }
+    template <typename T> void println(const T& value) { tftDriver->println(value); }
+  };
+
+  FleetDisplay display;
+#else
+  #define TFT_DC      2
+  #define TFT_RST     4
+  #define TFT_CS      15
+  #define TFT_SCLK    18
+  #define TFT_MOSI    23
+  #define TFT_BL      32
+  Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+#endif
 #define TFT_PANEL_W 170
 #define TFT_PANEL_H 320
 const int SPLIT_BOTTOM_Y = TFT_PANEL_H / 2;         // 下半分(センサー情報/アラート)の開始Y座標
 const int SPLIT_BOTTOM_H = TFT_PANEL_H - SPLIT_BOTTOM_Y;
-
-Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
 // 画面下半分(センサー情報/NO LINKアラート)のオフスクリーンバッファ。直接displayへclear→redrawすると
 // 瞬間的な黒塗りが見えてちらつくため、他のキャンバスと同様に一括転送する。
@@ -157,6 +182,14 @@ GFXcanvas16 *bottomCanvas = nullptr;
 // ピンアサイン定義 (L298N 接続、6ピン直接制御)
 // TFTがGPIO2/4/15/18/23/32を専有するため、空いているGPIOに方向ピンを割り当てる、E
 // ----------------------------------------------------------------------------
+#if CONFIG_IDF_TARGET_ESP32S3
+const int PIN_ENA = 1;
+const int PIN_IN1 = 2;
+const int PIN_IN2 = 10;
+const int PIN_IN3 = 11;
+const int PIN_IN4 = 12;
+const int PIN_ENB = 13;
+#else
 const int PIN_ENA = 14;   // 右モーター PWM
 const int PIN_IN1  = 27;  // 右モーター 方向1 (L298N IN1)
 const int PIN_IN2  = 26;  // 右モーター 方向2 (L298N IN2)
@@ -164,6 +197,7 @@ const int PIN_IN2  = 26;  // 右モーター 方向2 (L298N IN2)
 const int PIN_IN3  = 33;  // 左モーター 方向1 (L298N IN3)
 const int PIN_IN4  = 19;  // 左モーター 方向2 (L298N IN4)
 const int PIN_ENB = 25;   // 左モーター PWM
+#endif
 
 #if TRANSPORT_MODE == MODE_WEBSOCKET
   // WebSocketsClientはスレチE��セーフではなぁE��め、E��受信の実アクセス(sendHello/sendTelemetry/
@@ -1197,7 +1231,13 @@ void setup() {
   // 1. TFT初期化(MISOは未使用のため明示的に無効化してからSPIバスを開始)
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH); // バックライチEN
+#if CONFIG_IDF_TARGET_ESP32S3
+  pinMode(15, OUTPUT);
+  digitalWrite(15, HIGH);
+  delay(10);
+#else
   SPI.begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);
+#endif
   display.init(TFT_PANEL_W, TFT_PANEL_H);
   display.setRotation(2); // 170x320のポートレート表示(USBポートを下にして使用、実機確認により180度反転)
   display.fillScreen(ST77XX_BLACK);

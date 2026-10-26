@@ -1,0 +1,374 @@
+.bluetooth {
+  min-height: 100dvh;
+}
+
+.header {
+  position: relative;
+  isolation: isolate;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.header::before {
+  position: absolute;
+  inset: 0 -16px;
+  z-index: -1;
+  background: var(--header-surface);
+  box-shadow: var(--shadow);
+  content: "";
+  -webkit-backdrop-filter: blur(6px) saturate(var(--glass-saturation));
+  backdrop-filter: blur(6px) saturate(var(--glass-saturation));
+}
+
+.headerRow,
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.brand {
+  min-width: 0;
+  flex: 1;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: var(--text-page);
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.brand p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--text-meta);
+  overflow-wrap: anywhere;
+}
+
+.brand [data-connected="true"] {
+  color: var(--accent);
+}
+
+.errorNotice {
+  margin-top: 8px;
+  color: var(--danger);
+}
+
+.content {
+  display: grid;
+  gap: var(--card-gap);
+  padding-top: var(--layout-gap);
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--card-gap);
+}
+
+.metric {
+  display: flex;
+  min-width: 0;
+  min-height: 128px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.metricLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+.metricLabel svg {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+.metric strong {
+  font-size: var(--text-section);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.metric strong[data-connected="true"] {
+  color: var(--accent);
+}
+
+.metric small {
+  color: var(--muted);
+  font-size: var(--text-meta);
+  overflow-wrap: anywhere;
+}
+
+.controlGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--card-gap);
+}
+
+.drivePanel,
+.sidePanel {
+  min-width: 0;
+}
+
+.drivePanel { grid-column: span 2; }
+
+.panelHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panelHeading h2,
+.speedPanel h2 {
+  margin: 0;
+  font-size: var(--text-heading);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.panelHeading > span {
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+.motorReadings,
+.motorTracks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.motorReadings {
+  margin-top: 20px;
+}
+
+.motorReadings > span {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+.motorReadings strong {
+  color: var(--ink);
+  font-family: Consolas, monospace;
+  font-size: var(--text-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+.motorReadings small {
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+.motorTracks {
+  margin-top: 8px;
+}
+
+.motorTrack {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--track);
+}
+
+.motorFill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width .12s ease;
+}
+
+.bluetooth .dpad {
+  width: min(100%, 336px);
+  margin: 24px auto;
+  gap: 8px;
+}
+
+.emergencyRow {
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.emergencyRow button {
+  width: 100%;
+  min-height: 48px;
+}
+
+.sidePanel {
+  display: grid;
+  gap: var(--card-gap);
+}
+
+@media (min-width: 1001px) {
+  .controlGrid { align-items: stretch; }
+  .sidePanel { grid-template-rows: minmax(0, 2fr) minmax(0, 1fr); }
+  .bluetooth .dpad { width: min(100%, 384px); }
+  .speedPanel { display: flex; flex-direction: column; }
+  .speedControl { width: min(100%, 280px); margin: auto; }
+  .presets { margin-top: 20px; }
+}
+
+.speedPanel h2 {
+  margin-bottom: 16px;
+}
+
+.speedPanel label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--text-body);
+}
+
+.speedPanel label svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+
+.presets {
+  margin-top: 20px;
+}
+
+.presets button[aria-pressed="true"] {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.packetPanel {
+  min-width: 0;
+}
+
+.packetHeading > svg {
+  color: var(--accent);
+}
+
+.packetData {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0 0;
+}
+
+.packetData > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.packetData dt {
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+.packetData dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  font-family: Consolas, monospace;
+  font-size: var(--text-body);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+@media (max-width: 1000px) {
+  .controlGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .drivePanel { grid-column: auto; }
+
+  .sidePanel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto;
+    align-items: start;
+  }
+}
+
+@media (max-width: 700px) {
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: 12px 0;
+  }
+
+  .headerRow,
+  .brand {
+    align-items: stretch;
+  }
+
+  .headerRow {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .brand {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .brand h1 {
+    font-size: var(--text-section);
+  }
+
+  .headerRow nav {
+    justify-content: flex-end;
+  }
+
+  .content {
+    gap: 16px;
+    padding-top: 16px;
+  }
+
+  .metrics {
+    gap: 8px;
+  }
+
+  .metric {
+    min-height: 104px;
+    padding: 12px;
+  }
+
+  .metric strong {
+    font-size: var(--text-heading);
+  }
+
+  .metricLabel {
+    gap: 4px;
+    overflow-wrap: anywhere;
+  }
+
+  .sidePanel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bluetooth .dpad {
+    width: min(100%, 300px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motorFill {
+    transition: none;
+  }
+}
+
+.bluetooth[data-motion="off"] .motorFill {
+  transition: none;
+}

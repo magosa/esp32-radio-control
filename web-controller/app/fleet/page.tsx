@@ -187,7 +187,7 @@ export default function FleetDashboardPage() {
         </span>
       </div>
       <nav className={styles.headerActions} aria-label="フリートナビゲーション">
-        <Link href="/" className={styles.secondary} aria-label="Bluetooth" title="Bluetooth"><Bluetooth aria-hidden="true" /><span>Bluetooth</span></Link>
+        <Link href="/bluetooth" className={styles.secondary} aria-label="Bluetooth" title="Bluetooth"><Bluetooth aria-hidden="true" /><span>Bluetooth</span></Link>
         <Link href="/fleet/settings" className={styles.secondary} aria-label="表示設定" title="表示設定"><Settings2 aria-hidden="true" /><span>表示設定</span></Link>
         <button className={styles.emergency} onClick={emergencyStop} disabled={!connected}>
           <Square aria-hidden="true" />全台停止

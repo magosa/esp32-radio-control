@@ -18,12 +18,37 @@ TFTは書き込み専用でSPI MISOを無効にしています。GPIO19をMISO�
 L298NのENA／ENBジャンパーはPWM入力に合わせて外し、基板間GNDを共通にしてください。
 モーター電源をESP32の3.3Vから取らず、モーター・ドライバーの定格に合わせます。
 
+### LilyGO T-Display-S3 (標準版)
+
+同じスケッチは`CONFIG_IDF_TARGET_ESP32S3`でLilyGO標準版の8-bitパラレルLCDへ切り替わります。
+GPIO15で周辺電源、GPIO38でバックライトを有効化します。画面の8-bitデータ線はGPIO39–42、45–48です。
+タッチ版やSD Shield付きの場合は、下記モーターGPIOが周辺機能と競合しないことを確認してから使ってください。
+
+| L298N信号 | ESP32-S3 GPIO |
+| --- | --- |
+| ENA (右PWM) | 1 |
+| IN1 / IN2 (右方向) | 2 / 10 |
+| IN3 / IN4 (左方向) | 11 / 12 |
+| ENB (左PWM) | 13 |
+
+旧割当のGPIO19はUSB D-と競合するため使いません。LCD・USB・ボタンを避けるこの割当にL298Nを配線し直してください。
+モーター電源をESP32の3.3Vから取らず、L298NとESP32のGNDを共通にします。
+
+追加ライブラリ **GFX Library for Arduino** を導入します。
+
+```sh
+arduino-cli lib install "GFX Library for Arduino"
+arduino-cli compile --fqbn esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi firmware/esp32_rc_car
+```
+
+LCDピン配置と初期化は[LilyGO公式資料](https://github.com/Xinyuan-LilyGO/T-Display-S3)に基づきます。
+
 `TRANSPORT_MODE` は0=WebSocket、1=BLE（NUS）、2=Classic BT（SPP）です。
 同時使用ではなくビルド時の切替です。既定は0で、CLIの`-DTRANSPORT_MODE`でも切り替えられます。
 BLE／SPPの従来パケット（例 `a,190,190;`）と停止`e`、表情・レイアウトは維持します。
 
 Arduinoライブラリ: **WebSockets**（Links2004）、**ArduinoJson**（6系API対応）、
-**Adafruit GFX Library**、**Adafruit ST7735 and ST7789 Library**。
+**Adafruit GFX Library**、**Adafruit ST7735 and ST7789 Library**、**GFX Library for Arduino**（T-Display-S3用）。
 WiFi／Preferences／BLE／BluetoothSerialはESP32コア付属です。
 検証環境はArduino CLI 1.5.1、ESP32 Core 3.3.11。Core 2系はPWM互換分岐を保持していますが、
 今回の移行ではコンパイルしていません。
