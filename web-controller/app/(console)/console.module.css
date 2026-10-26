@@ -308,3 +308,41 @@
 @supports ((mask-image: url("/appearance/glass-folds.png")) or (-webkit-mask-image: url("/appearance/glass-folds.png"))) {
   .fleet::before { background: linear-gradient(125deg, var(--primary-300), var(--primary-tint) 48%, var(--backdrop-secondary)); -webkit-mask: url("/appearance/glass-folds.png") center / cover no-repeat; mask: url("/appearance/glass-folds.png") center / cover no-repeat; }
 }
+.fieldPage, .localizerPage { max-width: 960px; margin: 24px auto 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--card-gap); }
+.fieldCard { composes: preferenceCard; min-width: 0; }
+.fieldCard h2 { margin-bottom: 0; }
+.fleet .fieldMap { display: block; width: 100%; height: auto; max-height: 70dvh; }
+.fieldSurface { fill: var(--surface-inset); stroke: var(--line); stroke-width: 3; }
+.fieldReference { fill: var(--muted); opacity: .6; }
+.fieldLabel { fill: var(--muted); font-size: 26px; font-family: "Consolas", monospace; }
+.fieldTrail { fill: none; stroke: var(--primary-500); stroke-width: 4; stroke-linejoin: round; opacity: .55; }
+.fieldRobot rect { fill: var(--selected); stroke: var(--accent); stroke-width: 4; }
+.fieldRobot line { stroke: var(--accent); stroke-width: 6; stroke-linecap: round; }
+.fieldRobot text { fill: var(--ink); font-size: 28px; font-weight: 700; }
+.fieldRobot[data-outside="true"] rect, .fieldRobot[data-outside="true"] line { stroke: var(--warning-ink); }
+.poseTable { width: 100%; border-collapse: collapse; font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
+.poseTable th, .poseTable td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.poseTable th { color: var(--muted); font-weight: 600; }
+.poseTable td svg { width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; color: var(--warning-ink); }
+.trackingLine { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--muted); font-size: var(--text-meta); }
+.trackingLine[data-tracking="tracking"] { color: var(--accent); }
+.trackingLine:not([data-tracking="tracking"]):not([data-tracking="unassigned"]) { color: var(--warning-ink); }
+.robotCard input[type="number"] { display: block; width: 100%; min-height: 44px; margin-top: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--glass-input); color: var(--ink); font-size: var(--text-body); }
+.robotCard small { display: block; margin-top: 4px; color: var(--warning-ink); }
+.localizerControls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.localizerControls label { flex: 1 1 220px; min-width: 0; color: var(--muted); font-size: var(--text-meta); }
+.localizerControls select { width: 100%; margin-top: 6px; }
+.localizerStatus { margin-top: 12px; font-size: var(--text-meta); overflow-wrap: anywhere; }
+.localizerStatus[data-state="error"] { color: var(--warning-ink); font-weight: 600; }
+.localizerStats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-top: 16px; }
+.localizerStats dt { color: var(--muted); font-size: var(--text-meta); }
+.localizerStats dd { font-variant-numeric: tabular-nums; font-weight: 600; }
+.localizerPreview canvas { display: block; width: 100%; height: auto; border-radius: 4px; background: #000; }
+.localizerPreview:empty { display: none; }
+.fieldForm { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
+.fieldForm label { color: var(--muted); font-size: var(--text-meta); }
+.fieldForm input { display: block; width: 100%; min-height: 44px; margin-top: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--glass-input); color: var(--ink); font-size: var(--text-body); }
+.fieldForm p { grid-column: 1 / -1; }
+@media (max-width: 700px) {
+  .poseTable th, .poseTable td { padding: 6px 4px; }
+}

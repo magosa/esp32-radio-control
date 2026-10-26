@@ -126,6 +126,15 @@
 
 ### PR2: 測位・表示・安全（Phase 1〜5）
 
+状態: 実装済み（ブランチ `feat/ar-localizer`）。実機計測（受入基準）は未実施です。実装時に次の点を計画から変更しました。
+
+- 検出ループは `LocalizerRuntimeProvider`（`hooks/useLocalizerRuntime.tsx`）でシェルに常駐し、`/localizer` は操作UIとプレビュー表示だけを持ちます。
+- `/field`（フロアマップ）をこのPRで実装しました。`/routes` はPR3で追加します。
+- マーカー高さ・マーカーIDは `/robots` で設定します。領域設定は `/localizer` で設定し、測位中は変更できません。
+- Origin検証を追加しました（レビュー指摘）。外れ値ゲートと鮮度判定は `fleet/poseStore.ts` です。
+- 受入基準の計測に備え、`/localizer` と Hub の「周期（fps）」「遅延（撮影→Hub受信の中央値）」を表示します。
+- カメラなしで確認するための `npm run sim:localizer` を追加しました。ブラウザーのフェイクカメラで、検出ループ・Hub送信・画面遷移後の継続を確認済みです（この条件ではマーカーは映らないため座標精度は未確認）。
+
 1. 測位コア: `web-controller/localization/`に`geometry.ts`・型・`detector.ts`。ロボット1〜4台の可変、ID0〜3。スキーマは`robot_pose/v3`。
 2. `@techstark/opencv-js`を4.12.0-release.1で固定し、Route Handlerの`/vendor/opencv.js`で配信。Next側にCSPがないため`unsafe-eval`設定は不要。
 3. 原本テストを`tsx --test`形式へ移植（投影往復、3枚フォールバック、辞書全50ID×4回転、小マーカー検出）。

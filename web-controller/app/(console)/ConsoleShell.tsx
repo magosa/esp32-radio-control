@@ -3,14 +3,17 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bluetooth, Bot, Gamepad2, Settings2, Square, Wifi, WifiOff } from "lucide-react";
+import { Bluetooth, Bot, Gamepad2, Map as MapIcon, Radar, Settings2, Square, Wifi, WifiOff } from "lucide-react";
 import { FleetSocketProvider, useFleetSocket } from "@/hooks/useFleetSocket";
+import { LocalizerRuntimeProvider, useLocalizerRuntime } from "@/hooks/useLocalizerRuntime";
 import { useFleetAppearance } from "@/hooks/useFleetAppearance";
 import styles from "./console.module.css";
 
 const NAV = [
   { href: "/control", label: "制御", title: "フリート管理", Icon: Gamepad2 },
+  { href: "/field", label: "フロア", title: "フロアマップ", Icon: MapIcon },
   { href: "/robots", label: "ロボット", title: "ロボット構成", Icon: Bot },
+  { href: "/localizer", label: "測位", title: "測位（俯瞰カメラ）", Icon: Radar },
   { href: "/settings", label: "表示設定", title: "表示設定", Icon: Settings2 },
   { href: "/direct/bluetooth", label: "Bluetooth", title: "Bluetooth", Icon: Bluetooth },
 ] as const;
@@ -18,6 +21,7 @@ const NAV = [
 function ConsoleFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { status, emergencyStop } = useFleetSocket();
+  const localizer = useLocalizerRuntime();
   const { appearance, theme, style } = useFleetAppearance();
   const connected = status === "connected";
   const connectionLabel = { connected: "ハブ接続中", connecting: "ハブ接続中…",
@@ -30,6 +34,9 @@ function ConsoleFrame({ children }: { children: ReactNode }) {
         <span className={styles.connection} role="status">
           {connected ? <Wifi aria-hidden="true" /> : <WifiOff aria-hidden="true" />}{connectionLabel}
         </span>
+        {localizer.status === "running" && <span className={styles.connection} role="status">
+          <Radar aria-hidden="true" />測位中
+        </span>}
       </div>
       <nav className={styles.headerActions} aria-label="フリートナビゲーション">
         {NAV.map(({ href, label, Icon }) => <Link key={href} href={href} className={styles.secondary}
@@ -46,5 +53,5 @@ function ConsoleFrame({ children }: { children: ReactNode }) {
 }
 
 export function ConsoleShell({ children }: { children: ReactNode }) {
-  return <FleetSocketProvider><ConsoleFrame>{children}</ConsoleFrame></FleetSocketProvider>;
+  return <FleetSocketProvider><LocalizerRuntimeProvider><ConsoleFrame>{children}</ConsoleFrame></LocalizerRuntimeProvider></FleetSocketProvider>;
 }

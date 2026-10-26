@@ -7,7 +7,9 @@ import type {
   DisplayLayoutMode,
   DriveCommand,
   ExpressionId,
+  FieldConfig,
   PhysicalDeviceState,
+  PoseStateMessage,
   RobotState,
   RouteStatusMessage,
   VehicleMode,
@@ -29,6 +31,14 @@ export interface VehicleImage {
   capturedAt: number;
 }
 
+// 保存系操作(割当・設定)の進行状況。HubのoperationResultで確定する。
+export interface PendingOperation {
+  requestId: string;
+  pending: boolean;
+  error?: string;
+  done?: boolean;
+}
+
 function useFleetSocketConnection() {
   const [status, setStatus] = useState<FleetConnectionStatus>("disconnected");
   const [vehicles, setVehicles] = useState<VehicleState[]>([]);
@@ -38,6 +48,9 @@ function useFleetSocketConnection() {
   const [routeStatus, setRouteStatus] = useState<RouteStatusMessage | null>(null);
   const [availableRoutes, setAvailableRoutes] = useState<RouteInfo[]>([]);
   const [images, setImages] = useState<Record<string, VehicleImage>>({});
+  const [poseState, setPoseState] = useState<PoseStateMessage | null>(null);
+  const [markerAssignment, setMarkerAssignment] = useState<PendingOperation & { robotId: string } | null>(null);
+  const [fieldSave, setFieldSave] = useState<PendingOperation | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const assignmentSequence = useRef(0);
@@ -63,6 +76,9 @@ function useFleetSocketConnection() {
         setStatus("disconnected");
         setImages({});
         setAssignment((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。保存状態を確認してください" } : previous);
+        setMarkerAssignment((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。保存状態を確認してください" } : previous);
+        setFieldSave((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。保存状態を確認してください" } : previous);
+        setPoseState(null);
         reconnectTimer = setTimeout(connect, 2000);
       };
       ws.onerror = () => { if (!disposed) setStatus("error"); };
@@ -79,6 +95,12 @@ function useFleetSocketConnection() {
       } else if (msg.type === "operationResult") {
         setAssignment((previous) => previous?.requestId === msg.requestId
           ? { ...previous, pending: false, error: msg.ok ? undefined : msg.error || "保存に失敗しました" } : previous);
+        setMarkerAssignment((previous) => previous?.requestId === msg.requestId
+          ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "保存に失敗しました" } : previous);
+        setFieldSave((previous) => previous?.requestId === msg.requestId
+          ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "保存に失敗しました" } : previous);
+      } else if (msg.type === "poseState") {
+        setPoseState(msg);
       } else if (msg.type === "routeStatus") {
         setRouteStatus(msg);
       } else if (msg.type === "imageFrame") {
@@ -112,6 +134,20 @@ function useFleetSocketConnection() {
     return () => clearTimeout(timer);
   }, [assignment]);
 
+  useEffect(() => {
+    if (!markerAssignment?.pending) return;
+    const timer = setTimeout(() => setMarkerAssignment((previous) => previous?.pending
+      ? { ...previous, pending: false, error: "保存結果を確認できませんでした。接続を確認してください" } : previous), 8000);
+    return () => clearTimeout(timer);
+  }, [markerAssignment]);
+
+  useEffect(() => {
+    if (!fieldSave?.pending) return;
+    const timer = setTimeout(() => setFieldSave((previous) => previous?.pending
+      ? { ...previous, pending: false, error: "保存結果を確認できませんでした。接続を確認してください" } : previous), 8000);
+    return () => clearTimeout(timer);
+  }, [fieldSave]);
+
   const send = useCallback((msg: ClientInboundMessage) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -125,6 +161,18 @@ function useFleetSocketConnection() {
     const requestId = `${Date.now()}-${++assignmentSequence.current}`;
     const sent = send({ type: "assignCamera", requestId, robotId, cameraDeviceId });
     setAssignment({ requestId, robotId, pending: sent, error: sent ? undefined : "ハブ未接続" });
+  }, [send]);
+
+  const assignMarker = useCallback((robotId: string, markerId: number | null, markerHeightMm?: number) => {
+    const requestId = `${Date.now()}-${++assignmentSequence.current}`;
+    const sent = send({ type: "assignMarker", requestId, robotId, markerId, markerHeightMm });
+    setMarkerAssignment({ requestId, robotId, pending: sent, error: sent ? undefined : "ハブ未接続" });
+  }, [send]);
+
+  const saveFieldConfig = useCallback((config: FieldConfig) => {
+    const requestId = `${Date.now()}-${++assignmentSequence.current}`;
+    const sent = send({ type: "setFieldConfig", requestId, config });
+    setFieldSave({ requestId, pending: sent, error: sent ? undefined : "ハブ未接続" });
   }, [send]);
 
   const sendCommand = useCallback(
@@ -202,6 +250,11 @@ function useFleetSocketConnection() {
     robots,
     assignment,
     assignCamera,
+    poseState,
+    markerAssignment,
+    assignMarker,
+    fieldSave,
+    saveFieldConfig,
     routeStatus,
     availableRoutes,
     images,

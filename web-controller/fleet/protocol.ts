@@ -18,6 +18,10 @@ export interface RobotDefinition {
   robotId: string;
   driveDeviceId: string;
   cameraDeviceId: string | null;
+  // 俯瞰カメラで識別するArUco(DICT_4X4_50)のID(0-3)。未設定はnull。
+  markerId: number | null;
+  // 走行面からマーカー印刷面までの高さ(mm)。高さ補正に使う。
+  markerHeightMm: number;
 }
 
 // ロボット顔の表情ID (esp32_rc_car.ino の enum ExpressionId と同期させること)
@@ -138,12 +142,6 @@ export interface VehicleTelemetry {
   uptimeMs: number;
 }
 
-export interface VehiclePosition {
-  x: number;
-  y: number;
-  heading: number;
-}
-
 export interface PhysicalDeviceState extends DeviceDescription {
   status: VehicleStatus;
   lastSeen: number;
@@ -165,8 +163,6 @@ export interface VehicleState extends PhysicalDeviceState {
   telemetry: VehicleTelemetry | null;
   // 最新のスナップショットを受信した時刻(ms epoch)。未取得のuseundefined。
   lastImageAt?: number;
-  // 外部トラッキング(将来拡張)導入時に位置情報を格納するための予約フィールド。現時点では未使用。
-  position?: VehiclePosition;
 }
 
 // ---- 操作UI -> Server ----
@@ -238,7 +234,9 @@ export type ClientInboundMessage =
   | ClientStreamRequestMessage
   | ClientExpressionRequestMessage
   | ClientDisplayLayoutRequestMessage
-  | { type: "assignCamera"; requestId: string; robotId: string; cameraDeviceId: string | null };
+  | { type: "assignCamera"; requestId: string; robotId: string; cameraDeviceId: string | null }
+  | { type: "assignMarker"; requestId: string; robotId: string; markerId: number | null; markerHeightMm?: number }
+  | { type: "setFieldConfig"; requestId: string; config: FieldConfig };
 
 // ---- Server -> 操作UI ----
 
@@ -269,4 +267,91 @@ export interface OperationResultMessage {
   error?: string;
 }
 
-export type ClientOutboundMessage = FleetStateMessage | RouteStatusMessage | ImageFrameBroadcastMessage | OperationResultMessage;
+export type ClientOutboundMessage = FleetStateMessage | RouteStatusMessage | ImageFrameBroadcastMessage | OperationResultMessage | PoseStateMessage;
+
+// ---- 測位(俯瞰カメラのArUco検出) ----
+// 座標はrobot_pose/v3と同じ: 領域左下(0,0)・右上(1600,900)の比率座標、yawは右0°・反時計回り正。
+
+export interface FieldConfig {
+  cameraHeightMm: number;
+  widthMm: number;
+  heightMm: number;
+  referenceSizeMm: number;
+}
+
+export interface LocalizerMarkerPose {
+  markerId: number;
+  valid: boolean;
+  x?: number;
+  y?: number;
+  yawDeg?: number;
+  insideField?: boolean;
+}
+
+// ---- Localizer(/ws/localizer) -> Server ----
+
+export interface LocalizerHelloMessage {
+  type: "localizerHello";
+  camera: string;
+  width: number;
+  height: number;
+}
+
+export interface PoseFrameMessage {
+  type: "poseFrame";
+  frameId: number;
+  // フレームの撮影時刻(ms epoch)。Hubと同じPCの時計を使う。
+  capturedAt: number;
+  referenceCount: number;
+  extrinsicsOk: boolean;
+  markers: LocalizerMarkerPose[];
+}
+
+export interface LocalizerStatusMessage {
+  type: "localizerStatus";
+  state: "running" | "stopped";
+  reason?: string;
+}
+
+export type LocalizerInboundMessage = LocalizerHelloMessage | PoseFrameMessage | LocalizerStatusMessage;
+
+// ---- Server -> 操作UI ----
+
+// tracking: 最新フレームで検出・妥当 / lost: フレームは届いているが未検出・棄却
+// stale: フレームが途絶えた・localizer未接続・停止 / unassigned: マーカー未割当
+export type TrackingState = "tracking" | "stale" | "lost" | "unassigned";
+
+export interface RobotPoseState {
+  robotId: string;
+  deviceId: string;
+  markerId: number | null;
+  tracking: TrackingState;
+  // trackingのときのみ。mm(原点左下、X右・Y上)、headingは右0°・反時計回り正。
+  xMm?: number;
+  yMm?: number;
+  headingDeg?: number;
+  insideField?: boolean;
+  // 姿勢を受信してからの経過(ms)
+  ageMs?: number;
+}
+
+export interface LocalizerState {
+  connected: boolean;
+  running: boolean;
+  camera?: string;
+  referenceCount: number;
+  extrinsicsOk: boolean;
+  // 最新フレームの受信からの経過(ms)。未受信はnull。
+  frameAgeMs: number | null;
+  fps: number | null;
+  // 撮影からHub受信までの遅延(ms)。直近フレームの中央値。
+  latencyMs: number | null;
+  stopReason?: string;
+}
+
+export interface PoseStateMessage {
+  type: "poseState";
+  localizer: LocalizerState;
+  field: FieldConfig;
+  poses: RobotPoseState[];
+}
