@@ -43,6 +43,21 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,Flash
 
 LCDピン配置と初期化は[LilyGO公式資料](https://github.com/Xinyuan-LilyGO/T-Display-S3)に基づきます。
 
+#### 横使い(USBコネクタが右)
+
+既定は縦使い（170×320、`setRotation(0)`）です。`DISPLAY_ORIENTATION=1` を指定すると、同じスケッチが横使い（320×170、`setRotation(1)`）でビルドされます。
+横使いはT-Display-S3専用で、ESP32-S3以外では`#error`になります。
+
+```sh
+arduino-cli compile --fqbn esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi --build-property "compiler.cpp.extra_flags=-DDISPLAY_ORIENTATION=1" firmware/esp32_rc_car
+```
+
+- 顔は縮小せず中央に置きます。左右の各85pxが情報パネルです。
+- 通常の分割表示は、左が通信状態とコマンド、右がL/R速度バーです。通信断絶時は、左が`NO LINK`、右が`Fleet Hub disconnected`とHEAPです。
+- 全画面表示は顔のみです。目と口の間隔を詰めて高さ170pxに収めています。
+- `setDisplayLayout`の`split`／`full`／`auto`の意味は縦使いと同じで、Hub側の変更は不要です。
+- `setRotation(1)`でUSBが右になることは実機で確認してください。逆なら`TFT_ROTATION`を3にします。
+
 `TRANSPORT_MODE` は0=WebSocket、1=BLE（NUS）、2=Classic BT（SPP）です。
 同時使用ではなくビルド時の切替です。既定は0で、CLIの`-DTRANSPORT_MODE`でも切り替えられます。
 BLE／SPPの従来パケット（例 `a,190,190;`）と停止`e`、表情・レイアウトは維持します。

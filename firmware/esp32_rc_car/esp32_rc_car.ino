@@ -167,8 +167,27 @@ struct ExpressionParams {
   #define TFT_BL      32
   Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 #endif
-#define TFT_PANEL_W 170
-#define TFT_PANEL_H 320
+// 画面の向き: ORIENT_PORTRAIT(縦・既定) / ORIENT_LANDSCAPE(横・T-Display-S3のみ、USBコネクタが右)
+#define ORIENT_PORTRAIT  0
+#define ORIENT_LANDSCAPE 1
+#ifndef DISPLAY_ORIENTATION
+  #define DISPLAY_ORIENTATION ORIENT_PORTRAIT
+#endif
+#if DISPLAY_ORIENTATION == ORIENT_LANDSCAPE && !CONFIG_IDF_TARGET_ESP32S3
+  #error "DISPLAY_ORIENTATION=ORIENT_LANDSCAPE is supported only on ESP32-S3 (T-Display-S3)"
+#endif
+#define TFT_NATIVE_W 170
+#define TFT_NATIVE_H 320
+#if DISPLAY_ORIENTATION == ORIENT_LANDSCAPE
+  #define TFT_PANEL_W 320
+  #define TFT_PANEL_H 170
+  #define TFT_ROTATION 1
+#else
+  #define TFT_PANEL_W 170
+  #define TFT_PANEL_H 320
+  #define TFT_ROTATION 0
+#endif
+#if DISPLAY_ORIENTATION == ORIENT_PORTRAIT
 const int SPLIT_BOTTOM_Y = TFT_PANEL_H / 2;         // 下半分(センサー情報/アラート)の開始Y座標
 const int SPLIT_BOTTOM_H = TFT_PANEL_H - SPLIT_BOTTOM_Y;
 
@@ -177,7 +196,11 @@ const int SPLIT_BOTTOM_H = TFT_PANEL_H - SPLIT_BOTTOM_Y;
 // ※setup()内で遅延確保する(グローバルオブジェクトのままだと非常に早い段階の静的初期化で
 // 大きなmallocが走り、esp_timerタスク生成用のヒープが足りず起動直後にpanic・リブートする)
 GFXcanvas16 *bottomCanvas = nullptr;
-
+#else
+// 横版: 顔(幅150)を中央に置き、左右の各SIDE_PANEL_Wに情報を描く。左右で1枚のキャンバスを使い回す(縦版と同様にsetup()内で遅延確保)。
+const int SIDE_PANEL_W = 85;
+GFXcanvas16 *sideCanvas = nullptr;
+#endif
 // ----------------------------------------------------------------------------
 // ピンアサイン定義 (L298N 接続、6ピン直接制御)
 // TFTがGPIO2/4/15/18/23/32を専有するため、空いているGPIOに方向ピンを割り当てる、E
@@ -389,6 +412,7 @@ void parseCommandPacketFast(const char* buf, size_t len) {
 // ----------------------------------------------------------------------------
 // 画面下半分(分割レイアウト時)の描画処理。センサー情報の簡易版、または通信断絶時のアラートを表示する。
 // ----------------------------------------------------------------------------
+#if DISPLAY_ORIENTATION == ORIENT_PORTRAIT
 void updateSplitBottom(SplitBottomContent content) {
   if (bottomCanvas == nullptr) return;
   bottomCanvas->fillScreen(ST77XX_BLACK);
@@ -446,6 +470,75 @@ void updateSplitBottom(SplitBottomContent content) {
 
   display.drawRGBBitmap(0, SPLIT_BOTTOM_Y, bottomCanvas->getBuffer(), TFT_PANEL_W, SPLIT_BOTTOM_H);
 }
+#else
+// ----------------------------------------------------------------------------
+// 横版の分割レイアウト: 顔の左右に情報を描画する。
+// 通常時: 左=通信状態とコマンド / 右=L・R速度バー。通信断絶時: 左=NO LINK / 右=詳細とHEAP。
+// ----------------------------------------------------------------------------
+void updateSplitSides(SplitBottomContent content) {
+  if (sideCanvas == nullptr) return;
+
+  // 左パネル
+  sideCanvas->fillScreen(ST77XX_BLACK);
+  sideCanvas->drawFastVLine(SIDE_PANEL_W - 1, 0, TFT_PANEL_H, ST77XX_WHITE);
+  if (content == SPLIT_BOTTOM_ALERT) {
+    sideCanvas->setTextSize(2);
+    sideCanvas->setTextColor(ST77XX_RED);
+    sideCanvas->setCursor(8, 66);
+    sideCanvas->print("NO");
+    sideCanvas->setCursor(8, 86);
+    sideCanvas->print("LINK");
+  } else {
+    sideCanvas->setTextSize(1);
+    sideCanvas->setTextColor(isDeviceConnected ? ST77XX_GREEN : ST77XX_RED);
+    sideCanvas->setCursor(4, 74);
+#if TRANSPORT_MODE == MODE_WEBSOCKET
+    sideCanvas->print(isDeviceConnected ? "WS: OK" : "WS: WAIT");
+#elif TRANSPORT_MODE == MODE_BLE
+    sideCanvas->print(isDeviceConnected ? "BLE: OK" : "BLE: WAIT");
+#else
+    sideCanvas->print(isDeviceConnected ? "BT: OK" : "BT: WAIT");
+#endif
+    sideCanvas->setTextColor(ST77XX_YELLOW);
+    sideCanvas->setCursor(4, 90);
+    switch (currentCommand) {
+      case 'a': sideCanvas->print("FORWARD"); break;
+      case 'b': sideCanvas->print("REVERSE"); break;
+      case 'c': sideCanvas->print("TURN-R"); break;
+      case 'd': sideCanvas->print("TURN-L"); break;
+      default:  sideCanvas->print("STOP"); break;
+    }
+  }
+  display.drawRGBBitmap(0, 0, sideCanvas->getBuffer(), SIDE_PANEL_W, TFT_PANEL_H);
+
+  // 右パネル
+  sideCanvas->fillScreen(ST77XX_BLACK);
+  sideCanvas->drawFastVLine(0, 0, TFT_PANEL_H, ST77XX_WHITE);
+  sideCanvas->setTextSize(1);
+  sideCanvas->setTextColor(ST77XX_WHITE);
+  if (content == SPLIT_BOTTOM_ALERT) {
+    sideCanvas->setCursor(6, 68);
+    sideCanvas->print("Fleet Hub");
+    sideCanvas->setCursor(6, 80);
+    sideCanvas->print("disconnected");
+    sideCanvas->setCursor(6, 100);
+    sideCanvas->printf("HEAP:%luKB", ESP.getFreeHeap() / 1024);
+  } else {
+    sideCanvas->setCursor(6, 50);
+    sideCanvas->printf("L:%3d", currentSpeedL);
+    sideCanvas->drawRect(6, 62, 74, 10, ST77XX_WHITE);
+    int barL = map(constrain(currentSpeedL, 0, 255), 0, 255, 0, 70);
+    if (barL > 0) sideCanvas->fillRect(8, 64, barL, 6, ST77XX_CYAN);
+
+    sideCanvas->setCursor(6, 92);
+    sideCanvas->printf("R:%3d", currentSpeedR);
+    sideCanvas->drawRect(6, 104, 74, 10, ST77XX_WHITE);
+    int barR = map(constrain(currentSpeedR, 0, 255), 0, 255, 0, 70);
+    if (barR > 0) sideCanvas->fillRect(8, 106, barR, 6, ST77XX_CYAN);
+  }
+  display.drawRGBBitmap(TFT_PANEL_W - SIDE_PANEL_W, 0, sideCanvas->getBuffer(), SIDE_PANEL_W, TFT_PANEL_H);
+}
+#endif
 
 
 // ============================================================================
@@ -483,11 +576,15 @@ const ExpressionParams EXPRESSION_TABLE[EXPR_COUNT] = {
 };
 
 // ----------------------------------------------------------------------------
-// 顔レイアウト定数 (setRotation(2)適用後の170x320ポートレート座標系)
+// 顔レイアウト定数 (縦: setRotation(0)適用後の170x320座標系 / 横: setRotation(1)適用後の320x170座標系)
 // ----------------------------------------------------------------------------
 const int FACE_EYE_L_X = 44;
 const int FACE_EYE_R_X = 106;
+#if DISPLAY_ORIENTATION == ORIENT_LANDSCAPE
+const int FACE_EYE_Y = 40; // 横版は目キャンバスを高さ80に詰めたため中心も40(全16表情の描画範囲は中心から±37px)
+#else
 const int FACE_EYE_Y = 60;
+#endif
 const int FACE_EYE_RADIUS = 26;
 const int FACE_EYE_BASE_HW = 20; // パラメトリック目の標準状態での半幅(px)
 const int FACE_EYE_BASE_HH = 24; // パラメトリック目の標準状態での半高さ(px)
@@ -496,8 +593,15 @@ const int FACE_MOUTH_Y = 30;
 const int FACE_MOUTH_W = 30; // 半幁E
 
 // 部刁E�E描画用バウンチE��ングボックス(目領域と口領域は重ならなぁE��ぁE��訁E
+#if DISPLAY_ORIENTATION == ORIENT_LANDSCAPE
+// 横版: 目(高さ80)と口(高さ60)を隙間なく縦に並べ、320x170の中央(縦余白15px)へ配置する
+const int FACE_EYES_BOX_X = 85, FACE_EYES_BOX_Y = 15, FACE_EYES_BOX_W = 150, FACE_EYES_BOX_H = 80;
+const int FACE_MOUTH_BOX_X = 110, FACE_MOUTH_BOX_Y = 95, FACE_MOUTH_BOX_W = 100, FACE_MOUTH_BOX_H = 60;
+static_assert(FACE_EYES_BOX_W + SIDE_PANEL_W * 2 == TFT_PANEL_W, "side panels must fill both sides of the face");
+#else
 const int FACE_EYES_BOX_X = 10, FACE_EYES_BOX_Y = 60, FACE_EYES_BOX_W = 150, FACE_EYES_BOX_H = 120;
 const int FACE_MOUTH_BOX_X = 35, FACE_MOUTH_BOX_Y = 190, FACE_MOUTH_BOX_W = 100, FACE_MOUTH_BOX_H = 60;
+#endif
 
 // 目/口のオフスクリーンバッファ(2本値キャンバス)。毎フレームdrawRGBBitmapで一括転送してチラつきを防ぐ。
 GFXcanvas16 eyesCanvas(FACE_EYES_BOX_W, FACE_EYES_BOX_H);
@@ -506,6 +610,7 @@ GFXcanvas16 mouthCanvas(FACE_MOUTH_BOX_W, FACE_MOUTH_BOX_H);
 // ----------------------------------------------------------------------------
 // 上下分割レイアウト用の縮小顔(上半分に顔、下半分にセンサー情報/アラートを表示する)
 // ----------------------------------------------------------------------------
+#if DISPLAY_ORIENTATION == ORIENT_PORTRAIT
 const float SPLIT_FACE_SCALE = 0.60f;
 const int SPLIT_EYES_W = (int)(FACE_EYES_BOX_W * SPLIT_FACE_SCALE);
 const int SPLIT_EYES_H = (int)(FACE_EYES_BOX_H * SPLIT_FACE_SCALE);
@@ -517,6 +622,7 @@ const int SPLIT_MOUTH_X = (TFT_PANEL_W - SPLIT_MOUTH_W) / 2;
 const int SPLIT_MOUTH_Y = SPLIT_EYES_Y + SPLIT_EYES_H + 6;
 GFXcanvas16 eyesCanvasSmall(SPLIT_EYES_W, SPLIT_EYES_H);
 GFXcanvas16 mouthCanvasSmall(SPLIT_MOUTH_W, SPLIT_MOUTH_H);
+#endif
 
 const unsigned long FACE_INTERVAL_MS = 60;             // 表惁E��面の更新周朁E紁E6fps)
 const unsigned long BLINK_ANIM_MS = 110;               // まばたき1フェーズ(閁E閁Eあたり�E所要時閁E
@@ -1015,6 +1121,11 @@ void updateFace(FaceLayoutMode layout) {
   mouthCanvas.fillScreen(ST77XX_BLACK);
   drawMouth(mouthCanvas, p.mouthShape, p.mouthColor, mouthIntensity);
 
+#if DISPLAY_ORIENTATION == ORIENT_LANDSCAPE
+  // 横版は分割時も顔を実寸で中央表示する(左右は情報パネル)
+  display.drawRGBBitmap(FACE_MOUTH_BOX_X, FACE_MOUTH_BOX_Y, mouthCanvas.getBuffer(), FACE_MOUTH_BOX_W, FACE_MOUTH_BOX_H);
+  display.drawRGBBitmap(FACE_EYES_BOX_X, FACE_EYES_BOX_Y, eyesCanvas.getBuffer(), FACE_EYES_BOX_W, FACE_EYES_BOX_H);
+#else
   if (layout == LAYOUT_FULL_FACE) {
     display.drawRGBBitmap(FACE_MOUTH_BOX_X, FACE_MOUTH_BOX_Y, mouthCanvas.getBuffer(), FACE_MOUTH_BOX_W, FACE_MOUTH_BOX_H);
     display.drawRGBBitmap(FACE_EYES_BOX_X, FACE_EYES_BOX_Y, eyesCanvas.getBuffer(), FACE_EYES_BOX_W, FACE_EYES_BOX_H);
@@ -1024,6 +1135,7 @@ void updateFace(FaceLayoutMode layout) {
     display.drawRGBBitmap(SPLIT_EYES_X, SPLIT_EYES_Y, eyesCanvasSmall.getBuffer(), SPLIT_EYES_W, SPLIT_EYES_H);
     display.drawRGBBitmap(SPLIT_MOUTH_X, SPLIT_MOUTH_Y, mouthCanvasSmall.getBuffer(), SPLIT_MOUTH_W, SPLIT_MOUTH_H);
   }
+#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -1238,8 +1350,8 @@ void setup() {
 #else
   SPI.begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);
 #endif
-  display.init(TFT_PANEL_W, TFT_PANEL_H);
-  display.setRotation(2); // 170x320のポートレート表示(USBポートを下にして使用、実機確認により180度反転)
+  display.init(TFT_NATIVE_W, TFT_NATIVE_H);
+  display.setRotation(TFT_ROTATION); // 縦=0(USB下、rotation 2は上下反転を実機確認) / 横=1(USB右、要実機確認)
   display.fillScreen(ST77XX_BLACK);
   display.setTextColor(ST77XX_WHITE);
   display.setTextSize(2);
@@ -1250,7 +1362,11 @@ void setup() {
   display.println(deviceId);
 
   // 起動最初期のヒープ圧迸を避けるため、分割レイアウト下半分キャンバスはここで遅延確保する
+#if DISPLAY_ORIENTATION == ORIENT_LANDSCAPE
+  sideCanvas = new GFXcanvas16(SIDE_PANEL_W, TFT_PANEL_H);
+#else
   bottomCanvas = new GFXcanvas16(TFT_PANEL_W, SPLIT_BOTTOM_H);
+#endif
 
   // 2. モーターピン初期化(L298Nを6ピンで直接制御: ENA/IN1/IN2/ENB/IN3/IN4)
   pinMode(PIN_IN1, OUTPUT);
@@ -1417,7 +1533,11 @@ void loop() {
   }
   if (layout == LAYOUT_SPLIT && (now - lastDisplayTime > DISPLAY_INTERVAL_MS)) {
     lastDisplayTime = now;
+#if DISPLAY_ORIENTATION == ORIENT_LANDSCAPE
+    updateSplitSides(bottomContent);
+#else
     updateSplitBottom(bottomContent);
+#endif
   }
 
   // CPUタスク刁E��替え�E隙間を確俁E
