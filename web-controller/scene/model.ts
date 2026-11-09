@@ -1,6 +1,8 @@
 import { CELL_COUNT, AREA_HEIGHT_MM, AREA_WIDTH_MM, EDIT_GRID_OPTIONS } from "./units";
 import { snapToEditGrid } from "./grid";
 import { validateFloorPlan } from "./floorPlan";
+import { defaultId, type IdFactory } from "./ids";
+import { buildNavigation } from "./navigation";
 import {
   SCENE_SCHEMA,
   type Action,
@@ -13,7 +15,7 @@ import {
   type TrackKind,
 } from "./types";
 
-export type IdFactory = () => string;
+export { defaultId, type IdFactory };
 
 export const COLORS = ["#8d9bff", "#58d8ca", "#ffbd70", "#ec87c7", "#73bafa", "#bd9afa"];
 export const KINDS: Record<TrackKind, string> = { robot: "ロボット", human: "人", room: "部屋", display: "画面表示" };
@@ -31,7 +33,6 @@ const ACTION_NAMES: Record<ActionType, string> = {
   "event-start": "イベント開始", "event-end": "イベント終了", unlock: "解錠",
 };
 const MAX_SECONDS = 86400;
-export const defaultId: IdFactory = () => globalThis.crypto.randomUUID();
 const isActor = (kind: TrackKind) => kind === "robot" || kind === "human";
 const byPosition = (track: Track) => [...track.actions].sort((a, b) => a.position - b.position);
 
@@ -97,7 +98,9 @@ export function newAction(map: SceneMap, track: Track, type: ActionType = ACTION
 
 export function projectForSave(project: SceneProject): SceneProject {
   validateProject(project);
-  return structuredClone(project);
+  const saved = structuredClone(project);
+  for (const map of saved.maps) map.navigation = buildNavigation(map);
+  return saved;
 }
 
 type Obj = Record<string, unknown>;

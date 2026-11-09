@@ -159,7 +159,7 @@ test("rejects an actor initial.roomId that is non-empty and does not exist", () 
   rejects((_, m) => { m.tracks[0].initial!.roomId = "missing"; }, /initial\.roomId/);
 });
 
-test.todo("projectForSave output survives a JSON roundtrip through validateProject", () => {
+test("projectForSave output survives a JSON roundtrip through validateProject", () => {
   const project = sample();
   assert.doesNotThrow(() => validateProject(JSON.parse(JSON.stringify(projectForSave(project)))));
 });

@@ -1,6 +1,6 @@
 import { cellColRow, cellNeighbor, type Edge } from "./grid";
 import { boundaryEdge, furnitureCells, regionBounds, validateFloorPlan, type Bounds } from "./floorPlan";
-import { defaultId, type IdFactory } from "./model";
+import { defaultId, type IdFactory } from "./ids";
 import type { Door, SceneMap, Segment, Wall } from "./types";
 import { CELL_COUNT, CELL_MM, COLUMNS, ROWS } from "./units";
 

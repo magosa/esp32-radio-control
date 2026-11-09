@@ -1,4 +1,5 @@
 import type { Edge } from "./grid";
+import type { SceneNavigation } from "./navigation";
 import type { EditGridMm } from "./units";
 
 export const SCENE_SCHEMA = "fleet-scene/v1";
@@ -157,7 +158,7 @@ export interface SceneMap {
   floorPlan?: FloorPlan;
   presentation?: Presentation;
   facingTurns?: boolean;
-  navigation?: unknown;
+  navigation?: SceneNavigation;
 }
 
 export interface SceneProject {
