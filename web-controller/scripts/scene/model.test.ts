@@ -124,10 +124,39 @@ test("rejects join actions and trigger properties", () => {
 
 test("rejects duplicate ids and unresolved references", () => {
   rejects((_, m) => { m.tracks[1].id = m.tracks[0].id; }, /id/);
-  rejects((_, m) => { m.tracks[1].actions[1].targetId = "missing"; }, /targetId/);
+  rejects((_, m) => { m.tracks[1].actions[1].targetId = ""; }, /targetId/);
   rejects((_, m) => { m.tracks[2].actions[2].doorId = "missing"; }, /door/);
   rejects((_, m) => { m.tracks[2].actions[2].roomId = ""; }, /room/);
-  rejects((_, m) => { m.tracks[2].roomId = "missing"; }, /room/);
+});
+
+test("hide/event-end with unresolved or cross-track targetId are harmless no-ops", () => {
+  const unresolved = sample();
+  unresolved.maps[0].tracks[1].actions[1].targetId = "no-such-show";
+  unresolved.maps[0].tracks[2].actions[1].targetId = "no-such-event";
+  assert.doesNotThrow(() => validateProject(JSON.parse(JSON.stringify(unresolved))));
+
+  const makeId = seqIds();
+  const cross = sample();
+  const map = cross.maps[0];
+  const other = newTrack(map, "display", makeId);
+  other.id = "display-b";
+  map.tracks.push(other);
+  const hide = map.tracks[1].actions.pop()!;
+  hide.id = "hide-b";
+  other.actions.push(hide);
+  assert.ok(!map.tracks[1].actions.some((a) => a.type === "hide"));
+  assert.doesNotThrow(() => validateProject(JSON.parse(JSON.stringify(cross))));
+});
+
+test("rejects a room track whose roomId does not exist", () => {
+  rejects((_, m) => { m.tracks[2].roomId = "missing"; }, /roomId/);
+});
+
+test("rejects an actor initial.roomId that is non-empty and does not exist", () => {
+  const project = sample();
+  project.maps[0].tracks[0].initial!.roomId = "room-a";
+  assert.doesNotThrow(() => validateProject(JSON.parse(JSON.stringify(project))));
+  rejects((_, m) => { m.tracks[0].initial!.roomId = "missing"; }, /initial\.roomId/);
 });
 
 test.todo("projectForSave output survives a JSON roundtrip through validateProject", () => {

@@ -193,9 +193,6 @@ function validateMap(map: unknown, identifier: (id: unknown, label: string) => v
   const doors = has(map, "floorPlan") ? validateFloorPlanShape(map.floorPlan, rooms, identifier) : new Map<string, string>();
   if (has(map, "presentation")) validatePresentationShape(map.presentation);
 
-  const shows = new Set<string>();
-  const events = new Set<string>();
-  const closers: Obj[] = [];
   const robotIds = new Set<string>();
   for (const track of map.tracks as unknown[]) {
     check(isObj(track), "track must be an object");
@@ -224,16 +221,8 @@ function validateMap(map: unknown, identifier: (id: unknown, label: string) => v
     check(Array.isArray(track.actions), "track.actions must be an array");
     total += track.actions.length;
     check(total <= 2000, "actions must total at most 2000");
-    for (const action of track.actions as unknown[]) {
-      validateAction(action, kind, rooms, doors, identifier);
-      const a = action as Obj;
-      if (a.type === "show") shows.add(a.targetId as string);
-      if (a.type === "event-start") events.add(a.targetId as string);
-      if (a.type === "hide" || a.type === "event-end") closers.push(a);
-    }
-  }
-  for (const action of closers) {
-    check((action.type === "hide" ? shows : events).has(action.targetId as string), `${action.type} targetId does not resolve`);
+    // hide/event-end close by targetId map-wide at runtime; an unresolved target is a no-op (upstream parity).
+    for (const action of track.actions as unknown[]) validateAction(action, kind, rooms, doors, identifier);
   }
   return total;
 }
