@@ -13,6 +13,7 @@ export const RATIO_HEIGHT = 900;
 export const SAFETY_RADIUS_MM = 60;
 export const HUMAN_RADIUS_MM = 14;
 export const EDIT_GRID_OPTIONS = [20, 40, 60, 80, 100] as const;
+export type EditGridMm = (typeof EDIT_GRID_OPTIONS)[number];
 
 export function ratioToMm(x: number, y: number): { x: number; y: number } {
   return { x: (x / RATIO_WIDTH) * FIELD_WIDTH_MM, y: (y / RATIO_HEIGHT) * FIELD_HEIGHT_MM };
