@@ -3,6 +3,7 @@ import { snapToEditGrid } from "./grid";
 import { validateFloorPlan } from "./floorPlan";
 import { defaultId, type IdFactory } from "./ids";
 import { buildNavigation } from "./navigation";
+import { validatePresentation } from "./presentation";
 import {
   SCENE_SCHEMA,
   type Action,
@@ -195,7 +196,7 @@ function validateMap(map: unknown, identifier: (id: unknown, label: string) => v
     check(new Set(room.cells).size === room.cells.length, "room cell is duplicated");
   }
   const doors = has(map, "floorPlan") ? validateFloorPlanShape(map.floorPlan, rooms, identifier) : new Map<string, string>();
-  if (has(map, "presentation")) validatePresentationShape(map.presentation);
+  if (has(map, "presentation")) validatePresentation(map.presentation);
   validateFloorPlan(map as unknown as SceneMap);
 
   const robotIds = new Set<string>();
@@ -325,30 +326,4 @@ function validateFloorPlanShape(plan: unknown, rooms: Set<string>, identifier: (
     doors.set(door.id as string, door.roomId as string);
   }
   return doors;
-}
-
-function validatePresentationShape(value: unknown) {
-  check(isObj(value) && value.version === 1, "presentation.version must be 1");
-  check(typeof value.scenarioId === "string" && /^[a-z0-9-]{1,60}$/.test(value.scenarioId), "presentation.scenarioId is invalid");
-  check(Array.isArray(value.cues) && value.cues.length <= 160, "presentation.cues must be an array of at most 160");
-  for (const cue of value.cues as unknown[]) {
-    check(isObj(cue), "cue must be an object");
-    oneOf(cue.kind, ["zone", "dirt", "crowd", "fire", "scan", "route", "notice", "car"], "cue.kind");
-    time(cue.start, "cue.start");
-    time(cue.end, "cue.end");
-    check((cue.end as number) > (cue.start as number), "cue.end must be after cue.start");
-    text(cue.label, "cue.label", 180);
-    color(cue.color, "cue.color");
-    if (cue.kind === "route") {
-      check(Array.isArray(cue.points) && cue.points.length >= 2 && cue.points.length <= 40, "cue.points must have 2..40 points");
-      for (const p of cue.points as unknown[]) {
-        check(Array.isArray(p) && p.length === 2, "cue point must be [x, y]");
-        point({ x: p[0], y: p[1] }, "cue.points");
-      }
-    } else if (cue.kind !== "notice") {
-      point(cue, "cue");
-      num(cue.width, Number.MIN_VALUE, AREA_WIDTH_MM - (cue.x as number), "cue.width");
-      num(cue.height, Number.MIN_VALUE, AREA_HEIGHT_MM - (cue.y as number), "cue.height");
-    }
-  }
 }
