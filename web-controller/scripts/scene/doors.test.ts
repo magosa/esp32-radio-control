@@ -6,7 +6,8 @@ import {
 } from "../../scene/doors";
 import { cellIndex } from "../../scene/grid";
 import { positionAt, type Point } from "../../scene/safety";
-import type { DoorMode, Room, SceneMap, Track } from "../../scene/types";
+import { compilePlan, samplePlan } from "../../scene/timedPlan";
+import type { Action, DoorMode, Room, SceneMap, Track } from "../../scene/types";
 
 const horizontal = { x1: 340, y1: 310, x2: 560, y2: 310 };
 const vertical = { x1: 450, y1: 200, x2: 450, y2: 420 };
@@ -285,7 +286,73 @@ test("maps without doors produce an empty door plan", () => {
   assert.deepEqual(sampleDoorPlan(plan, 3), []);
 });
 
-test.todo("unlock bars have exact duration — actionStates.simulatedPosition needs Task 9 compilePlan");
-test.todo("short robot passages — move entry scheduled at 12..14.5 needs Task 9 compilePlan");
-test.todo("story default does not allow robots to cross walls outside a doorway — needs Task 9 compilePlan");
-test.todo("muted, failed and invalid unlock controls never permit a passage — needs Task 9 compilePlan");
+const bar = (id: string, type: Action["type"], extra: Partial<Action>): Action => ({
+  id, name: id, type, position: 0, runSeconds: 1, x: 0, y: 0, yaw: 0, roomId: "",
+  targetId: `${id}-target`, text: "", state: "meeting", ...extra,
+});
+function compiled(unlockEnd: number, kind: "human" | "robot" = "human", doorMode: DoorMode = "strict") {
+  const { map, actor, doors } = fixture(unlockEnd, kind, doorMode);
+  const walk = bar("walk", "move", { runSeconds: 10, x: 990, y: 300, roomId: "right" });
+  const unlock = bar("unlock", "unlock", { runSeconds: unlockEnd, roomId: "right" });
+  actor.actions = [walk];
+  doors.actions = [unlock];
+  return { map, actor, doors, walk, unlock };
+}
+
+test("compiled unlock bars have exact duration; a foreign room's unlock leaves the walker at its start", () => {
+  const { map, unlock, walk } = compiled(8);
+  const plan = compilePlan(map);
+  assert.deepEqual(plan.errors, []);
+  assert.equal(samplePlan(plan, 7.999).doors[0].unlocked, true);
+  assert.equal(samplePlan(plan, 8).doors[0].unlocked, false);
+  assert.equal(samplePlan(plan, 8).doors[0].held, false);
+  unlock.roomId = "left";
+  const locked = compilePlan(map);
+  assert.match(locked.errors.join(" "), /施錠/);
+  assert.equal(locked.entries[0].blocked, true);
+  assert.equal(samplePlan(locked, 10).actors[0].x, 90);
+  assert.equal(samplePlan(locked, 10).actionStates[walk.id].result.simulatedPosition, null);
+});
+
+test("compiled short robot passages match the hand-built door plan and keep exact bar times", () => {
+  const { map, actor, unlock } = compiled(9, "robot");
+  actor.initial!.x = 225;
+  Object.assign(unlock, { position: 7, runSeconds: 9 });
+  actor.actions = [
+    bar("approach", "move", { position: 8, runSeconds: 3, x: 454, y: 300, roomId: "left" }),
+    bar("turn", "move", { position: 11, runSeconds: 1, motion: "rotate", rotationSeconds: 1, x: 454, y: 300, roomId: "left" }),
+    bar("cross", "move", { position: 12, runSeconds: 2.5, x: 626, y: 300, roomId: "right" }),
+  ];
+  const plan = compilePlan(map), manual = robotTurnFixture();
+  prepareDoorPlan(manual);
+  assert.deepEqual(plan.errors, []);
+  const cross = plan.entries.find((e) => e.action.id === "cross")!;
+  assert.equal(cross.start, 12);
+  assert.equal(cross.end, 14.5);
+  for (const t of [11.39, 11.55, 11.7, 12, 14.5, 14.8, 15.11]) {
+    assert.deepEqual(samplePlan(plan, t).doors, sampleDoorPlan(manual, t));
+  }
+});
+
+test("story mode does not let robots cross walls outside a doorway", () => {
+  const { map, actor, walk } = compiled(9, "robot", "story");
+  actor.initial!.y = 100;
+  walk.y = 100;
+  const plan = compilePlan(map);
+  assert.ok(plan.errors.length);
+  assert.equal(plan.entries.find((e) => e.action.id === walk.id)!.geometryFailure, true);
+  assert.equal(samplePlan(plan, 10).actors[0].x, 90);
+});
+
+test("muted and late unlock controls never permit a passage", () => {
+  for (const change of [
+    (data: ReturnType<typeof compiled>) => { data.doors.muted = true; },
+    (data: ReturnType<typeof compiled>) => { data.unlock.position = 20; },
+  ]) {
+    const data = compiled(10);
+    change(data);
+    const plan = compilePlan(data.map);
+    assert.equal(plan.entries.find((e) => e.action.id === data.walk.id)!.blocked, true);
+    assert.equal(samplePlan(plan, 5).doors[0].unlocked, false);
+  }
+});
