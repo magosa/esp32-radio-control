@@ -49,7 +49,7 @@ export function adjustTimeline(map: SceneMap, actionIds: string[], offset: numbe
 
 export function reorderSequence(track: Track, actionId: string, direction: -1 | 1): void {
   if (track.locked) throw new Error("この行はロックされています。");
-  const actions = [...track.actions].sort((a, b) => a.position - b.position);
+  const actions = structuredClone(track.actions).sort((a, b) => a.position - b.position);
   const index = actions.findIndex((action) => action.id === actionId), other = index + direction;
   if (index < 0) throw new Error("入れ替えるブロックがありません。");
   if (other < 0 || other >= actions.length) throw new Error("これ以上移動できません。");
@@ -59,8 +59,8 @@ export function reorderSequence(track: Track, actionId: string, direction: -1 | 
   [actions[left], actions[right]] = [actions[right], actions[left]];
   actions[left].position = start;
   actions[right].position = start + actions[left].runSeconds + gap;
+  checkSequence({ ...track, actions });
   track.actions = actions;
-  checkSequence(track);
 }
 
 // Shift-snap: `value` is a start (or a duration when resize) aligned to other bars' edges within 8 screen px.

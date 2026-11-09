@@ -81,6 +81,13 @@ test("reorderSequence rejects locked rows, missing bars and moves past the ends"
   assert.throws(() => reorderSequence(track, "b", 1), /これ以上/);
 });
 
+test("reorderSequence leaves the track untouched when the result is invalid", () => {
+  const track = row("r", [act("a", 0, 2), act("b", 1, 1), act("c", 5, 1)]);
+  const before = structuredClone(track);
+  assert.throws(() => reorderSequence(track, "c", -1), /重なっています/);
+  assert.deepEqual(track, before);
+});
+
 // upstream timed: "timeline alignment uses an eight-screen-pixel radius for either edge at every zoom"
 test("timelineAlignment snaps either edge within eight screen pixels at every zoom", () => {
   const moving = act("moving", 2, 2.1), anchor = act("anchor", 8.3, 4.4);
