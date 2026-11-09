@@ -1,6 +1,6 @@
 import { cellColRow, cellNeighbor, type Edge } from "./grid";
 import { boundaryEdge, furnitureCells, regionBounds, validateFloorPlan, type Bounds } from "./floorPlan";
-import type { IdFactory } from "./model";
+import { defaultId, type IdFactory } from "./model";
 import type { Door, SceneMap, Segment, Wall } from "./types";
 import { CELL_COUNT, CELL_MM, COLUMNS, ROWS } from "./units";
 
@@ -22,8 +22,6 @@ export type MergedDoor = Door & {
   memberIds: string[];
   opening: Segment;
 };
-
-const defaultId: IdFactory = () => globalThis.crypto.randomUUID();
 
 function check(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);

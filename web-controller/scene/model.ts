@@ -31,7 +31,7 @@ const ACTION_NAMES: Record<ActionType, string> = {
   "event-start": "イベント開始", "event-end": "イベント終了", unlock: "解錠",
 };
 const MAX_SECONDS = 86400;
-const defaultId: IdFactory = () => globalThis.crypto.randomUUID();
+export const defaultId: IdFactory = () => globalThis.crypto.randomUUID();
 const isActor = (kind: TrackKind) => kind === "robot" || kind === "human";
 const byPosition = (track: Track) => [...track.actions].sort((a, b) => a.position - b.position);
 
