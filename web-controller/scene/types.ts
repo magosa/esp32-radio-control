@@ -52,6 +52,8 @@ export interface Furniture {
   id: string;
   roomId: string;
   cell: number;
+  // Multi-cell footprint; `cell` is its lowest index.
+  cells?: number[];
   type: FurnitureType;
   rotation: 0 | 90 | 180 | 270;
 }

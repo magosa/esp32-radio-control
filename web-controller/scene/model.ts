@@ -1,5 +1,6 @@
 import { CELL_COUNT, AREA_HEIGHT_MM, AREA_WIDTH_MM, EDIT_GRID_OPTIONS } from "./units";
 import { snapToEditGrid } from "./grid";
+import { validateFloorPlan } from "./floorPlan";
 import {
   SCENE_SCHEMA,
   type Action,
@@ -192,6 +193,7 @@ function validateMap(map: unknown, identifier: (id: unknown, label: string) => v
   }
   const doors = has(map, "floorPlan") ? validateFloorPlanShape(map.floorPlan, rooms, identifier) : new Map<string, string>();
   if (has(map, "presentation")) validatePresentationShape(map.presentation);
+  validateFloorPlan(map as unknown as SceneMap);
 
   const robotIds = new Set<string>();
   for (const track of map.tracks as unknown[]) {
@@ -295,6 +297,10 @@ function validateFloorPlanShape(plan: unknown, rooms: Set<string>, identifier: (
     identifier(item.id, "furniture");
     check(rooms.has(item.roomId as string), "furniture.roomId does not resolve");
     cell(item.cell, "furniture");
+    if (has(item, "cells")) {
+      check(Array.isArray(item.cells), "furniture.cells must be an array");
+      for (const value of item.cells) cell(value, "furniture");
+    }
     oneOf(item.type, ["desk", "chair", "plant", "reception-monitor"], "furniture.type");
     oneOf(item.rotation, [0, 90, 180, 270], "furniture.rotation");
   }
