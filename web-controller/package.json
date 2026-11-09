@@ -10,6 +10,7 @@
     "test:appearance": "tsx --test scripts/appearance-contrast.test.mjs",
     "test:fleet": "tsx --test scripts/fleet-migration.test.ts scripts/localizer-hub.test.ts",
     "test:localization": "tsx --test scripts/localization.test.ts",
+    "test:scene": "tsx --test scripts/scene/*.test.ts",
     "typecheck": "tsc --noEmit --incremental false",
     "sim:device": "tsx scripts/fakeDevice.ts",
     "sim:localizer": "tsx scripts/fakeLocalizer.ts"
