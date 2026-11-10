@@ -274,6 +274,39 @@ test("all new kinds and actions validate; defaults are unique, chain locally, an
   assert.doesNotThrow(() => validateProject(project));
 });
 
+test("event-end defaults match last known local target and selected room, including other room tracks", () => {
+  const makeId = seqIds();
+  const project = createProject("p", makeId), map = project.maps[0];
+  map.rooms.push(
+    { id: "room-a", name: "A", color: "#73bafa", kind: "room", material: "wood", cells: [0, 1] },
+    { id: "room-b", name: "B", color: "#73bafa", kind: "room", material: "wood", cells: [2, 3] },
+  );
+  const add = (owner: ReturnType<typeof newTrack>, type: ActionType) => {
+    const action = newAction(map, owner, type, makeId);
+    owner.actions.push(action);
+    return action;
+  };
+  const owner = newTrack(map, "room", makeId);
+  map.tracks.push(owner);
+  add(owner, "event-start");
+  const latest = add(owner, "event-start");
+  const end = newAction(map, owner, "event-end", makeId);
+  assert.equal(end.targetId, latest.targetId);
+  assert.equal(end.roomId, "room-a");
+  const other = newTrack(map, "room", makeId);
+  map.tracks.push(other);
+  const otherEnd = add(other, "event-end");
+  assert.equal(otherEnd.targetId, latest.targetId);
+  assert.equal(otherEnd.roomId, other.roomId);
+  const elsewhere = newTrack(map, "room", makeId);
+  elsewhere.roomId = "room-b";
+  map.tracks.push(elsewhere);
+  const elsewhereEnd = add(elsewhere, "event-end");
+  assert.notEqual(elsewhereEnd.targetId, latest.targetId);
+  assert.equal(elsewhereEnd.roomId, "room-b");
+  assert.doesNotThrow(() => validateProject(JSON.parse(JSON.stringify(project))));
+});
+
 test("display templates and event hatch options persist and reject unknown values", () => {
   const project = sample(), map = project.maps[0];
   Object.assign(map.tracks[1].actions[0], { displayTemplate: "card", text: "<b>案内</b>" });
