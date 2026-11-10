@@ -390,6 +390,39 @@ test("room activities list stationary robots in rooms, excluding moving robots a
   assert.deepEqual(samplePlan(compilePlan(map), 5).roomActivities, []);
 });
 
+test("room activity follows physical robot occupancy and excludes charging and muted robots", () => {
+  const { map, track, action } = twoRooms();
+  map.doorMode = "story";
+  const guard = track("robot", { x: 210, y: 310 });
+  guard.robotRole = "security";
+  const cleaner = track("robot", { x: 210, y: 110 });
+  action(cleaner, "move", { position: 0, runSeconds: 4, x: 810, y: 110, roomId: "hall" });
+  map.floorPlan!.doors.push(...Array.from({ length: 10 }, (_, i) => ({
+    id: `d-${i}`, roomId: "room", cell: cellIndex(26, i), edge: "right" as const,
+  })));
+  let plan = compilePlan(map);
+  assert.deepEqual(plan.errors, []);
+  assert.deepEqual(samplePlan(plan, 5).roomActivities, [
+    { roomId: "room", text: "監視中", actorIds: [guard.id] },
+    { roomId: "hall", text: "掃除中", actorIds: [cleaner.id] },
+  ]);
+  guard.muted = true;
+  assert.deepEqual(samplePlan(compilePlan(map), 5).roomActivities, [{ roomId: "hall", text: "掃除中", actorIds: [cleaner.id] }]);
+  cleaner.muted = true;
+  assert.deepEqual(samplePlan(compilePlan(map), 5).roomActivities, []);
+
+  map.tracks = (["cleaning", "cleaning", "security", "delivery"] as const).map((role, index) => ({
+    ...guard, id: `activity-${index}`, robotId: `robot-${index}`, robotRole: role, muted: false, actions: [],
+    initial: { x: 210, y: 310, yaw: 0, roomId: "hall" },
+  }));
+  plan = compilePlan(map);
+  const combined = samplePlan(plan, 0).roomActivities;
+  assert.deepEqual(combined, [{
+    roomId: "room", text: "掃除中 / 監視中 / 配送中", actorIds: ["activity-0", "activity-1", "activity-2", "activity-3"],
+  }]);
+  assert.deepEqual(samplePlan(plan, 2).roomActivities, combined);
+});
+
 test("action preview checks geometry regardless of muted rows, blocked predecessors and invalid initial poses", () => {
   for (const blockedBy of ["muted", "blocked", "initial"]) {
     const { map, track, action } = fixture(), t = track("robot");
