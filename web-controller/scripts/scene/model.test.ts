@@ -328,6 +328,21 @@ test("event-end defaults match last known local target and selected room, includ
   assert.doesNotThrow(() => validateProject(JSON.parse(JSON.stringify(project))));
 });
 
+test("robot role accepts all three types, preserves old missing values and rejects unknown roles", () => {
+  const project = sample(), robot = project.maps[0].tracks[0];
+  assert.equal(robot.robotRole, undefined);
+  assert.doesNotThrow(() => validateProject(project));
+  assert.equal(Object.hasOwn(projectForSave(project).maps[0].tracks[0], "robotRole"), false);
+  for (const role of ["cleaning", "security", "delivery"] as const) {
+    robot.robotRole = role;
+    assert.doesNotThrow(() => validateProject(project));
+    const saved = validateProject(JSON.parse(JSON.stringify(projectForSave(project))));
+    assert.equal(saved.maps[0].tracks[0].robotRole, role);
+  }
+  (robot as { robotRole: string }).robotRole = "other";
+  assert.throws(() => validateProject(project), /robotRole/);
+});
+
 test("display templates and event hatch options persist and reject unknown values", () => {
   const project = sample(), map = project.maps[0];
   Object.assign(map.tracks[1].actions[0], { displayTemplate: "card", text: "<b>案内</b>" });
