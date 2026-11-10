@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createProject, newAction, newTrack, projectForSave, validateProject } from "../../scene/model";
-import type { SceneMap, SceneProject } from "../../scene/types";
+import { createProject, KINDS, newAction, newTrack, projectForSave, validateProject } from "../../scene/model";
+import type { ActionType, SceneMap, SceneProject, TrackKind } from "../../scene/types";
 
 function seqIds() {
   let n = 0;
@@ -230,6 +230,48 @@ test("door mode and door-specific unlock references validate", () => {
     mutate(trial.maps[0]);
     assert.throws(() => validateProject(trial), pattern);
   }
+});
+
+test("all new kinds and actions validate; defaults are unique, chain locally, and never mutate input", () => {
+  const makeId = seqIds();
+  const project = createProject("p", makeId), map = project.maps[0];
+  map.rooms.push({ id: "room-a", name: "会議室", color: "#73bafa", kind: "room", material: "wood", cells: [0, 1, 55, 56] });
+  const pairs: Record<TrackKind, [ActionType, ActionType]> = {
+    robot: ["move", "move"], human: ["move", "move"], room: ["event-start", "event-end"], display: ["show", "hide"],
+  };
+  for (const kind of Object.keys(KINDS) as TrackKind[]) {
+    const before = structuredClone(map);
+    const owner = newTrack(map, kind, makeId);
+    assert.deepEqual(map, before);
+    map.tracks.push(owner);
+    const snapshot = structuredClone(map);
+    const first = newAction(map, owner, pairs[kind][0], makeId);
+    assert.deepEqual(map, snapshot);
+    first.position = 2;
+    owner.actions.push(first);
+    const second = newAction(map, owner, pairs[kind][1], makeId);
+    owner.actions.push(second);
+    assert.notEqual(first.id, second.id);
+    assert.equal(second.position, first.position + first.runSeconds);
+    if (kind === "room" || kind === "display") assert.equal(second.targetId, first.targetId);
+    else assert.notEqual(second.targetId, first.targetId);
+  }
+  assert.equal(validateProject(project), project);
+  const secondRobot = newTrack(map, "robot", makeId);
+  assert.notEqual(secondRobot.name, map.tracks[0].name);
+  assert.notEqual(secondRobot.id, map.tracks[0].id);
+  assert.equal(newAction(map, secondRobot, "move", makeId).position, 0);
+  assert.equal(newAction(map, secondRobot, "show", makeId).type, "show");
+  assert.throws(() => newTrack(map, "manual" as TrackKind, makeId), /kind/);
+  assert.throws(() => newAction(map, secondRobot, "unsupported" as ActionType, makeId), /not allowed/);
+  assert.throws(() => newAction(map, secondRobot, "event-start", makeId), /not allowed/);
+  map.rooms = [];
+  map.tracks = [];
+  const room = newTrack(map, "room", makeId);
+  assert.equal(room.roomId, "");
+  map.tracks.push(room);
+  room.actions.push(newAction(map, room, "event-start", makeId));
+  assert.doesNotThrow(() => validateProject(project));
 });
 
 test("display templates and event hatch options persist and reject unknown values", () => {
