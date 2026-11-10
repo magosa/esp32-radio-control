@@ -96,16 +96,20 @@ test("doors belong to occupied cell boundaries and shared-wall doors are unique"
   }
 });
 
-test("furniture validates occupancy and unique cell", () => {
+test("furniture validates occupancy, kind, cardinal rotation and unique cell", () => {
   const value = map(region("a", L_SHAPE));
   for (const [index, type] of [[0, "desk"], [1, "chair"], [2, "plant"]] as const) {
     plan(value).furniture.push({ id: `item-${index}`, roomId: "a", cell: T(0, index), type, rotation: (index * 90) as Furniture["rotation"] });
   }
   assert.equal(validateFloorPlan(value), value);
-  for (const change of [{ cell: T(1, 0) }, { cell: -1 }, { cell: Infinity }, { cell: String(T(0, 0)) }, { roomId: "missing" }]) {
+  for (const change of [
+    { cell: T(1, 0) }, { cell: -1 }, { cell: Infinity }, { cell: String(T(0, 0)) }, { roomId: "missing" },
+    { type: "script" }, { rotation: 45 }, { rotation: 360 }, { rotation: "90" }, { roomId: "__proto__" }, { id: "a" },
+    { id: "item-1" }, { id: "__proto__" },
+  ]) {
     const trial = structuredClone(value);
     Object.assign(plan(trial).furniture[0], change);
-    assert.throws(() => validateFloorPlan(trial));
+    assert.throws(() => validateFloorPlan(trial), Error, JSON.stringify(change));
   }
   plan(value).furniture.push({ id: "duplicate", roomId: "a", cell: T(0, 0), type: "desk", rotation: 0 });
   assert.throws(() => validateFloorPlan(value), /one furniture item per cell/);

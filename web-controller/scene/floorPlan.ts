@@ -147,12 +147,22 @@ function footprint(item: Furniture): number[] {
 }
 
 const isSegmentDoor = (door: object) => ["x1", "y1", "x2", "y2"].some((key) => Object.hasOwn(door, key));
+const FURNITURE_TYPES: readonly unknown[] = ["desk", "chair", "plant", "reception-monitor"];
+const ROTATIONS: readonly unknown[] = [0, 90, 180, 270];
+const RESERVED_IDS = ["$start", "__proto__", "constructor", "prototype"];
 
-/** Checks geometry and references; field shapes are checked by validateProject. */
+/** Checks geometry, references, IDs and furniture kinds; remaining field shapes are checked by validateProject. */
 export function validateFloorPlan(map: SceneMap): SceneMap {
+  const ids = new Set<string>();
+  const identify = (id: unknown, label: string) => {
+    check(typeof id === "string" && id.length > 0 && id.length <= 100 && !RESERVED_IDS.includes(id) && !ids.has(id),
+      `${label} ID is invalid or duplicated`);
+    ids.add(id);
+  };
   const rooms = new Map<string, Room>();
   const owners = new Set<number>();
   for (const room of map.rooms) {
+    identify(room.id, "room");
     rooms.set(room.id, room);
     regionBounds(room.cells);
     check(new Set(room.cells).size === room.cells.length, "room cells are duplicated");
@@ -168,12 +178,16 @@ export function validateFloorPlan(map: SceneMap): SceneMap {
 
   const walls = new Map<string, Segment & { roomId: string }>();
   for (const wall of plan.walls ?? []) {
+    identify(wall.id, "wall");
     check(rooms.has(wall.roomId), "wall room not found");
     validateSegment(wall, "wall");
     walls.set(wall.id, wall);
   }
   const occupied = new Set<number>();
   for (const item of plan.furniture) {
+    identify(item.id, "furniture");
+    check(FURNITURE_TYPES.includes(item.type), "furniture type is invalid");
+    check(ROTATIONS.includes(item.rotation), "furniture rotation must be 0, 90, 180 or 270");
     const room = rooms.get(item.roomId);
     check(room && isCell(item.cell), "furniture must be placed on a cell of an existing room");
     const cells = footprint(item);
@@ -185,6 +199,7 @@ export function validateFloorPlan(map: SceneMap): SceneMap {
   }
   const edges = new Set<string>();
   for (const door of plan.doors) {
+    identify(door.id, "door");
     const room = rooms.get(door.roomId);
     check(room, "door room not found");
     if (isSegmentDoor(door)) {
