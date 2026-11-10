@@ -300,6 +300,54 @@ test("fixed timeline reports narrow corridor conflicts instead of adding invisib
   assert.deepEqual(compilePlan(map).errors, []);
 });
 
+test("twelve-cell corridors are not exclusive and parked robots in narrow corridors block entry", () => {
+  const wide = fixture([
+    region("left", rect(0, 0, 14, 31)), region("hall", rect(14, 10, 27, 12), "corridor"), region("right", rect(41, 0, 14, 31)),
+  ]);
+  wide.map.doorMode = "story";
+  for (let row = 10; row < 22; row++) {
+    wide.map.floorPlan!.doors.push({ id: `l-${row}`, roomId: "left", cell: cellIndex(13, row), edge: "right" });
+    wide.map.floorPlan!.doors.push({ id: `r-${row}`, roomId: "right", cell: cellIndex(41, row), edge: "left" });
+  }
+  wide.track("robot", { x: 550, y: 380, roomId: "hall" });
+  const passer = wide.track("robot", { x: 210, y: 264, roomId: "left" });
+  const pass = wide.action(passer, "move", { position: 0, runSeconds: 10, x: 890, y: 264, roomId: "right" });
+  let plan = compilePlan(wide.map);
+  assert.deepEqual(plan.errors, []);
+  assert.equal(samplePlan(plan, 20).actionStates[pass.id].result.status, "success");
+
+  let { map, track, action } = corridor();
+  track("robot", { x: 550, y: 310, roomId: "hall" });
+  const moving = track("robot", { x: 210, y: 310, roomId: "left" });
+  const move = action(moving, "move", { position: 0, runSeconds: 10, x: 890, y: 310, roomId: "right" });
+  const next = action(moving, "wait", { position: 10, runSeconds: 1 });
+  plan = compilePlan(map);
+  const state = samplePlan(plan, 20);
+  assert.equal(state.actionStates[move.id].result.status, "failed");
+  assert.match(state.actionStates[move.id].reason, /退出予定/);
+  assert.equal(state.actionStates[next.id].status, "blocked");
+  close(state.actors[1].x, 210);
+  assert.ok(plan.errors.some((e) => /退出予定/.test(e)));
+
+  ({ map, track, action } = corridor());
+  const leaving = track("robot", { x: 550, y: 310, roomId: "hall" });
+  action(leaving, "move", { position: 0, runSeconds: 4, x: 890, y: 310, roomId: "right" });
+  const later = track("robot", { x: 210, y: 310, roomId: "left" });
+  const enter = action(later, "move", { position: 4, runSeconds: 10, x: 750, y: 310, roomId: "hall" });
+  plan = compilePlan(map);
+  assert.deepEqual(plan.errors, []);
+  assert.equal(samplePlan(plan, 20).actionStates[enter.id].result.status, "success");
+
+  ({ map, track, action } = corridor());
+  const resident = track("robot", { x: 550, y: 310, roomId: "hall" });
+  action(resident, "move", { position: 6, runSeconds: 4, x: 890, y: 310, roomId: "right" });
+  const early = track("robot", { x: 210, y: 310, roomId: "left" });
+  action(early, "wait", { position: 0, runSeconds: 4 });
+  const blocked = action(early, "move", { position: 4, runSeconds: 10, x: 750, y: 310, roomId: "hall" });
+  plan = compilePlan(map);
+  assert.match(samplePlan(plan, 20).actionStates[blocked.id].reason, /通行時刻が重なっています/);
+});
+
 test("room activities list stationary robots in rooms, excluding moving robots and charging zones", () => {
   const { map, track, action } = twoRooms();
   const guard = track("robot", { x: 210, y: 310 });

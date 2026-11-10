@@ -6,8 +6,9 @@ import { defaultId, type IdFactory } from "./ids";
 import { newAction } from "./model";
 import {
   collisionWarnings, createSafety, pathProblem, pathSections, positionAt,
-  type ActorKind, type Point, type Trajectory, type TrajectorySegment,
+  type ActorKind, type Point, type Safety, type Trajectory, type TrajectorySegment,
 } from "./safety";
+import { cellAt } from "./grid";
 import type {
   Action, ActionType, CoordinateMode, DisplayTemplate, HatchStyle, Pose, RobotRole, RoomState, SceneMap, Track, TrackKind,
 } from "./types";
@@ -133,6 +134,19 @@ interface Reservation {
   end: number;
 }
 
+interface Parked extends Reservation {
+  zone: string;
+}
+
+interface Schedule {
+  entries: PlanEntry[];
+  log: PlanLogEvent[];
+  errors: string[];
+  warnings: PlanWarning[];
+  duration: number;
+  trajectories: Trajectory[];
+}
+
 const EPS = 1e-7;
 const FACING_DEG_PER_SECOND = 90;
 const ZERO_LENGTH_ALLOWED: ReadonlySet<ActionType> = new Set<ActionType>(["hide", "event-end"]);
@@ -144,6 +158,44 @@ const heading = (dx: number, dy: number) => normalizeYaw(Math.atan2(dy, dx) * 18
 const moved = (a: Point, b: Point) => a.x !== b.x || a.y !== b.y;
 
 export function compilePlan(map: SceneMap): ScenePlan {
+  const safety = createSafety(map);
+  const limit = Math.min(32, map.tracks.reduce((n, t) => n + t.actions.length, 0) + 2);
+  let parked: Parked[] = [];
+  for (let iteration = 0; ; iteration++) {
+    const { trajectories, ...result } = schedule(map, safety, parked);
+    const next = parkedInZones(safety, trajectories, result.duration);
+    if (signature(next) === signature(parked)) {
+      result.warnings.push(...collisionWarnings(trajectories));
+      const plan: ScenePlan = { map, ...result };
+      prepareDoorPlan(plan);
+      return plan;
+    }
+    if (iteration >= limit) {
+      const reason = "狭い廊下の停車計画が収束しません。開始時刻・退出先を調整してください。";
+      for (const e of result.entries) Object.assign(e, { blocked: true, reason, start: null, end: null, outcome: null, segments: [] });
+      const plan: ScenePlan = { map, entries: result.entries, log: [], errors: [...result.errors, reason], warnings: [], duration: 0 };
+      prepareDoorPlan(plan);
+      return plan;
+    }
+    parked = next;
+  }
+}
+
+// A robot standing still in a one-at-a-time section holds it; end Infinity means it never leaves.
+function parkedInZones(safety: Safety, trajectories: Trajectory[], duration: number): Parked[] {
+  const parked: Parked[] = [];
+  for (const t of trajectories) if (t.kind === "robot") for (const s of t.segments) {
+    if (moved(s.from, s.to)) continue;
+    const zone = safety.cellZones.get(cellAt(s.from.x, s.from.y));
+    if (zone) parked.push({ zone, trackId: t.id, name: t.name, start: s.start, end: s.end >= duration ? Infinity : s.end });
+  }
+  return parked;
+}
+
+const signature = (list: Parked[]) => JSON.stringify(list.map((r) =>
+  [r.zone, r.trackId, Math.round(r.start * 1e6), Number.isFinite(r.end) ? Math.round(r.end * 1e6) : "forever"]));
+
+function schedule(map: SceneMap, safety: Safety, parked: Parked[]): Schedule {
   const entries: PlanEntry[] = map.tracks.flatMap((track) => track.actions.map((action) => ({
     track, action, start: null, end: null, blocked: track.muted, outcome: null, segments: [],
     reason: track.muted ? `${track.name} はプレビュー対象外です。` : "",
@@ -153,8 +205,9 @@ export function compilePlan(map: SceneMap): ScenePlan {
   for (const track of map.tracks) {
     byPosition(track).forEach((action, i, sorted) => { if (i) previous.set(action.id, byId.get(sorted[i - 1].id)!); });
   }
-  const safety = createSafety(map), errors: string[] = [], warnings: PlanWarning[] = [], log: PlanLogEvent[] = [];
+  const errors: string[] = [], warnings: PlanWarning[] = [], log: PlanLogEvent[] = [];
   const reservations = new Map<string, Reservation[]>(), latest = new Map<string, PlanEntry>();
+  for (const { zone, ...r } of parked) reservations.set(zone, [...(reservations.get(zone) ?? []), r]);
   const block = (e: PlanEntry, reason: string, report = false) => {
     e.blocked = true;
     e.reason = reason;
@@ -180,7 +233,9 @@ export function compilePlan(map: SceneMap): ScenePlan {
       const cause = (reservations.get(claim.zone) ?? []).find((r) => r.trackId !== e.track.id &&
         claim.start < r.end - EPS && claim.end > r.start + EPS);
       if (cause) {
-        e.reason = `${cause.name} と狭い廊下の通行時刻が重なっています。バーの配置時刻を調整してください。`;
+        e.reason = Number.isFinite(cause.end)
+          ? `${cause.name} と狭い廊下の通行時刻が重なっています。バーの配置時刻を調整してください。`
+          : `${cause.name} が狭い廊下内に停止し、退出予定がないため通行できません。退出する動作を追加してください。`;
         return false;
       }
     }
@@ -268,10 +323,7 @@ export function compilePlan(map: SceneMap): ScenePlan {
     segments.push({ start: cursor, end: Math.max(cursor, duration) + 0.001, from, to: from });
     return { id: t.id, name: t.name, kind: t.kind as ActorKind, segments };
   });
-  warnings.push(...collisionWarnings(trajectories));
-  const plan: ScenePlan = { map, entries, log, errors, warnings, duration };
-  prepareDoorPlan(plan);
-  return plan;
+  return { entries, log, errors, warnings, duration, trajectories };
 }
 
 function movementPosition(e: PlanEntry, time: number): PlanPose {
