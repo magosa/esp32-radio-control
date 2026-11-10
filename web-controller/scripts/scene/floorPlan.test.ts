@@ -115,6 +115,29 @@ test("furniture validates occupancy, kind, cardinal rotation and unique cell", (
   assert.throws(() => validateFloorPlan(value), /one furniture item per cell/);
 });
 
+test("strict values, ID safety and count limits reject malformed plans", () => {
+  for (const change of [
+    { id: "" }, { id: "__proto__" }, { id: "constructor" }, { id: "$start" }, { id: "x".repeat(101) },
+    { name: 1 }, { name: "x".repeat(121) }, { color: "red" }, { color: "#123456;fill:red" },
+    { kind: "hall" }, { material: "marble" }, { cells: null }, { cells: [true] },
+  ]) {
+    assert.throws(() => validateFloorPlan(map({ ...region("a", [0]), ...change } as unknown as Room)), Error, JSON.stringify(change));
+  }
+  assert.doesNotThrow(() => validateFloorPlan(map(region("a", [0], { name: "x".repeat(120) }))));
+  for (const value of [
+    null, [], {}, { doors: [], furniture: null }, { doors: "x", furniture: [] },
+    { doors: Array(1705 * 4 + 1).fill({}), furniture: [] },
+    { doors: [], furniture: Array(1705 + 1).fill({}) },
+  ]) {
+    const trial = map(region("a", [0]));
+    (trial as { floorPlan: unknown }).floorPlan = value;
+    assert.throws(() => validateFloorPlan(trial), Error, JSON.stringify(value)?.slice(0, 40));
+  }
+  assert.throws(() => validateFloorPlan({ ...map(), rooms: Array.from({ length: 101 }, (_, i) => region(`r${i}`, [i])) }), /100/);
+  assert.throws(() => validateFloorPlan(map(region("a", [0]), region("a", [1]))), /ID/);
+  assert.throws(() => validateFloorPlan(null as unknown as SceneMap));
+});
+
 test("multi-cell furniture roundtrips and rejects overlap and malformed footprints", () => {
   const p = map(region("room", [0, 1, 2].flatMap((k) => [T(0, k), T(1, k), T(2, k)])));
   const footprint = [T(0, 1), T(1, 1), T(0, 0), T(1, 0)];

@@ -150,9 +150,15 @@ const isSegmentDoor = (door: object) => ["x1", "y1", "x2", "y2"].some((key) => O
 const FURNITURE_TYPES: readonly unknown[] = ["desk", "chair", "plant", "reception-monitor"];
 const ROTATIONS: readonly unknown[] = [0, 90, 180, 270];
 const RESERVED_IDS = ["$start", "__proto__", "constructor", "prototype"];
+const ROOM_KINDS: readonly unknown[] = ["room", "corridor"];
+const MATERIALS: readonly unknown[] = ["wood", "tile", "carpet", "concrete"];
+const MAX_ROOMS = 100;
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Checks geometry, references, IDs and furniture kinds; remaining field shapes are checked by validateProject. */
+/** Checks geometry, references, IDs, room fields and furniture kinds; remaining field shapes are checked by validateProject. */
 export function validateFloorPlan(map: SceneMap): SceneMap {
+  check(isObject(map) && Array.isArray(map.rooms) && map.rooms.length <= MAX_ROOMS, `map must have at most ${MAX_ROOMS} rooms`);
   const ids = new Set<string>();
   const identify = (id: unknown, label: string) => {
     check(typeof id === "string" && id.length > 0 && id.length <= 100 && !RESERVED_IDS.includes(id) && !ids.has(id),
@@ -163,6 +169,9 @@ export function validateFloorPlan(map: SceneMap): SceneMap {
   const owners = new Set<number>();
   for (const room of map.rooms) {
     identify(room.id, "room");
+    check(typeof room.name === "string" && room.name.length <= 120, "room name must be a string of at most 120 chars");
+    check(typeof room.color === "string" && /^#[0-9a-f]{6}$/i.test(room.color), "room color must be #RRGGBB");
+    check(ROOM_KINDS.includes(room.kind) && MATERIALS.includes(room.material), "room kind or material is invalid");
     rooms.set(room.id, room);
     regionBounds(room.cells);
     check(new Set(room.cells).size === room.cells.length, "room cells are duplicated");
@@ -171,8 +180,10 @@ export function validateFloorPlan(map: SceneMap): SceneMap {
       owners.add(cell);
     }
   }
-  if (!map.floorPlan) return map;
+  if (map.floorPlan === undefined) return map;
   const plan = map.floorPlan;
+  check(isObject(plan) && Array.isArray(plan.doors) && Array.isArray(plan.furniture) &&
+    (plan.walls === undefined || Array.isArray(plan.walls)), "floorPlan must be an object with door and furniture arrays");
   check(plan.doors.length <= CELL_COUNT * 4 && plan.furniture.length <= CELL_COUNT && (plan.walls?.length ?? 0) <= CELL_COUNT * 4,
     "floor plan has too many doors, furniture or walls");
 
