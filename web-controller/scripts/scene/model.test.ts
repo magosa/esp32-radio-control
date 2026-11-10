@@ -163,3 +163,50 @@ test("projectForSave output survives a JSON roundtrip through validateProject", 
   const project = sample();
   assert.doesNotThrow(() => validateProject(JSON.parse(JSON.stringify(projectForSave(project)))));
 });
+
+// sample() plus robots with fleet IDs (tracks 0 and 3) and a human (track 4).
+function richSample(): SceneProject {
+  const project = sample(), map = project.maps[0];
+  map.tracks[0].robotId = "robot-a";
+  const second = newTrack(map, "robot", () => "robot-track-b");
+  second.robotId = "robot-b";
+  map.tracks.push(second);
+  map.tracks.push(newTrack(map, "human", () => "human-track"));
+  return project;
+}
+
+test("rich sample with two robots and a human is valid", () => {
+  assert.doesNotThrow(() => validateProject(JSON.parse(JSON.stringify(richSample()))));
+});
+
+const G2: [string, (p: SceneProject, m: SceneMap) => void, RegExp][] = [
+  ["empty maps", (p) => { p.maps = []; }, /maps/],
+  ["null map", (p) => { (p.maps as unknown[])[0] = null; }, /map must be an object/],
+  ["unsafe ID", (_, m) => { m.tracks[0].actions[0].id = "__proto__"; }, /action\.id/],
+  ["reserved ID", (_, m) => { m.tracks[0].id = "$start"; }, /track\.id/],
+  ["unknown kind", (_, m) => { (m.tracks[0] as { kind: string }).kind = "manual"; }, /track\.kind/],
+  ["unsafe color", (_, m) => { m.tracks[0].color = "red;xxx"; }, /track\.color/],
+  ["nonboolean mute", (_, m) => { (m.tracks[0] as { muted: unknown }).muted = 1; }, /muted/],
+  ["duplicate robot", (_, m) => { m.tracks[3].robotId = m.tracks[0].robotId; }, /robotId/],
+  ["human zero count", (_, m) => { m.tracks[4].count = 0; }, /count/],
+  ["human fractional count", (_, m) => { m.tracks[4].count = 1.5; }, /count/],
+  ["missing initial room", (_, m) => { delete (m.tracks[0].initial as { roomId?: string }).roomId; }, /initial\.roomId/],
+  ["unknown action room", (_, m) => { m.tracks[0].actions[0].roomId = "missing"; }, /action\.roomId/],
+  ["wrong action kind", (_, m) => { m.tracks[0].actions[0].type = "event-start"; }, /action\.type/],
+  ["numeric string", (_, m) => { (m.tracks[0].actions[0] as { x: unknown }).x = "10"; }, /action\.x/],
+  ["bad state", (_, m) => { (m.tracks[0].actions[0] as { state: string }).state = "unknown"; }, /action\.state/],
+  ["bad text", (_, m) => { (m.tracks[0].actions[0] as { text: unknown }).text = {}; }, /action\.text/],
+  ["long text", (_, m) => { m.tracks[0].actions[0].text = "x".repeat(4001); }, /action\.text/],
+];
+for (const [name, mutate, pattern] of G2) test(`validator rejects ${name}`, () => {
+  const project = richSample();
+  mutate(project, project.maps[0]);
+  assert.throws(() => validateProject(JSON.parse(JSON.stringify(project))), pattern);
+});
+
+test("validator accepts text of exactly 4000 chars and a human count of 1", () => {
+  const project = richSample(), map = project.maps[0];
+  map.tracks[0].actions[0].text = "x".repeat(4000);
+  map.tracks[4].count = 1;
+  assert.doesNotThrow(() => validateProject(JSON.parse(JSON.stringify(project))));
+});
