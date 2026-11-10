@@ -194,6 +194,14 @@ export function validateFloorPlan(map: SceneMap): SceneMap {
     validateSegment(wall, "wall");
     walls.set(wall.id, wall);
   }
+  check(plan.chargingZones === undefined || (Array.isArray(plan.chargingZones) && plan.chargingZones.length <= 64),
+    "charging zones must be an array of at most 64");
+  for (const zone of plan.chargingZones ?? []) {
+    identify(zone.id, "charging zone");
+    check(finite(zone.x, 0, AREA_WIDTH_MM) && finite(zone.y, 0, AREA_HEIGHT_MM) &&
+      finite(zone.width, 1, AREA_WIDTH_MM - zone.x) && finite(zone.height, 1, AREA_HEIGHT_MM - zone.y),
+    "charging zone must lie inside the area with a size of at least 1mm");
+  }
   const occupied = new Set<number>();
   for (const item of plan.furniture) {
     identify(item.id, "furniture");

@@ -4,6 +4,7 @@ import { cellIndex, type Edge } from "../../scene/grid";
 import { equipmentRectangle, placeDoor, placeGate } from "../../scene/equipment";
 import { createProject, projectForSave, validateProject } from "../../scene/model";
 import { buildNavigation } from "../../scene/navigation";
+import { validateFloorPlan } from "../../scene/floorPlan";
 import type { Room, SceneMap, Segment } from "../../scene/types";
 
 const EDGES: Edge[] = ["top", "bottom", "left", "right"];
@@ -164,6 +165,33 @@ test("charging zones do not change navigation", () => {
   const without = buildNavigation(p);
   fp(p).chargingZones = [{ id: "zone", name: "Dock", x: 0, y: 0, width: 40, height: 40 }];
   assert.deepEqual(buildNavigation(p), without);
+});
+
+test("charging overlays preserve all navigation cells, walls and obstacles across JSON roundtrip", () => {
+  const project = createProject("p", ids("project")), m = project.maps[0];
+  m.rooms.push(region("room", rect(0, 0, 10, 10)));
+  m.floorPlan = {
+    doors: [{ id: "door", roomId: "room", cell: cellIndex(0, 4), edge: "left" }],
+    furniture: [{ id: "desk", roomId: "room", cell: cellIndex(6, 6), type: "desk", rotation: 0 }],
+    walls: [{ id: "partition", roomId: "room", x1: 0, y1: 100, x2: 60, y2: 100 }],
+    chargingZones: [
+      { id: "dock", name: "Dock", x: 20, y: 20, width: 60, height: 60 },
+      { id: "corner", name: "Corner", x: 1040, y: 560, width: 60, height: 60 },
+    ],
+  };
+  const without = structuredClone(m);
+  delete without.floorPlan!.chargingZones;
+  assert.deepEqual(buildNavigation(m), buildNavigation(without));
+  assert.deepEqual(JSON.parse(JSON.stringify(projectForSave(project))).maps[0].floorPlan.chargingZones, m.floorPlan.chargingZones);
+  assert.doesNotThrow(() => validateFloorPlan(m));
+  for (const props of [{ x: -1 }, { width: 2000 }, { height: NaN }, { id: "room" }, { y: 600 }]) {
+    const invalid = structuredClone(m);
+    Object.assign(invalid.floorPlan!.chargingZones![0], props);
+    assert.throws(() => validateFloorPlan(invalid), /charging|ID/, JSON.stringify(props));
+    const saved = structuredClone(project);
+    saved.maps[0] = invalid;
+    assert.throws(() => validateProject(saved), /charging|chargingZone|id/i, JSON.stringify(props));
+  }
 });
 
 test("save snapshot refreshes derived navigation without changing editable data", () => {
