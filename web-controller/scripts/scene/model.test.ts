@@ -210,3 +210,24 @@ test("validator accepts text of exactly 4000 chars and a human count of 1", () =
   map.tracks[4].count = 1;
   assert.doesNotThrow(() => validateProject(JSON.parse(JSON.stringify(project))));
 });
+
+test("door mode and door-specific unlock references validate", () => {
+  const project = sample(), map = project.maps[0];
+  map.rooms.push({ id: "other-room", name: "Other", color: "#123456", kind: "room", material: "tile", cells: [2] });
+  map.floorPlan!.walls = [{ id: "wall", roomId: "room-a", x1: 0, y1: 40, x2: 40, y2: 40 }];
+  map.floorPlan!.doors.push({ id: "wall-door", roomId: "room-a", wallId: "wall", name: "Lobby entrance", kind: "automatic", x1: 10, y1: 40, x2: 30, y2: 40 });
+  map.tracks[2].actions[2].doorId = "wall-door";
+  assert.doesNotThrow(() => validateProject(JSON.parse(JSON.stringify(project))));
+  const unlock = (m: SceneMap) => m.tracks[2].actions[2];
+  const cases: [(m: SceneMap) => void, RegExp][] = [
+    [(m) => { (m as { doorMode: string }).doorMode = "loose"; }, /doorMode/],
+    [(m) => { unlock(m).roomId = "other-room"; }, /doorId/],
+    [(m) => { unlock(m).doorId = "missing"; }, /doorId/],
+    [(m) => { unlock(m).type = "wait"; }, /doorId is only allowed on unlock/],
+  ];
+  for (const [mutate, pattern] of cases) {
+    const trial = structuredClone(project);
+    mutate(trial.maps[0]);
+    assert.throws(() => validateProject(trial), pattern);
+  }
+});
