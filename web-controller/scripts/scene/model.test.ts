@@ -231,3 +231,21 @@ test("door mode and door-specific unlock references validate", () => {
     assert.throws(() => validateProject(trial), pattern);
   }
 });
+
+test("display templates and event hatch options persist and reject unknown values", () => {
+  const project = sample(), map = project.maps[0];
+  Object.assign(map.tracks[1].actions[0], { displayTemplate: "card", text: "<b>案内</b>" });
+  Object.assign(map.tracks[2].actions[0], { hatchStyle: "cross", hatchColor: "#12abcd", text: "会議中" });
+  const saved = JSON.parse(JSON.stringify(project));
+  assert.deepEqual(validateProject(saved), project);
+  const cases: [(m: SceneMap) => void, RegExp][] = [
+    [(m) => { m.tracks[2].actions[0].hatchColor = "red"; }, /hatchColor/],
+    [(m) => { (m.tracks[2].actions[0] as { hatchStyle: string }).hatchStyle = "script"; }, /hatchStyle/],
+    [(m) => { (m.tracks[1].actions[0] as { displayTemplate: string }).displayTemplate = "script"; }, /displayTemplate/],
+  ];
+  for (const [mutate, pattern] of cases) {
+    const trial = structuredClone(project);
+    mutate(trial.maps[0]);
+    assert.throws(() => validateProject(trial), pattern);
+  }
+});
