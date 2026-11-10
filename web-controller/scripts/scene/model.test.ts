@@ -94,6 +94,27 @@ test("accepts 2000 actions and rejects 2001", () => {
   assert.throws(() => validateProject(build(2001)), /2000/);
 });
 
+test("2000 action limit is global across maps, exact limit validates", () => {
+  const makeId = seqIds();
+  const project = createProject("p", makeId);
+  const fill = (map: SceneMap, count: number) => {
+    const track = newTrack(map, "display", makeId);
+    map.tracks.push(track);
+    for (let i = 0; i < count; i++) {
+      const action = newAction(map, track, "wait", makeId);
+      Object.assign(action, { position: i, runSeconds: 1 });
+      track.actions.push(action);
+    }
+  };
+  fill(project.maps[0], 1500);
+  project.maps.push(createProject("q", makeId).maps[0]);
+  fill(project.maps[1], 500);
+  assert.doesNotThrow(() => validateProject(project));
+  project.maps.push(createProject("r", makeId).maps[0]);
+  fill(project.maps[2], 1);
+  assert.throws(() => validateProject(project), /2000/);
+});
+
 test("rejects times outside 0..86400", () => {
   rejects((_, m) => { m.tracks[0].actions[0].runSeconds = 86401; }, /runSeconds/);
   rejects((_, m) => { m.tracks[0].actions[0].position = -1; }, /position/);
