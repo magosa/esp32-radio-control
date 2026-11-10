@@ -6,9 +6,9 @@
 
 | 区分 | 件数 |
 |---|---:|
-| 移植済み | 91 |
-| 一部移植（ギャップあり） | 11 |
-| 未移植（ギャップ） | 19 |
+| 移植済み | 121 |
+| 一部移植（ギャップあり） | 0 |
+| 未移植（ギャップ） | 0 |
 | 対象外: 旧互換 | 60 |
 | 対象外: DOM | 4 |
 | 対象外: 履歴サーバー | 6 |
@@ -17,7 +17,7 @@
 | 対象外: S2以降 | 40 |
 | 合計 | 240 |
 
-「一部移植（ギャップあり）」と「未移植（ギャップ）」の内容は末尾の「未移植のギャップ」に記載する。
+ギャップ G1〜G14 はすべて解消した（経緯は末尾の「未移植のギャップ」に記載）。
 
 ## 対応表
 
@@ -48,8 +48,8 @@
 | 16 | yield coordination demo waits, retreats from the shared corridor and stays collision-free | 対象外: S2以降 |  | デモ／シナリオ（S3 で作り直し） |
 | 17 | coordination demo rejects unsupported scenario names | 対象外: S2以降 |  | デモ／シナリオ（S3 で作り直し） |
 | 18 | conflict companion is simulation-only and predicts a collision without plan errors | 対象外: S2以降 |  | デモ／シナリオ（S3 で作り直し） |
-| 19 | room activity follows physical robot occupancy and excludes charging and muted robots | 一部移植（ギャップあり） | room activities list stationary robots in rooms, excluding moving robots and charging zones | ミュート行の除外は未検証（G13） |
-| 20 | transit and turning robots never become room activities while crossing the entrance | 一部移植（ギャップあり） | room activities list stationary robots in rooms, excluding moving robots and charging zones | 移動中の除外のみ。旋回中の除外は未検証（G14） |
+| 19 | room activity follows physical robot occupancy and excludes charging and muted robots | 移植済み | room activity follows physical robot occupancy and excludes charging and muted robots<br>room activities list stationary robots in rooms, excluding moving robots and charging zones | G13 で解消。デモマップの代わりに 2 部屋の小さなマップで検証 |
+| 20 | transit and turning robots never become room activities while crossing the entrance | 移植済み | transit and turning robots never become room activities while crossing the entrance | G14 で解消。デモマップの代わりに廊下付きの小さなマップで検証 |
 
 ### door-controls.test.js
 
@@ -106,15 +106,15 @@
 | 54 | named partition walls and corridor doors persist and export navigation geometry | 移植済み | named partition walls and corridor doors persist as mm Y-up segments<br>named partition walls and corridor doors export navigation geometry |  |
 | 55 | independent corridor barriers stop unsafe paths and wide door openings permit passage | 移植済み | independent corridor barriers stop unsafe paths and wide door openings permit passage |  |
 | 56 | rendering can hide labels while preserving names, elevator appearance and reception monitor | 対象外: DOM |  | 描画 |
-| 57 | door mode and door-specific unlock references validate and remap with copied layouts | 一部移植（ギャップあり） | rejects duplicate ids and unresolved references<br>createProject yields one empty valid fleet-scene/v1 map | 不在の doorId のみ検証。複製部分は S2 以降（G3） |
+| 57 | door mode and door-specific unlock references validate and remap with copied layouts | 移植済み | door mode and door-specific unlock references validate<br>rejects duplicate ids and unresolved references | G3 で解消。レイアウトの複製（remap）は S2 以降 |
 | 58 | grid bounds use top-row indices and bottom-left world coordinates | 移植済み | grid bounds use bottom-row indices and bottom-left mm<br>cellIndex counts rows from the bottom and rejects out-of-range |  |
 | 59 | actual L-shaped occupancy excludes the missing bbox corner | 移植済み | actual L-shaped occupancy excludes the missing bbox corner<br>L-shaped room rejects the empty cell center inside its bounding box |  |
 | 60 | anchor selects a cell interior even for a ring with a hole | 移植済み | anchor selects a cell interior even for a ring with a hole |  |
 | 61 | legacy rectangles remain unmodified, optional floor plan is supported | 移植済み | maps without a floor plan still export cell-based navigation | 矩形の部屋（旧形式）は旧互換 |
 | 62 | ownership validates polygons instead of overlapping bounding boxes | 移植済み | ownership validates cell polygons instead of overlapping bounding boxes |  |
 | 63 | doors belong to occupied cell boundaries and shared-wall doors are unique | 移植済み | doors belong to occupied cell boundaries and shared-wall doors are unique |  |
-| 64 | furniture validates occupancy, kind, cardinal rotation and unique cell | 一部移植（ギャップあり） | furniture validates occupancy and unique cell | 家具の種類・回転角・ID 安全性の拒否は未検証（G4） |
-| 65 | strict values, ID safety and count limits reject malformed plans | 一部移植（ギャップあり） | rejects cell indices outside 0..1704<br>rejects duplicate ids and unresolved references | 部屋の名前・色・種類・床材・件数上限の拒否は未検証（G5） |
+| 64 | furniture validates occupancy, kind, cardinal rotation and unique cell | 移植済み | furniture validates occupancy, kind, cardinal rotation and unique cell | G4 で解消（validateFloorPlan を修正） |
+| 65 | strict values, ID safety and count limits reject malformed plans | 移植済み | strict values, ID safety and count limits reject malformed plans<br>rejects cell indices outside 0..1704<br>rejects duplicate ids and unresolved references | G5 で解消（validateFloorPlan を修正） |
 | 66 | JSON roundtrip preserves IDs, references, polygons and fixtures | 移植済み | JSON roundtrip preserves IDs, references, polygons and fixtures |  |
 | 67 | unreferenced region deletion removes fixtures without mutating the input | 移植済み | unreferenced region deletion removes fixtures without mutating the input |  |
 | 68 | region deletion protects direct track, initial and action room references | 移植済み | region deletion protects direct track, initial and action room references |  |
@@ -153,7 +153,7 @@
 | 86 | new movement uses a fixed near-10mm arrival margin and stable wait | 対象外: 旧互換 |  | 到着許容・dwell は fleet-scene/v1 で廃止 |
 | 87 | action preview resolves trigger-ordered start position instead of array order | 移植済み | action preview resolves the time-ordered start pose without mutating the map | トリガー順は時刻順に置換 |
 | 88 | rotation seconds sets actual duration and completion trigger without changing legacy speed | 対象外: 旧互換 |  | angularSpeed・rotationSeconds による所要時間は runSeconds に置換。旋回の進行は 179→-179 のテストで確認 |
-| 89 | display templates and event hatch options persist and reach runtime state | 一部移植（ギャップあり） | display targets update in place, hide removes only its target, and templates reach the state<br>room events update stable targets and unrelated ends do not clear other states | displayTemplate・hatchStyle・hatchColor の不正値拒否は未検証（G6） |
+| 89 | display templates and event hatch options persist and reach runtime state | 移植済み | display templates and event hatch options persist and reject unknown values<br>display targets update in place, hide removes only its target, and templates reach the state<br>room events update stable targets and unrelated ends do not clear other states | G6 で解消 |
 | 90 | rotation stays in place, uses shortest yaw and angular speed, then triggers a straight move | 移植済み | 179 to -179 explicit rotation takes the shortest 2 degree arc over the bar length and keeps the room |  |
 | 91 | rotation uses the preceding arrival, preserves room, and rejects overlapping movement | 移植済み | 179 to -179 explicit rotation takes the shortest 2 degree arc over the bar length and keeps the room<br>same-row overlap is an error and does not slip the bar or block other rows | angularSpeed の検証は旧互換 |
 | 92 | two consecutive moves form straight segments and initial pose persists without an action | 移植済み | consecutive moves form straight segments, keep yaw and the initial pose persists without actions |  |
@@ -161,7 +161,7 @@
 | 94 | grid rooms aggregate only occupied cells, retain IDs and select an interior arrival point | 移植済み | actual L-shaped occupancy excludes the missing bbox corner<br>events aggregate stationary actors inside the room; moving or outside actors wait for arrival; end releases<br>rejects duplicate ids and unresolved references |  |
 | 95 | planned duration roundtrips but never changes execution and supports legacy omissions | 対象外: 旧互換 |  | plannedDuration は廃止 |
 | 96 | save snapshot refreshes derived navigation without changing editable data | 移植済み | save snapshot refreshes derived navigation without changing editable data |  |
-| 97 | all new kinds and actions validate; defaults are unique, chain locally, and never mutate input | 一部移植（ギャップあり） | sample project with tracks, rooms and doors is valid | 不正な kind・type の例外、入力の非変更、名前の重複回避は未検証（G7） |
+| 97 | all new kinds and actions validate; defaults are unique, chain locally, and never mutate input | 移植済み | all new kinds and actions validate; defaults are unique, chain locally, and never mutate input<br>sample project with tracks, rooms and doors is valid | G7 で解消。trigger の連鎖は position の連鎖に置換 |
 | 98 | multiple maps are independent and trigger references never cross map boundaries | 対象外: 旧互換 |  | マップ間のトリガー参照 |
 | 99 | actual start/complete timestamps drive all/any, delays, gaps, and forward references | 対象外: 旧互換 |  | トリガー |
 | 100 | any trigger picks earliest actual source, not first source or first array entry | 対象外: 旧互換 |  | トリガー |
@@ -172,8 +172,8 @@
 | 105 | overlapping moves block deterministically instead of secretly serializing or introducing a gate | 移植済み | same-row overlap is an error and does not slip the bar or block other rows |  |
 | 106 | display targets update in place, hide removes only its target, and effects apply at exact completion | 移植済み | display targets update in place, hide removes only its target, and templates reach the state |  |
 | 107 | actor-attached show/hide coexist with motion and identify their owner by track ID | 移植済み | actor-attached displays identify their owner by track ID |  |
-| 108 | event-end defaults match last known local target and selected room, including other room tracks | 一部移植（ギャップあり） | sample project with tracks, rooms and doors is valid | 同じ部屋の他の部屋行から target を引き継ぐ既定値は未検証（G8） |
-| 109 | same-timestamp effects have deterministic map/track/action order with dependency precedence | 未移植（ギャップ） |  | 依存関係の優先は旧互換。同時刻の効果の適用順は未検証（G9） |
+| 108 | event-end defaults match last known local target and selected room, including other room tracks | 移植済み | event-end defaults match last known local target and selected room, including other room tracks | G8 で解消 |
+| 109 | same-timestamp effects have deterministic map/track/action order with dependency precedence | 移植済み | same-timestamp effects have deterministic track/action order (later track wins) | G9 で解消。依存関係（トリガー）の優先は旧互換 |
 | 110 | room events update stable targets, unrelated end does not clear other room states | 移植済み | room events update stable targets and unrelated ends do not clear other states |  |
 | 111 | arrival during event aggregates, latch survives end, same-room move retains and exit releases at start | 対象外: 旧互換 |  | イベント終了後も集約を保つのは非固定時間軸の挙動。固定時間軸では終了で解除（上流 timed の event completion と同じ） |
 | 112 | starting event aggregates stationary actors inside room, not moving or geometrically outside actors | 移植済み | events aggregate stationary actors inside the room; moving or outside actors wait for arrival; end releases |  |
@@ -183,31 +183,31 @@
 | 116 | aggregate encoded background size reserves metadata headroom for 80MiB JSON imports | 対象外: 旧互換 |  | 背景画像は fleet-scene/v1 で廃止 |
 | 117 | validator rejects v1 | 移植済み | rejects wrong schema |  |
 | 118 | validator rejects absolute project duration | 対象外: 旧互換 |  | v1 の duration |
-| 119 | validator rejects empty maps | 未移植（ギャップ） |  | G2 |
+| 119 | validator rejects empty maps | 移植済み | validator rejects empty maps | G2 で解消 |
 | 120 | validator rejects map limit | 移植済み | rejects more than 8 maps |  |
-| 121 | validator rejects null map | 未移植（ギャップ） |  | G2 |
+| 121 | validator rejects null map | 移植済み | validator rejects null map | G2 で解消 |
 | 122 | validator rejects duplicate global ID | 移植済み | rejects duplicate ids and unresolved references |  |
-| 123 | validator rejects unsafe ID | 未移植（ギャップ） |  | G2 |
-| 124 | validator rejects reserved ID | 未移植（ギャップ） |  | G2 |
-| 125 | validator rejects unknown kind | 未移植（ギャップ） |  | G2 |
-| 126 | validator rejects unsafe color | 未移植（ギャップ） |  | G2 |
-| 127 | validator rejects nonboolean mute | 未移植（ギャップ） |  | G2 |
-| 128 | validator rejects duplicate robot | 未移植（ギャップ） |  | G2 |
+| 123 | validator rejects unsafe ID | 移植済み | validator rejects unsafe ID | G2 で解消 |
+| 124 | validator rejects reserved ID | 移植済み | validator rejects reserved ID | G2 で解消 |
+| 125 | validator rejects unknown kind | 移植済み | validator rejects unknown kind | G2 で解消 |
+| 126 | validator rejects unsafe color | 移植済み | validator rejects unsafe color | G2 で解消 |
+| 127 | validator rejects nonboolean mute | 移植済み | validator rejects nonboolean mute | G2 で解消 |
+| 128 | validator rejects duplicate robot | 移植済み | validator rejects duplicate robot | G2 で解消 |
 | 129 | validator rejects fractional robot | 対象外: 旧互換 |  | 整数の robotId は fleet.json の文字列 ID に置換 |
-| 130 | validator rejects human zero count | 未移植（ギャップ） |  | G2 |
-| 131 | validator rejects human fractional count | 未移植（ギャップ） |  | G2 |
+| 130 | validator rejects human zero count | 移植済み | validator rejects human zero count<br>validator accepts text of exactly 4000 chars and a human count of 1 | G2 で解消 |
+| 131 | validator rejects human fractional count | 移植済み | validator rejects human fractional count | G2 で解消 |
 | 132 | validator rejects unknown initial room | 移植済み | rejects an actor initial.roomId that is non-empty and does not exist |  |
-| 133 | validator rejects missing initial room | 未移植（ギャップ） |  | G2 |
+| 133 | validator rejects missing initial room | 移植済み | validator rejects missing initial room | G2 で解消 |
 | 134 | validator rejects bad initial coordinates | 移植済み | rejects yaw -180 and coordinates outside the drawable area |  |
 | 135 | validator rejects room outside bounds | 移植済み | rejects cell indices outside 0..1704 | 矩形の部屋は廃止。マス番号で検証 |
 | 136 | validator rejects unknown room track reference | 移植済み | rejects a room track whose roomId does not exist |  |
-| 137 | validator rejects unknown action room | 未移植（ギャップ） |  | G2 |
-| 138 | validator rejects wrong action kind | 未移植（ギャップ） |  | G2 |
+| 137 | validator rejects unknown action room | 移植済み | validator rejects unknown action room | G2 で解消 |
+| 138 | validator rejects wrong action kind | 移植済み | validator rejects wrong action kind | G2 で解消 |
 | 139 | validator rejects absolute start | 対象外: 旧互換 |  | v1 の start・duration |
 | 140 | validator rejects duration | 対象外: 旧互換 |  | v1 の start・duration |
 | 141 | validator rejects nonfinite speed | 対象外: 旧互換 |  | speed は廃止 |
 | 142 | validator rejects zero speed | 対象外: 旧互換 |  | speed は廃止 |
-| 143 | validator rejects numeric string | 未移植（ギャップ） |  | G2 |
+| 143 | validator rejects numeric string | 移植済み | validator rejects numeric string | G2 で解消 |
 | 144 | validator rejects bad coordinates | 移植済み | rejects yaw -180 and coordinates outside the drawable area |  |
 | 145 | validator rejects bad yaw | 移植済み | rejects yaw -180 and coordinates outside the drawable area |  |
 | 146 | validator rejects nonfinite editor position | 移植済み | rejects times outside 0..86400 |  |
@@ -215,9 +215,9 @@
 | 148 | validator rejects nonfinite dwell | 対象外: 旧互換 |  | tolerance・dwell・angleTolerance は廃止 |
 | 149 | validator rejects bad angle tolerance | 対象外: 旧互換 |  | tolerance・dwell・angleTolerance は廃止 |
 | 150 | validator rejects bad target | 移植済み | rejects duplicate ids and unresolved references |  |
-| 151 | validator rejects bad state | 未移植（ギャップ） |  | G2 |
-| 152 | validator rejects bad text | 未移植（ギャップ） |  | G2 |
-| 153 | validator rejects long text | 未移植（ギャップ） |  | G2 |
+| 151 | validator rejects bad state | 移植済み | validator rejects bad state | G2 で解消 |
+| 152 | validator rejects bad text | 移植済み | validator rejects bad text | G2 で解消 |
+| 153 | validator rejects long text | 移植済み | validator rejects long text<br>validator accepts text of exactly 4000 chars and a human count of 1 | G2 で解消 |
 | 154 | validator rejects null trigger | 対象外: 旧互換 |  | トリガー（fleet-scene/v1 では trigger を拒否: rejects join actions and trigger properties） |
 | 155 | validator rejects unknown mode | 対象外: 旧互換 |  | トリガー（fleet-scene/v1 では trigger を拒否: rejects join actions and trigger properties） |
 | 156 | validator rejects empty sources | 対象外: 旧互換 |  | トリガー（fleet-scene/v1 では trigger を拒否: rejects join actions and trigger properties） |
@@ -233,7 +233,7 @@
 | 166 | validator rejects bad base64 | 対象外: 旧互換 |  | 背景画像は fleet-scene/v1 で廃止 |
 | 167 | validator rejects empty background | 対象外: 旧互換 |  | 背景画像は fleet-scene/v1 で廃止 |
 | 168 | validator rejects background size | 対象外: 旧互換 |  | 背景画像は fleet-scene/v1 で廃止 |
-| 169 | 2000 action limit is global across maps, exact limit validates without recursive graph traversal | 一部移植（ギャップあり） | accepts 2000 actions and rejects 2001 | マップをまたぐ合計の検証は未検証（G10） |
+| 169 | 2000 action limit is global across maps, exact limit validates without recursive graph traversal | 移植済み | 2000 action limit is global across maps, exact limit validates<br>accepts 2000 actions and rejects 2001 | G10 で解消。グラフ走査はトリガー廃止で不要 |
 | 170 | time formatting carries rounded seconds and minutes | 対象外: S2以降 |  | 時刻表示の書式（エディター） |
 
 ### scenario-library.test.js
@@ -272,8 +272,8 @@
 | 195 | sequence reordering changes chronological order without changing duration or gaps | 移植済み | reorderSequence swaps order while keeping durations and the gap |  |
 | 196 | scenario handoff is explicitly a draft with percent coordinates and exact action times | 対象外: 外部API |  | scene-scenario-draft（百分率座標）の出力は非目標 |
 | 197 | 100mm rendering dimension and editor safety share the same conservative footprint | 移植済み | wall clearance of exactly 60mm is allowed and 59mm is rejected<br>collision thresholds are 120mm robot-robot and 74mm robot-human | 100mm の描画寸法は D6（安全半径 60mm 固定）で置換 |
-| 198 | charging overlays preserve all navigation cells, walls and obstacles across JSON roundtrip | 一部移植（ギャップあり） | charging zones do not change navigation | 充電スペースの不正値拒否は未検証（G11） |
-| 199 | robot role accepts all three types, preserves old missing values and rejects unknown roles | 未移植（ギャップ） |  | G12 |
+| 198 | charging overlays preserve all navigation cells, walls and obstacles across JSON roundtrip | 移植済み | charging overlays preserve all navigation cells, walls and obstacles across JSON roundtrip<br>charging zones do not change navigation | G11 で解消（validateFloorPlan を修正） |
+| 199 | robot role accepts all three types, preserves old missing values and rejects unknown roles | 移植済み | robot role accepts all three types, preserves old missing values and rejects unknown roles | G12 で解消 |
 | 200 | disconnected join nodes are editable but cannot fire without two sources | 対象外: 旧互換 |  | 合流 |
 
 ### startup.test.js
@@ -316,7 +316,7 @@
 | 229 | continuous closest approach detects human/robot crossings and stationary actors | 移植済み | continuous closest approach detects human/robot crossings and stationary actors |  |
 | 230 | fixed timeline reports corridor conflicts instead of adding invisible waiting time | 移植済み | fixed timeline reports narrow corridor conflicts instead of adding invisible waiting time |  |
 | 231 | narrow corridors serialize opposing robots, hold outside entry and delay downstream | 対象外: 旧互換 |  | 廊下待ちの収束計算（非固定時間軸） |
-| 232 | four-cell corridors are not exclusive and parked robots in narrow corridors block entry | 一部移植（ギャップあり） | corridors up to 11 cells wide form one-at-a-time zones; 12 cells do not | 停車中ロボットによる進入停止は未移植（G1） |
+| 232 | four-cell corridors are not exclusive and parked robots in narrow corridors block entry | 移植済み | twelve-cell corridors are not exclusive and parked robots in narrow corridors block entry<br>corridors up to 11 cells wide form one-at-a-time zones; 12 cells do not | G1 で解消（timedPlan.ts に停車中ロボットの検出を追加） |
 | 233 | a deadline expires even when the corridor occupant never has an exit plan | 対象外: 旧互換 |  | timeoutSeconds・トリガー |
 | 234 | a deadline covers an unresolved dependency, not just dependencies with known completion times | 対象外: 旧互換 |  | timeoutSeconds・トリガー |
 | 235 | a robot initially in a narrow corridor has priority to exit before an incoming robot | 対象外: 旧互換 |  | 廊下待ちの収束計算（非固定時間軸） |
