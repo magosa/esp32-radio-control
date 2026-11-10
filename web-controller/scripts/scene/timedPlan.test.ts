@@ -157,6 +157,33 @@ test("room events update stable targets and unrelated ends do not clear other st
   assert.deepEqual(samplePlan(plan, 2).events.map((e) => e.state), ["outage"]);
 });
 
+test("same-timestamp effects have deterministic track/action order (later track wins)", () => {
+  const { map, track, action } = fixture();
+  const owner = track("display");
+  const show = action(owner, "show", { position: 0, runSeconds: 3, text: "FIRST" });
+  const hide = action(owner, "hide", { position: 3, runSeconds: 0, targetId: show.targetId });
+  owner.actions.reverse();
+  let plan = compilePlan(map);
+  assert.deepEqual(plan.errors, []);
+  assert.equal(samplePlan(plan, 3).displays.length, 0);
+  assert.equal(samplePlan(plan, 3).actionStates[hide.id].status, "complete");
+
+  const next = track("display");
+  action(next, "show", { position: 0, runSeconds: 3, targetId: show.targetId, text: "LAST" });
+  plan = compilePlan(map);
+  assert.deepEqual(samplePlan(plan, 0).displays.map((d) => d.text), ["LAST"]);
+  assert.deepEqual(compilePlan(map), plan);
+  map.tracks.reverse();
+  assert.deepEqual(samplePlan(compilePlan(map), 0).displays.map((d) => d.text), ["FIRST"]);
+
+  const swap = fixture(), a = swap.track("display"), b = swap.track("display");
+  const shown = swap.action(a, "show", { position: 2, runSeconds: 3, text: "SHOWN" });
+  swap.action(b, "hide", { position: 2, runSeconds: 0, targetId: shown.targetId });
+  assert.equal(samplePlan(compilePlan(swap.map), 2).displays.length, 0);
+  swap.map.tracks.reverse();
+  assert.deepEqual(samplePlan(compilePlan(swap.map), 2).displays.map((d) => d.text), ["SHOWN"]);
+});
+
 function twoRooms() {
   return fixture([region("room", rect(0, 0, 27, 31)), region("hall", rect(27, 0, 28, 31))]);
 }
