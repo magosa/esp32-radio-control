@@ -423,6 +423,25 @@ test("room activity follows physical robot occupancy and excludes charging and m
   assert.deepEqual(samplePlan(plan, 2).roomActivities, combined);
 });
 
+test("transit and turning robots never become room activities while crossing the entrance", () => {
+  const { map, track, action } = corridor();
+  const robot = track("robot", { x: 210, y: 310, yaw: 90, roomId: "left" });
+  action(robot, "move", { position: 1, runSeconds: 1, motion: "rotate", yaw: 0 });
+  action(robot, "move", { position: 2, runSeconds: 10, x: 890, y: 310, roomId: "right" });
+  action(robot, "move", { position: 12, runSeconds: 1, motion: "rotate", yaw: 90 });
+  const plan = compilePlan(map);
+  assert.deepEqual(plan.errors, []);
+  const trips = plan.entries.filter((e) => !e.blocked && e.action.type === "move");
+  assert.equal(trips.length, 3);
+  for (const trip of trips) {
+    for (const at of [trip.start!, trip.start! + 0.01, (trip.start! + trip.end!) / 2, trip.end! - 0.01]) {
+      assert.ok(!samplePlan(plan, at).roomActivities.some((a) => a.actorIds.includes(robot.id)), `${trip.action.name} at ${at}`);
+    }
+  }
+  assert.deepEqual(samplePlan(plan, 0.5).roomActivities, [{ roomId: "left", text: "掃除中", actorIds: [robot.id] }]);
+  assert.deepEqual(samplePlan(plan, 13).roomActivities, [{ roomId: "right", text: "掃除中", actorIds: [robot.id] }]);
+});
+
 test("action preview checks geometry regardless of muted rows, blocked predecessors and invalid initial poses", () => {
   for (const blockedBy of ["muted", "blocked", "initial"]) {
     const { map, track, action } = fixture(), t = track("robot");
