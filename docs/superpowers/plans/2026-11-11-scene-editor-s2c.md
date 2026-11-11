@@ -100,8 +100,8 @@ web-controller/
   - `timelineView.ts`: `MIN_HORIZON_S = 30`、`MAX_HORIZON_S = 7200`、`PX_MIN = 10`、`PX_MAX = 120`、`PX_DEFAULT = 26`、`LANE_PAD_PX = 16`、`timelineHorizon(map, planDuration): number`、`rulerTicks(horizon, px): { time: number; left: number; label: string }[]`（`px < 30` で 5 秒刻み、それ以外 2 秒刻み）、`quantize(seconds, fine: boolean): number`（fine は 0.1、粗いと 0.5。負は 0）、`barBox(action, px): { left: number; width: number }`（`left = position * px + 16`、幅は `runSeconds * px`、最小幅あり）、`timeToPx(t, px)`、`pxToTime(x, px)`、`fitPx(viewportPx, horizon): number`（`PX_MIN..PX_MAX` に収める）、`formatTime(seconds): string`（`m:ss.s` 形式。丸めで 60 秒になったら繰り上げる＝上流の「時刻表示の書式」）。
   - `playback.ts`: `PlaybackState = { time: number; running: boolean; looping: boolean; speed: number }`、`SPEEDS = [0.5, 1, 2, 4]`、`initialPlayback()`、`step(state, deltaMs, duration): PlaybackState`（`running` のとき `time += deltaMs/1000 * speed`。終端で、ループなら 0 へ戻り、ループでなければ `time = duration` で `running = false`。`duration = 0` のときは動かず停止）、`seek(state, t, duration)`（0〜duration にクランプ）、`toggle(state, duration)`（終端で押すと先頭から再生）、`home(state)`、`setSpeed(state, s)`（`SPEEDS` 以外は拒否）、`toggleLoop(state)`、`clampTo(state, duration)`（再生時間が縮んだとき時刻を収める）。
 - **ステップ 1: 失敗するテストを書く**
-  - `timelineHorizon`: バーなしで 30、最後のバー終了 + 4 が 30 を超えると反映、再生時間 + 8（ただし 3600 で頭打ち）、上限 7200。
-  - `rulerTicks`: 幅 26px で 2 秒刻み、20px で 5 秒刻み、境界 `px = 30`。先頭は 0 秒。
+  - `timelineHorizon`: バーなしで 30、最後のバー終了 + 4 が 30 を超えると反映、再生時間 + 8（ただし再生時間の項は `min(3600, 再生時間 + 8)`）、上限 7200。
+  - `rulerTicks`: 幅 26px（既定）で 5 秒刻み、40px で 2 秒刻み、境界 `px = 30`（`px < 30` が 5 秒刻み）。先頭は 0 秒。
   - `quantize`: 0.1 秒刻みの丸め（0.04→0、0.05→0.1、浮動小数点の誤差で 0.30000000000000004 にならない）、0.5 秒刻み、負は 0。
   - `barBox` と `pxToTime` の往復、`fitPx` のクランプ（`PX_MIN`・`PX_MAX`）。
   - `formatTime`: 59.96 → `1:00.0`（繰り上げ）、0 → `0:00.0`、125.04 → `2:05.0`、負・NaN の扱い。
@@ -122,7 +122,7 @@ web-controller/
   - `addTrack(map, kind: TrackKind, opts: { roomId?: string; index?: number }, makeId?): { map: SceneMap; trackId: string }`（上限 128。部屋の行は領域が 0 のとき「先にマップ編集で部屋・廊下を作成してください。」。ロボット・人は初期位置を、通行でき、既存の行の初期位置と車体・人の半径＋余裕 5mm 以上離れた最初の空きマスの中心へ置く。空きがなければ「初期位置を配置できる空きがありません。先にマップ編集で部屋・廊下を広げてください。」）
   - `moveTrack(map, trackId, toIndex)`、`moveTrackBy(map, trackId, ±1)`（固定の行・移動先が固定の行は不可。端は「これ以上移動できません。」）
   - `setTrackFlag(map, trackId, "muted" | "locked", value)`（これは固定中でも切り替えられる）
-  - `updateTrack(map, trackId, patch: Partial<Pick<Track, "name" | "color" | "count" | "robotRole" | "robotId" | "roomId">>)`（固定の行は不可。`count` は 1〜1000 の整数、`robotId` は 0〜9999 の整数かつ他の行と重複不可、色は `#RRGGBB`、名前は 1〜120 文字）
+  - `updateTrack(map, trackId, patch: Partial<Pick<Track, "name" | "color" | "count" | "robotRole" | "robotId" | "roomId">>)`（固定の行は不可。`count` は 1〜1000 の整数、`robotId` は 1〜100 文字の文字列（`$start`・`__proto__`・`constructor`・`prototype` は不可）で他の行と重複不可、色は `#RRGGBB`、名前は 1〜120 文字）
   - `setInitialPose(map, trackId, pose: Pose)`（固定の行は不可。通行できない点は `pathProblem` の理由で拒否）
   - `deleteTrack(map, trackId)`（固定は不可。この行の動作が `targetId` で結ばれた他の行の動作がある場合は、参照が宙に浮かないよう「表示を消去」「イベント終了」側を一緒に消すか拒否するかを**テストで決めた方で固定**する。上流は単に行を消す＝参照切れを許していたため、`validateProject` が通るかを確認し、通らない場合は拒否理由を返す）
   - `deleteActions(map, actionIds: string[])`（固定の行の動作を含むと全体を拒否。見つからない ID は拒否）
