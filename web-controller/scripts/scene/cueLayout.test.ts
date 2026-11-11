@@ -114,3 +114,13 @@ test("layoutCues shows only the cues active at the time and numbers notices in o
   assert.deepEqual(layoutCues(presentation, 9, 0).map((s) => s.kind), ["dirt"], "end is exclusive");
   assert.deepEqual(layoutCues(undefined, 4, 0), []);
 });
+
+test("a notice can be pulled in from both sides so it stays clear of the corners", () => {
+  const plain = layoutCue(cue({ kind: "notice" }), 0, 0), inset = layoutCue(cue({ kind: "notice" }), 0, 0, 73);
+  if (plain.kind !== "notice" || inset.kind !== "notice") throw new Error("not a notice");
+  assert.equal(inset.x, 73);
+  assert.equal(inset.x + inset.width, 1100 - 73);
+  assert.ok(inset.text.x > inset.x);
+  assert.equal(layoutCue(cue({ kind: "notice" }), 0, 0, 3).kind === "notice" && (layoutCue(cue({ kind: "notice" }), 0, 0, 3) as { x: number }).x, plain.x, "a small inset never moves it outward");
+  assert.equal((layoutCues({ version: 1, scenarioId: "s", cues: [cue({ kind: "notice" })] }, 1, 0, 73)[0] as { x: number }).x, 73);
+});

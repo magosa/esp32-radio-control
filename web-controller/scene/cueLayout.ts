@@ -63,12 +63,13 @@ function scatter(cue: PresentationCue & { x: number; y: number; width: number; h
 }
 
 // The cue as plain geometry in the map's SVG units (y down). `scale` is px per mm; it only keeps text legible on a small view.
-export function layoutCue(cue: PresentationCue, noticeIndex: number, scale: number): CueShape {
+export function layoutCue(cue: PresentationCue, noticeIndex: number, scale: number, inset = 0): CueShape {
   if (cue.kind === "notice") {
     const font = textMm(NOTICE_FONT, scale);
     const y = NOTICE_Y + noticeIndex * NOTICE_PITCH;
-    return { kind: "notice", color: cue.color, x: NOTICE_X, y, width: AREA_WIDTH_MM - 2 * NOTICE_X, height: NOTICE_HEIGHT,
-      text: { x: 30 * K, y: y + 25 * K, size: font, lines: [cue.label], lineHeight: font } };
+    const x = Math.max(NOTICE_X, inset);
+    return { kind: "notice", color: cue.color, x, y, width: AREA_WIDTH_MM - 2 * x, height: NOTICE_HEIGHT,
+      text: { x: x + 14 * K, y: y + 25 * K, size: font, lines: [cue.label], lineHeight: font } };
   }
   if (cue.kind === "route") {
     const points = (cue.points ?? []).map(([x, y]) => ({ x, y: svgY(y) }));
@@ -94,7 +95,8 @@ export function layoutCue(cue: PresentationCue, noticeIndex: number, scale: numb
   };
 }
 
-export function layoutCues(presentation: Presentation | undefined, time: number, scale: number): CueShape[] {
+// `inset` keeps the full-width notices clear of the corners (the exhibit leaves those blank around the reference markers).
+export function layoutCues(presentation: Presentation | undefined, time: number, scale: number, inset = 0): CueShape[] {
   let notices = 0;
-  return presentationAt(presentation, time).map((cue) => layoutCue(cue, cue.kind === "notice" ? notices++ : 0, scale));
+  return presentationAt(presentation, time).map((cue) => layoutCue(cue, cue.kind === "notice" ? notices++ : 0, scale, inset));
 }

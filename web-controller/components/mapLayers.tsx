@@ -188,13 +188,15 @@ export interface MapBodyProps {
   plan?: ScenePlan;
   drawRobots?: boolean;
   roomActivities?: readonly RoomActivity[];
+  // Notices start this far from each side of the map.
+  noticeInset?: number;
   overlay?: ReactNode;
 }
 
-export function MapBody({ map, scene, time, scale, showGrid = false, gridMm = 20, plan, drawRobots = true, roomActivities = [], overlay }: MapBodyProps) {
+export function MapBody({ map, scene, time, scale, showGrid = false, gridMm = 20, plan, drawRobots = true, roomActivities = [], noticeInset = 0, overlay }: MapBodyProps) {
   const openness = new Map(scene.doors.map((door) => [door.id, door.openness]));
   const floorPlan = map.floorPlan;
-  const cues = layoutCues(map.presentation, time, scale);
+  const cues = layoutCues(map.presentation, time, scale, noticeInset);
   return (
     <>
       <rect width={VIEW_WIDTH} height={VIEW_HEIGHT} fill={MAP_COLORS.roomKind.corridor} />
