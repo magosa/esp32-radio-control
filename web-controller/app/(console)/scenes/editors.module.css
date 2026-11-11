@@ -1,0 +1,73 @@
+/* Shared by the single-action dialog and the robot sequence dialog. --surface-strong is about 93% opaque, so the dialog uses an opaque colour. */
+.dialog { --me-solid: #f5faff; }
+:global([data-theme="dark"]) .dialog { --me-solid: #172338; }
+.dialog {
+  position: fixed; inset: 0; width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 12px;
+  color: var(--ink); background: var(--me-solid); border: 0; border-radius: 0;
+  display: none; grid-template-rows: auto minmax(0, 1fr) auto; gap: 10px;
+}
+.dialog[open] { display: grid; }
+.dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+.dialog button { min-height: 44px; }
+.dialog button:focus-visible, .dialog input:focus-visible, .dialog select:focus-visible, .dialog textarea:focus-visible {
+  outline: 3px solid var(--focus); outline-offset: 2px;
+}
+.dialog h3 { margin: 0; font-size: var(--text-body); font-weight: 700; }
+.dialog p { margin: 0; font-size: var(--text-body); }
+.dialog button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.title { margin: 0; font-size: var(--text-section); overflow-wrap: anywhere; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.body { min-width: 0; min-height: 0; overflow: auto; }
+.footer { display: grid; gap: 4px; }
+.hint { color: var(--muted); font-size: var(--text-meta); }
+.error { color: var(--warning-ink); font-weight: 600; overflow-wrap: anywhere; }
+.empty { color: var(--muted); }
+
+.confirm { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.45); }
+.confirmBox { display: grid; gap: 10px; max-width: min(420px, calc(100vw - 32px)); padding: 20px; color: var(--ink); background: var(--me-solid); border: 1px solid var(--line); border-radius: 8px; }
+
+.field { display: grid; gap: 4px; color: var(--muted); font-size: var(--text-meta); min-width: 0; }
+.field input[type="number"], .field input[type="text"], .field select, .field textarea {
+  min-height: 44px; padding: 8px 10px; color: var(--ink); background: var(--glass-input);
+  border: 1px solid var(--line); border-radius: 6px; font-size: var(--text-body); max-width: 100%; font-family: inherit;
+}
+.field textarea { resize: vertical; }
+
+.formGrid { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 12px; align-items: start; }
+.fields { display: grid; gap: 10px; min-width: 0; }
+.motion { display: flex; flex-wrap: wrap; gap: 6px; }
+.pickRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--text-body); }
+.step { display: grid; gap: 10px; justify-items: start; max-width: 520px; }
+
+.preview { display: grid; gap: 8px; min-width: 0; }
+.note { color: var(--ink); overflow-wrap: anywhere; }
+.problem { color: var(--warning-ink); font-weight: 600; overflow-wrap: anywhere; }
+.overlay { pointer-events: none; }
+
+/* Robot sequence dialog */
+.sequence { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.seqMeta { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; align-items: end; }
+.seqInitial { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: var(--text-body); }
+.seqWorkspace { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 12px; align-items: start; min-width: 0; }
+.seqList { display: grid; gap: 8px; min-width: 0; }
+.seqRows { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.seqRow {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 4px; align-items: center;
+  padding: 4px; border: 1px solid var(--line); border-radius: 8px;
+}
+.seqRow[data-active="true"] { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: -2px; }
+.seqSelect { display: grid; gap: 2px; justify-items: start; padding: 4px 8px; text-align: left; color: var(--ink); background: transparent; border: 0; cursor: pointer; font-size: var(--text-body); overflow-wrap: anywhere; }
+.seqSelect small { color: var(--muted); font-size: var(--text-meta); }
+.seqIcon { min-width: 44px; padding: 0 8px; color: var(--ink); background: var(--me-solid); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: var(--text-body); }
+.seqAdditions { display: flex; flex-wrap: wrap; gap: 6px; }
+.seqAdd { padding: 0 12px; color: var(--ink); background: var(--me-solid); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: var(--text-body); }
+.seqForm { min-width: 0; }
+
+@media (max-width: 1023px) {
+  .dialog { overflow-y: auto; grid-template-rows: auto auto auto; grid-auto-rows: min-content; align-content: start; }
+  .body { min-height: auto; overflow: visible; }
+  .formGrid, .seqWorkspace { grid-template-columns: minmax(0, 1fr); }
+}
