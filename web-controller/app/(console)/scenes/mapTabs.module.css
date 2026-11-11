@@ -4,16 +4,16 @@
 .group.selected { background: var(--selected); border-color: var(--accent); }
 .tab, .iconButton, .add { min-height: 44px; font: inherit; color: inherit; background: transparent; border: 0; cursor: pointer; }
 .tab { padding: 0 14px; min-width: 44px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; border-radius: 6px 0 0 6px; }
-.iconButton { min-width: 44px; padding: 0 8px; border-left: 1px solid var(--line); }
+.iconButton { min-width: 44px; padding: 0 8px; border-left: 1px solid var(--line); font-size: var(--text-meta); }
 .iconButton:last-child { border-radius: 0 6px 6px 0; }
 .iconButton:disabled, .add:disabled { opacity: 0.5; cursor: not-allowed; }
 .tab:focus-visible, .iconButton:focus-visible, .add:focus-visible, .renameInput:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .renameInput { min-height: 44px; width: 180px; max-width: 100%; padding: 0 10px; font: inherit; color: var(--ink); background: var(--surface); border: 0; border-radius: 6px 0 0 6px; }
-.limit { font-size: 0.875rem; color: var(--ink); opacity: 0.8; }
-.error { margin: 0; color: var(--warning-ink); font-size: 0.875rem; overflow-wrap: anywhere; }
+.limit { font-size: var(--text-meta); color: var(--ink); opacity: 0.8; }
+.error { margin: 0; color: var(--warning-ink); font-size: var(--text-meta); overflow-wrap: anywhere; }
 .dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 20px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
 .dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-.dialog h2 { margin: 0 0 12px; font-size: 1.125rem; }
+.dialog h2 { margin: 0 0 12px; font-size: var(--text-heading); }
 .field { display: grid; gap: 6px; margin: 12px 0; }
 .field input[type="text"] { min-height: 44px; padding: 0 10px; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
 .choices { margin: 0; padding: 0; border: 0; display: grid; gap: 4px; }

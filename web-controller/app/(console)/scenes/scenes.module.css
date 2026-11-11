@@ -22,6 +22,12 @@
 .stageControls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--card-gap); }
 .timeField { display: grid; flex: 1 1 280px; gap: 4px; color: var(--muted); font-size: var(--text-meta); }
 .timeField input { width: 100%; min-height: 44px; }
+/* 既存の速度スライダー(.speed input)と同じ見た目。既定のままだと濃い紺の太い帯になる。 */
+.timeField input[type="range"] { height: 44px; margin: 0; background: transparent; border-radius: 4px; }
+.timeField input[type="range"]::-webkit-slider-runnable-track { height: 6px; background: var(--track); border-radius: 4px; }
+.timeField input[type="range"]::-webkit-slider-thumb { width: 24px; height: 24px; margin-top: -9px; background: var(--accent); box-shadow: none; border: 2px solid var(--thumb-border); }
+.timeField input[type="range"]::-moz-range-track { height: 6px; background: var(--track); border-radius: 4px; }
+.timeField input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; background: var(--accent); border: 2px solid var(--thumb-border); border-radius: 50%; }
 .gridToggle { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-size: var(--text-body); }
 .sideCard, .timelineCard { min-width: 0; }
 .sideCard h2, .timelineCard h2 { font-size: var(--text-section); margin: 0 0 8px; }
