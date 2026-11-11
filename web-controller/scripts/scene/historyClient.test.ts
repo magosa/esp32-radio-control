@@ -174,6 +174,17 @@ test("load returns the latest record, continues numbering, and handles 204", asy
   assert.equal(await empty.client.load(), null);
 });
 
+test("load reports the loaded revision as saved so the screen shows it", async () => {
+  const project = createProject("p");
+  const loaded = setup(({ url }) => (url.endsWith("/api/scenes/latest") ? json(200, { revision: 7, id: "x", label: "l", project }) : json(500, {})));
+  await loaded.client.load();
+  assert.deepEqual(loaded.states.at(-1), { kind: "saved", revision: 7 });
+
+  const empty = setup(() => new Response(null, { status: 204 }));
+  await empty.client.load();
+  assert.deepEqual(empty.states.at(-1), { kind: "saved", revision: 0 });
+});
+
 test("list and get call the history API", async () => {
   const seen: string[] = [];
   const { client } = setup(({ url }) => {

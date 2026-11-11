@@ -94,10 +94,11 @@ export function createHistoryClient(opts: HistoryClientOptions): HistoryClient {
   return {
     async load() {
       const res = await opts.fetch(url("latest"), { cache: "no-store" });
-      if (res.status === 204) return null;
+      if (res.status === 204) { opts.onState({ kind: "saved", revision }); return null; }
       if (!res.ok) throw new Error(`履歴の読込に失敗しました (HTTP ${res.status})`);
       const record = (await res.json()) as SceneHistoryRecord;
       revision = record.revision;
+      opts.onState({ kind: "saved", revision });
       return record;
     },
     record(project, label, restoredFrom = null) {
