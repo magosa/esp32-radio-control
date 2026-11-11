@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { defineConfig } from "@playwright/test";
 
-const PORT = 3117;
+const PORT = Number(process.env.E2E_PORT ?? 3117);
 const runDir = path.join(os.tmpdir(), `scene-e2e-${process.pid}`);
 
 export default defineConfig({

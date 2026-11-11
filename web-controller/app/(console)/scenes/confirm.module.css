@@ -1,0 +1,15 @@
+/* The page behind a modal dialog shows through --surface-strong (about 93% opaque), so the dialog uses an opaque colour. */
+.dialog { --me-solid: #f5faff; }
+:global([data-theme="dark"]) .dialog { --me-solid: #172338; }
+.dialog {
+  width: min(420px, calc(100vw - 32px)); margin: auto; padding: 20px; color: var(--ink); background: var(--me-solid);
+  border: 1px solid var(--line); border-radius: 8px; display: none;
+}
+.dialog[open] { display: grid; gap: 10px; }
+.dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+.dialog h2 { margin: 0; font-size: var(--text-section); }
+.dialog p { margin: 0; font-size: var(--text-body); overflow-wrap: anywhere; }
+.row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.dialog button { min-height: 44px; }
+.dialog button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.danger { padding: 0 16px; color: #ffffff; background: #b42318; border: 1px solid #b42318; border-radius: 8px; cursor: pointer; font-size: var(--text-body); }
