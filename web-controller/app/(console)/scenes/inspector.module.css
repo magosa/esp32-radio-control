@@ -1,0 +1,24 @@
+/* Field and toggle looks come from mapEditor.module.css; --me-solid is only defined there inside the dialog. */
+.body { display: grid; gap: 12px; --me-solid: var(--glass-input); min-width: 0; }
+.body button { min-height: 44px; }
+.body button:focus-visible, .body input:focus-visible, .body select:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.body button:disabled, .body input:disabled, .body select:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.body .title { margin: 0; font-size: var(--text-heading); font-weight: 700; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
+.body .sectionTitle { margin: 0; font-size: var(--text-meta); font-weight: 600; color: var(--muted); }
+.body .summary { margin: 0; font-size: var(--text-body); color: var(--ink); overflow-wrap: anywhere; }
+.body .help { margin: 0; font-size: var(--text-meta); color: var(--muted); overflow-wrap: anywhere; }
+.body .lock, .body .alert { margin: 0; font-size: var(--text-body); color: var(--warning-ink); font-weight: 600; overflow-wrap: anywhere; }
+
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: 10px; }
+.section { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); min-width: 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.actions button { white-space: normal; }
+
+.number { display: grid; gap: 4px; max-width: 240px; color: var(--muted); font-size: var(--text-meta); }
+.number input {
+  min-height: 44px; padding: 8px 10px; color: var(--ink); background: var(--glass-input);
+  border: 1px solid var(--line); border-radius: 6px; font-size: var(--text-body);
+}
+
+.body button.danger { color: var(--warning-ink); }

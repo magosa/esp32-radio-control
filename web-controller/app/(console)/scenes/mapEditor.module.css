@@ -1,0 +1,68 @@
+/* Map colours inside the SVG overlay are fixed hex values so the editor reads the same in both themes. */
+/* --surface-strong is about 93% opaque, so the page behind a full-screen dialog would show through. */
+.dialog { --me-solid: #f5faff; }
+:global([data-theme="dark"]) .dialog { --me-solid: #172338; }
+.dialog {
+  position: fixed; inset: 0; width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 12px;
+  color: var(--ink); background: var(--me-solid); border: 0; border-radius: 0;
+  display: none; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 10px;
+}
+.dialog[open] { display: grid; }
+.dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+.dialog button:focus-visible, .dialog input:focus-visible, .dialog select:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.dialog h3 { margin: 0; font-size: var(--text-body); font-weight: 700; }
+.dialog p { margin: 0; font-size: var(--text-body); }
+
+.header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+.headerActions, .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.dialog button { min-height: 44px; }
+.dialog button svg { width: 18px; height: 18px; margin-right: 6px; vertical-align: -3px; }
+
+.field { display: grid; gap: 4px; color: var(--muted); font-size: var(--text-meta); min-width: 0; }
+.field input[type="text"], .field select {
+  min-height: 44px; padding: 8px 10px; color: var(--ink); background: var(--glass-input);
+  border: 1px solid var(--line); border-radius: 6px; font-size: var(--text-body); max-width: 100%;
+}
+.field input[type="color"] { min-height: 44px; width: 64px; padding: 2px; background: var(--glass-input); border: 1px solid var(--line); border-radius: 6px; }
+
+.tools { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 16px; }
+.group { display: grid; gap: 4px; }
+.groupLabel { color: var(--muted); font-size: var(--text-meta); }
+.groupBody { display: flex; flex-wrap: wrap; gap: 6px; }
+.toggle {
+  min-width: 44px; padding: 0 12px; color: var(--ink); background: var(--me-solid);
+  border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: var(--text-body);
+}
+.toggle[aria-pressed="true"] { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: -2px; font-weight: 600; }
+.toggle:disabled, .dialog button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.body { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 12px; min-height: 0; }
+.canvas { min-width: 0; min-height: 0; overflow: auto; }
+.canvas[data-tool="select"] { cursor: default; }
+.canvas:not([data-tool="select"]) { cursor: crosshair; }
+.overlay { pointer-events: none; }
+.selection { fill: rgba(37, 99, 235, 0.16); stroke: #1d4ed8; stroke-width: 2; }
+.preview { fill: rgba(217, 119, 6, 0.4); stroke: #b45309; stroke-width: 1; }
+.erasePreview { fill: rgba(220, 38, 38, 0.4); stroke: #b91c1c; stroke-width: 1; }
+.invalid { fill: none; stroke: #b91c1c; stroke-width: 2; stroke-dasharray: 4 3; }
+.itemSelection { fill: rgba(225, 29, 72, 0.12); stroke: #be123c; stroke-width: 3; }
+.doorPreview { fill: none; stroke: #ef9d36; stroke-width: 6; stroke-linecap: butt; }
+
+.sidebar { display: grid; align-content: start; gap: 12px; min-height: 0; overflow: auto; }
+.panel { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.hint { color: var(--muted); font-size: var(--text-meta); }
+
+.footer { display: grid; gap: 4px; }
+.statusLine { color: var(--ink); overflow-wrap: anywhere; }
+.notice { color: var(--warning-ink); }
+.error { color: var(--warning-ink); font-weight: 600; overflow-wrap: anywhere; }
+
+.confirm { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.45); }
+.confirmBox { display: grid; gap: 10px; max-width: min(420px, calc(100vw - 32px)); padding: 20px; color: var(--ink); background: var(--me-solid); border: 1px solid var(--line); border-radius: 8px; }
+
+@media (max-width: 1023px) {
+  .dialog { overflow-y: auto; grid-template-rows: auto auto auto auto; grid-auto-rows: min-content; align-content: start; }
+  .body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; min-height: auto; }
+  .canvas { min-height: 60vh; }
+  .sidebar { max-height: none; overflow: visible; min-height: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; align-items: start; }
+}

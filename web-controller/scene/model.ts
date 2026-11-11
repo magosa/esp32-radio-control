@@ -106,6 +106,48 @@ export function projectForSave(project: SceneProject): SceneProject {
 
 type Obj = Record<string, unknown>;
 
+export function copyMapLayout(source: SceneMap, name: string, makeId: IdFactory = defaultId): SceneMap {
+  const copy = structuredClone(source);
+  copy.id = makeId();
+  copy.name = name;
+  copy.tracks = [];
+  delete copy.presentation;
+  delete copy.navigation;
+  const resolve = (ids: Map<string, string>, old: string, what: string) => {
+    const next = ids.get(old);
+    if (next === undefined) throw new Error(`${what} ${old} does not resolve`);
+    return next;
+  };
+  const rooms = new Map(copy.rooms.map((room) => [room.id, makeId()]));
+  for (const room of copy.rooms) room.id = resolve(rooms, room.id, "room");
+  const plan = copy.floorPlan;
+  if (!plan) return copy;
+  const walls = new Map((plan.walls ?? []).map((wall) => [wall.id, makeId()]));
+  const shared = new Map<string, string>();
+  const share = (old: string) => {
+    if (!shared.has(old)) shared.set(old, makeId());
+    return shared.get(old)!;
+  };
+  for (const wall of plan.walls ?? []) {
+    wall.id = resolve(walls, wall.id, "wall");
+    wall.roomId = resolve(rooms, wall.roomId, "room");
+    if (wall.equipmentId !== undefined) wall.equipmentId = share(wall.equipmentId);
+  }
+  for (const item of plan.furniture) {
+    item.id = makeId();
+    item.roomId = resolve(rooms, item.roomId, "room");
+  }
+  for (const door of plan.doors) {
+    door.id = makeId();
+    door.roomId = resolve(rooms, door.roomId, "room");
+    if (door.wallId !== undefined) door.wallId = resolve(walls, door.wallId, "wall");
+    if (door.openingId !== undefined) door.openingId = share(door.openingId);
+    if (door.equipmentId !== undefined) door.equipmentId = share(door.equipmentId);
+  }
+  for (const zone of plan.chargingZones ?? []) zone.id = makeId();
+  return copy;
+}
+
 function check(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }

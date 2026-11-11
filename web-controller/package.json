@@ -11,6 +11,7 @@
     "test:fleet": "tsx --test scripts/fleet-migration.test.ts scripts/localizer-hub.test.ts",
     "test:localization": "tsx --test scripts/localization.test.ts",
     "test:scene": "tsx --test scripts/scene/*.test.ts",
+    "test:browser": "playwright test",
     "typecheck": "tsc --noEmit --incremental false",
     "sim:device": "tsx scripts/fakeDevice.ts",
     "sim:localizer": "tsx scripts/fakeLocalizer.ts"
@@ -26,6 +27,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
     "@types/node": "^20.17.19",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",

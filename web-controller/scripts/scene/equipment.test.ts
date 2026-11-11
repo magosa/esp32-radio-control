@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { cellIndex } from "../../scene/grid";
 import { regionBounds, validateFloorPlan } from "../../scene/floorPlan";
 import {
-  DOOR_CELLS, DOOR_FRAME_MM, equipmentRectangle, mergedDoors, nearestDoorWall, placeDoor, placeElevator, placeGate,
+  DOOR_CELLS, DOOR_DEFAULT_CELLS, DOOR_FRAME_MM, DOOR_MAX_CELLS, DOOR_MIN_CELLS, doorWidthOk, equipmentRectangle,
+  mergedDoors, nearestDoorWall, placeDoor, placeElevator, placeGate,
 } from "../../scene/equipment";
 import { createProject, projectForSave, validateProject } from "../../scene/model";
+import { createSafety, pathProblem } from "../../scene/safety";
 import type { Edge } from "../../scene/grid";
 import type { Room, SceneMap } from "../../scene/types";
-import { SAFETY_RADIUS_MM } from "../../scene/units";
+import { CELL_MM, SAFETY_RADIUS_MM } from "../../scene/units";
 
 const EDGES: Edge[] = ["top", "bottom", "left", "right"];
 const ids = (prefix = "equipment") => {
@@ -97,7 +99,7 @@ test("EV placement rejects blocked footprints without deleting existing furnitur
   fp(map).furniture = [];
   fp(map).walls!.push({ id: "wall", roomId: "floor", x1: 110, y1: 60, x2: 110, y2: 120 });
   assert.throws(() => placeElevator(map, "new-ev", cells, "bottom", ids()), /walls/);
-  assert.throws(() => placeElevator(map, "new-ev", rect(4, 4, 9, 3), "bottom", ids()), /10-cell/);
+  assert.throws(() => placeElevator(map, "new-ev", rect(4, 4, 6, 3), "bottom", ids()), /7-12-cell/);
 });
 
 test("short, wrapping, interrupted and already occupied boundaries reject without partial writes", () => {
@@ -136,14 +138,14 @@ test("independent automatic doors are ten cells, never clipped to a short wall",
 test("rectangular gate overlays reuse walls and flapper door without carving the floor", () => {
   for (const entrance of EDGES) {
     const map = plan(rect(0, 0, 30, 20)), before = structuredClone(map.rooms);
-    const cells = equipmentRectangle(cellIndex(4, 3), cellIndex(11, 7), entrance);
+    const cells = equipmentRectangle(cellIndex(4, 3), cellIndex(11, 9), entrance);
     const gate = placeGate(map, cells, entrance, ids());
     assert.equal(gate.walls.length, 3);
     assert.equal(gate.door.kind, "flapper");
     const horizontal = entrance === "top" || entrance === "bottom";
     assert.equal(gate.door.y1 === gate.door.y2, horizontal);
     assert.deepEqual([gate.door.x1, gate.door.y1, gate.door.x2, gate.door.y2],
-      horizontal ? [80, 110, 240, 110] : [160, 60, 160, 160]);
+      horizontal ? [80, 130, 240, 130] : [160, 60, 160, 200]);
     addGate(map, gate);
     validateFloorPlan(map);
     assert.deepEqual(map.rooms, before);
@@ -151,8 +153,8 @@ test("rectangular gate overlays reuse walls and flapper door without carving the
 });
 
 test("invalid gate overlays reject blank cells, multiple rooms, furniture, walls and non-rectangles atomically", () => {
-  const map = plan(rect(0, 0, 10, 10)), cells = rect(2, 2, 4, 3);
-  assert.throws(() => placeGate(map, rect(9, 9, 2, 2)), /same room/);
+  const map = plan(rect(0, 0, 12, 12)), cells = rect(2, 2, 7, 3);
+  assert.throws(() => placeGate(map, rect(11, 11, 2, 2)), /same room/);
   assert.throws(() => placeGate(map, [0, 1, 55]), /rectangle/);
   fp(map).furniture.push({ id: "plant", type: "plant", roomId: "floor", cell: cells[0], rotation: 0 });
   const before = structuredClone(map);
@@ -170,7 +172,7 @@ test("save and validation preserve old equipment sizes and new opening groups", 
   fp(map).doors.push({ id: "old-door", roomId: "floor", cell: cellIndex(15, 0), edge: "bottom" });
   const legacyRoom = structuredClone(map.rooms[1]), legacyDoor = structuredClone(fp(map).doors[0]);
   fp(map).doors.push(...placeDoor(map, { roomId: "floor", cell: 0, edge: "bottom" }, ids()));
-  addGate(map, placeGate(map, rect(3, 3, 4, 3), "left", ids("gate")));
+  addGate(map, placeGate(map, rect(3, 3, 4, 7), "left", ids("gate")));
   const saved = validateProject(JSON.parse(JSON.stringify(projectForSave(project))));
   assert.deepEqual(saved.maps[0].rooms[1], legacyRoom);
   assert.deepEqual(fp(saved.maps[0]).doors[0], legacyDoor);
@@ -265,4 +267,83 @@ test("merging adjacent doors keeps the original IDs in memberIds", () => {
   assert.deepEqual(group.memberIds, doors.map((door) => door.id));
   assert.equal(group.id, doors[0].id);
   assert.equal(group.openingId, doors[0].openingId);
+});
+
+test("selectable door width: 7..12 cells (140..240mm), 20mm steps, 10 by default", () => {
+  assert.deepEqual([DOOR_MIN_CELLS, DOOR_MAX_CELLS, DOOR_DEFAULT_CELLS, DOOR_CELLS], [7, 12, 10, 10]);
+  assert.equal(DOOR_FRAME_MM, 4);
+  for (const cells of [7, 8, 9, 10, 11, 12]) assert.equal(doorWidthOk(cells), true, `${cells}`);
+  for (const cells of [-1, 0, 5, 6, 13, 7.5, NaN, Infinity]) assert.equal(doorWidthOk(cells), false, `${cells}`);
+});
+
+test("the narrowest allowed opening still fits the safety circle (invariant for any constant change)", () => {
+  assert.ok(DOOR_MIN_CELLS * CELL_MM - 2 * DOOR_FRAME_MM >= 2 * SAFETY_RADIUS_MM);
+  assert.equal(DOOR_MIN_CELLS * CELL_MM - 2 * DOOR_FRAME_MM, 132);
+  assert.ok((DOOR_MIN_CELLS - 1) * CELL_MM - 2 * DOOR_FRAME_MM < 2 * SAFETY_RADIUS_MM);
+});
+
+test("edge doors take the requested width and the opening shrinks by the frame on both ends", () => {
+  for (const cells of [7, 8, 10, 12]) {
+    const map = plan(rect(2, 2, 14, 14)), before = structuredClone(map);
+    const doors = placeDoor(map, { roomId: "floor", cell: cellIndex(2, 2), edge: "bottom" }, ids(), cells);
+    assert.deepEqual(map, before);
+    assert.equal(doors.length, cells);
+    fp(map).doors.push(...doors);
+    validateFloorPlan(map);
+    const [group] = mergedDoors(map);
+    assert.equal(group.memberIds.length, cells);
+    assert.equal(length(group.opening), cells * CELL_MM - 2 * DOOR_FRAME_MM);
+  }
+});
+
+test("a door narrower than 7 or wider than 12 cells is refused before anything is written", () => {
+  for (const cells of [5, 6, 13, 7.5]) {
+    const map = plan(rect(2, 2, 14, 14)), before = structuredClone(map);
+    assert.throws(() => placeDoor(map, { roomId: "floor", cell: cellIndex(2, 2), edge: "bottom" }, ids(), cells), /7-12/);
+    assert.deepEqual(map, before);
+  }
+});
+
+test("a robot passes the narrowest door along the centre line and a 6-cell opening is never offered", () => {
+  const map = plan([]);
+  map.rooms = [region("left", rect(0, 5, 20, 20), "room"), region("right", rect(20, 5, 20, 20), "room")];
+  const doors = placeDoor(map, { roomId: "left", cell: cellIndex(19, 12), edge: "right" }, ids(), DOOR_MIN_CELLS);
+  fp(map).doors.push(...doors);
+  const [group] = mergedDoors(map);
+  const y = (group.opening.y1 + group.opening.y2) / 2;
+  assert.equal(pathProblem(createSafety(map), { x: 300, y }, { x: 500, y }, "robot"), "");
+  assert.throws(() => placeDoor(plan(rect(0, 0, 20, 20)), { roomId: "floor", cell: 0, edge: "bottom" }, ids(), 6), /7-12/);
+});
+
+test("gates and EVs take a selectable entrance width and refuse out-of-range widths", () => {
+  for (const cells of [7, 9, 12]) {
+    const map = plan(rect(0, 0, 40, 25)), gateCells = rect(4, 3, cells, 4);
+    const gate = placeGate(map, gateCells, "bottom", ids());
+    assert.equal(gate.door.x2! - gate.door.x1!, cells * CELL_MM);
+    const ev = plan(rect(0, 0, 40, 25));
+    ev.rooms.push(newEv());
+    const evCells = equipmentRectangle(cellIndex(4, 4), cellIndex(20, 8), "bottom", true, cells);
+    assert.equal(regionBounds(evCells).width, cells * CELL_MM);
+    const placed = placeElevator(ev, "new-ev", evCells, "bottom", ids());
+    assert.equal(mergedDoors(placed)[0].memberIds.length, cells);
+  }
+  for (const cells of [6, 13]) {
+    assert.throws(() => placeGate(plan(rect(0, 0, 40, 25)), rect(4, 3, cells, 4), "bottom", ids()), /7-12/);
+    assert.throws(() => equipmentRectangle(cellIndex(4, 4), cellIndex(20, 8), "bottom", true, cells), /7-12/);
+  }
+});
+
+test("independent-wall doors take the requested width, and 200mm legacy doors still validate", () => {
+  const map = plan(rect(0, 0, 40, 25));
+  fp(map).walls!.push({ id: "wall", roomId: "floor", x1: 60, y1: 200, x2: 660, y2: 200 });
+  const candidate = nearestDoorWall(map, 300, 200, { cells: 7 });
+  assert.ok(candidate && "independent" in candidate);
+  assert.equal(candidate.x2 - candidate.x1, 7 * CELL_MM);
+  const [door] = placeDoor(map, candidate, ids(), 7);
+  assert.equal(door.x2! - door.x1!, 7 * CELL_MM);
+  const legacy = plan(rect(0, 0, 30, 20));
+  fp(legacy).doors.push(...Array.from({ length: 5 }, (_, i) =>
+    ({ id: `five-${i}`, openingId: "five", roomId: "floor", cell: i, edge: "bottom" as Edge })));
+  assert.doesNotThrow(() => validateFloorPlan(legacy));
+  assert.equal(length(mergedDoors(legacy)[0].opening), 5 * CELL_MM - 2 * DOOR_FRAME_MM);
 });

@@ -1,0 +1,55 @@
+/* --surface-strong is about 93% opaque, so the page behind the dialog would show through; use a solid colour per theme. */
+.dialog { --me-solid: #f5faff; --pk-edge: #8aa0bd; }
+:global([data-theme="dark"]) .dialog { --me-solid: #172338; --pk-edge: #4a5f82; }
+.dialog {
+  width: min(960px, calc(100vw - 32px)); max-width: none; max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px);
+  margin: auto; padding: 16px; overflow: auto; box-sizing: border-box;
+  color: var(--ink); background: var(--me-solid); border: 1px solid var(--pk-edge); border-radius: 12px;
+  display: none; align-content: start; gap: 10px;
+}
+.dialog[open] { display: grid; }
+.dialog:focus { outline: none; }
+.dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+.dialog button:focus-visible, .dialog input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.dialog h2 { margin: 0; font-size: 18px; font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+.dialog p { margin: 0; font-size: var(--text-body); overflow-wrap: anywhere; }
+.dialog button { min-height: 44px; }
+.dialog button:disabled { opacity: 0.55; cursor: not-allowed; }
+.dialog button svg { width: 18px; height: 18px; margin-right: 6px; vertical-align: -3px; }
+
+.header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.controls { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 10px 16px; }
+.modes { display: flex; flex-wrap: wrap; gap: 6px; }
+.toggle {
+  min-width: 44px; padding: 0 14px; color: var(--ink); background: var(--me-solid);
+  border: 1px solid var(--pk-edge); border-radius: 8px; cursor: pointer; font-size: var(--text-body);
+}
+.toggle[aria-pressed="true"] { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: -2px; font-weight: 600; }
+
+.field { display: grid; gap: 4px; color: var(--muted); font-size: var(--text-meta); }
+.field input {
+  width: 140px; max-width: 100%; min-height: 44px; padding: 8px 10px; box-sizing: border-box;
+  color: var(--ink); background: var(--glass-input); border: 1px solid var(--pk-edge); border-radius: 6px; font-size: var(--text-body);
+}
+
+.canvas { min-width: 0; cursor: crosshair; }
+/* MapStage's scroll area (second child of its root) would otherwise grow with the zoom and push the buttons off screen. */
+.canvas > div > div:nth-child(2) { max-height: max(360px, calc(100vh - 340px)); max-height: max(360px, calc(100dvh - 340px)); }
+.overlay { pointer-events: none; }
+.roomSelection { fill: rgba(37, 99, 235, 0.22); stroke: #1d4ed8; stroke-width: 3; }
+.ring { fill: none; stroke: #7c3aed; stroke-width: 2; stroke-dasharray: 5 4; }
+.cross { stroke: #7c3aed; stroke-width: 3; stroke-linecap: round; }
+.dot { fill: #bca1ff; stroke: #252038; stroke-width: 3; }
+.body { stroke: #252038; stroke-width: 2; }
+.arrow { fill: none; stroke: #252038; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.badCross { stroke: #b91c1c; stroke-width: 6; stroke-linecap: round; }
+.badRing { fill: rgba(220, 38, 38, 0.25); stroke: #b91c1c; stroke-width: 3; }
+
+.readout { display: grid; gap: 4px; }
+.status { color: var(--ink); font-variant-numeric: tabular-nums; }
+.problem { display: flex; align-items: flex-start; gap: 6px; color: var(--warning-ink); font-weight: 600; }
+.problem svg { flex: none; width: 18px; height: 18px; margin-top: 2px; }
+.hint { color: var(--muted); font-size: var(--text-meta); }
+.dialog .hint { font-size: var(--text-meta); }
+.error { color: var(--warning-ink); font-weight: 600; }
+.actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
