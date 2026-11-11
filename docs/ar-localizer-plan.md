@@ -9,7 +9,7 @@
 
 - 範囲: 表示・監視、安全／検証の補足、位置フィードバック走行（waypoint）。
 - 対象外: 経路の動的再計画による衝突回避、差動操舵による連続追従、検出のWorker化、ESP32ファームウェア変更、マップ上でのルート編集（ルートはJSON手書き）。
-- 台数: 最大4台（ロボットID0〜3）。基準マーカーはID40〜43。
+- 台数: 最大8台（ロボットID0〜7。当初は4台・ID0〜3で、シーンエディター移植のS6で拡張）。基準マーカーはID40〜43。
 - ESP32の走行FWは変更しません。1.5秒の受信途絶フェイルセーフは最後の砦として維持します。
 
 ## 2. 決定事項
@@ -20,7 +20,7 @@
 | カメラ接続 | Hub実行PCへ接続（localhostでgetUserMediaが使える） |
 | 検出の常駐 | シェル常駐Provider。同一タブで画面遷移しても検出を継続 |
 | 補足の範囲 | 表示・監視、安全／検証、位置フィードバック走行 |
-| マーカー対応 | UIで設定し`fleet.json`へ保存。最大4台 |
+| マーカー対応 | UIで設定し`fleet.json`へ保存。最大8台 |
 | 校正 | 自動測定ウィザード |
 | 走行制御 | stop-and-goで開始。連続追従は将来拡張 |
 | 測位喪失 | 短時間停止して待機し、復帰したら自動再開。上限超過で手動へ戻す |
@@ -135,7 +135,7 @@
 - 受入基準の計測に備え、`/localizer` と Hub の「周期（fps）」「遅延（撮影→Hub受信の中央値）」を表示します。
 - カメラなしで確認するための `npm run sim:localizer` を追加しました。ブラウザーのフェイクカメラで、検出ループ・Hub送信・画面遷移後の継続を確認済みです（この条件ではマーカーは映らないため座標精度は未確認）。
 
-1. 測位コア: `web-controller/localization/`に`geometry.ts`・型・`detector.ts`。ロボット1〜4台の可変、ID0〜3。スキーマは`robot_pose/v3`。
+1. 測位コア: `web-controller/localization/`に`geometry.ts`・型・`detector.ts`。ロボット1〜8台の可変、ID0〜7。スキーマは`robot_pose/v3`。
 2. `@techstark/opencv-js`を4.12.0-release.1で固定し、Route Handlerの`/vendor/opencv.js`で配信。Next側にCSPがないため`unsafe-eval`設定は不要。
 3. 原本テストを`tsx --test`形式へ移植（投影往復、3枚フォールバック、辞書全50ID×4回転、小マーカー検出）。
 4. Hub: protocol追加、`fleet/poseStore.ts`、`/ws/localizer`ハンドラー（5.3・5.4）、`VehicleState.position`廃止。

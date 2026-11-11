@@ -3,11 +3,12 @@
 import { useState } from "react";
 import { TriangleAlert } from "lucide-react";
 import { useFleetSocket } from "@/hooks/useFleetSocket";
+import { MAX_ROBOTS } from "@/localization/geometry";
 import type { RobotState } from "@/fleet/protocol";
 import { TRACKING_LABEL } from "../tracking";
 import styles from "../console.module.css";
 
-const MARKER_IDS = [0, 1, 2, 3];
+const MARKER_IDS = Array.from({ length: MAX_ROBOTS }, (_, id) => id);
 
 function MarkerHeight({ robot, disabled, onCommit }: { robot: RobotState; disabled: boolean; onCommit: (height: number) => void }) {
   const [draft, setDraft] = useState(String(robot.markerHeightMm));

@@ -1,3 +1,4 @@
+import { MAX_ROBOT_MARKER_ID, MAX_ROBOTS, REFERENCE_IDS } from "../localization/geometry";
 import type {
   FieldConfig, LocalizerHelloMessage, LocalizerMarkerPose, LocalizerState, PoseFrameMessage,
   PoseStateMessage, RobotDefinition, RobotPoseState,
@@ -12,10 +13,11 @@ const OUTLIER_REACQUIRE_MS = 1500;
 const OUTLIER_CONFIRM_FRAMES = 3;
 const OUTLIER_CONFIRM_RADIUS_MM = 40;
 const STATS_WINDOW = 20;
-const MAX_MARKERS_PER_FRAME = 8;
+// ロボットのマーカーと基準マーカーを合わせた数(8台+基準4枚=12)。
+const MAX_MARKERS_PER_FRAME = MAX_ROBOTS + REFERENCE_IDS.length;
 
 const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
-const isMarkerId = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 3;
+const isMarkerId = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= MAX_ROBOT_MARKER_ID;
 
 export function parseLocalizerHello(value: Record<string, unknown>): LocalizerHelloMessage | null {
   if (typeof value.camera !== "string" || value.camera.length > 128

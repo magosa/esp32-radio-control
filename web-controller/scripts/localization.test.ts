@@ -98,12 +98,39 @@ test("invalid geometry raises explicit errors", () => {
   assert.throws(() => estimate([...scene(400, 200), scene(400, 200)[0]], config, 1920, 1080), /Duplicate/);
 });
 
-test("one to four robots are accepted, others and out-of-range IDs are rejected", () => {
+test("one to eight robots are accepted, others and out-of-range IDs are rejected", () => {
   validateConfig({ ...config, robots: [config.robots[1]] });
+  const robot = (id: number) => ({ id, height: 90, size: 40 });
+  validateConfig({ ...config, robots: Array.from({ length: 8 }, (_, id) => robot(id)) });
   assert.throws(() => validateConfig({ ...config, robots: [] }));
-  assert.throws(() => validateConfig({ ...config, robots: [...config.robots, { id: 4, height: 90, size: 40 }] }));
-  assert.throws(() => validateConfig({ ...config, robots: [{ id: 40, height: 90, size: 40 }] }));
+  assert.throws(() => validateConfig({ ...config, robots: Array.from({ length: 9 }, (_, id) => robot(id)) }));
+  assert.throws(() => validateConfig({ ...config, robots: [robot(8)] }));
+  assert.throws(() => validateConfig({ ...config, robots: [robot(-1)] }));
+  assert.throws(() => validateConfig({ ...config, robots: [robot(40)] }));
   assert.throws(() => validateConfig({ ...config, robots: [config.robots[0], config.robots[0]] }));
+});
+
+test("eight robots are measured at once, each on its own ID, and a hidden one does not disturb the rest", () => {
+  const eight: LocalizerConfig = { ...config, robots: Array.from({ length: 8 }, (_, id) => ({ id, height: 90, size: 40 })) };
+  const spots: Point[] = [[120, 100], [320, 160], [520, 100], [720, 160], [920, 100], [120, 500], [520, 460], [920, 500]];
+  const refs = scene(400, 200).filter((m) => m.id >= 40);
+  const nadir = [eight.width / 2, eight.height / 2];
+  const gain = 1 / (1 - 90 / eight.cameraHeight);
+  const toImage = (p: Point): Point => [960 + (p[0] - nadir[0]) * 1.375, 540 + (p[1] - nadir[1]) * 1.375];
+  const robots: Detection[] = spots.map(([x, y], id) => ({
+    id, corners: corners(x, y, 40, id * 20).map((p) => toImage(p.map((v, i) => nadir[i] + (v - nadir[i]) * gain) as Point)),
+  }));
+  const all = estimate([...refs, ...robots], eight, 1920, 1080);
+  assert.equal(all.robots.length, 8);
+  all.robots.forEach((robot, id) => {
+    assert.ok(robot.valid, `robot ${id}`);
+    close(robot.x, spots[id][0] / eight.width * 1600, 1e-6);
+    close(robot.y, (1 - spots[id][1] / eight.height) * 900, 1e-6);
+    close(robot.yaw_deg, -(id * 20), 1e-6);
+  });
+  const without = estimate([...refs, ...robots.filter((r) => r.id !== 5)], eight, 1920, 1080);
+  assert.deepEqual(without.robots.filter((r) => !r.valid).map((r) => r.id), [5]);
+  assert.equal(without.robots.filter((r) => r.valid).length, 7);
 });
 
 // OpenCVの実際の4x4セルコードをRGBA化し、IDと回転後のコーナー順まで検証する。

@@ -18,7 +18,7 @@ export interface RobotDefinition {
   robotId: string;
   driveDeviceId: string;
   cameraDeviceId: string | null;
-  // 俯瞰カメラで識別するArUco(DICT_4X4_50)のID(0-3)。未設定はnull。
+  // 俯瞰カメラで識別するArUco(DICT_4X4_50)のID(0-7)。未設定はnull。
   markerId: number | null;
   // 走行面からマーカー印刷面までの高さ(mm)。高さ補正に使う。
   markerHeightMm: number;

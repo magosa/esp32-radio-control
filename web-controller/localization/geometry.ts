@@ -37,8 +37,8 @@ export interface PoseEstimate {
 }
 
 export const REFERENCE_IDS = [40, 41, 42, 43] as const;
-export const MAX_ROBOTS = 4;
-export const MAX_ROBOT_MARKER_ID = 3;
+export const MAX_ROBOTS = 8;
+export const MAX_ROBOT_MARKER_ID = MAX_ROBOTS - 1;
 
 type Matrix3 = number[];
 
