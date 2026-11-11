@@ -6,7 +6,7 @@
 
 | 区分 | 件数 |
 |---|---:|
-| 移植済み | 121 |
+| 移植済み | 123 |
 | 一部移植（ギャップあり） | 0 |
 | 未移植（ギャップ） | 0 |
 | 対象外: 旧互換 | 60 |
@@ -14,7 +14,7 @@
 | 対象外: 履歴サーバー | 6 |
 | 対象外: 起動スクリプト | 4 |
 | 対象外: 外部API | 5 |
-| 対象外: S2以降 | 40 |
+| 対象外: S2以降 | 38 |
 | 合計 | 240 |
 
 ギャップ G1〜G14 はすべて解消した（経緯は末尾の「未移植のギャップ」に記載）。
@@ -66,7 +66,7 @@
 | 29 | named independent gates unlock individually, not every gate owned by the corridor | 移植済み | named independent gates unlock individually, not every gate owned by the corridor |  |
 | 30 | unlock must be active before the leading footprint reaches the doorway | 移植済み | unlock must be active before the leading footprint reaches the doorway |  |
 | 31 | muted, failed and invalid unlock controls never permit a passage | 移植済み | blocked and unsuccessful unlock entries never permit a passage<br>muted and late unlock controls never permit a passage<br>rejects duplicate ids and unresolved references |  |
-| 32 | layout reuse preserves the full appearance but creates independent IDs and empty sequences | 対象外: S2以降 |  | レイアウトの複製（copyMapLayout）はエディター機能 |
+| 32 | layout reuse preserves the full appearance but creates independent IDs and empty sequences | 移植済み | copyMapLayout assigns new ids, keeps references consistent and leaves the source untouched<br>copyMapLayout works on frozen input and with the default id factory | S1 で関数を移植済み。マップ追加の複製操作は S2b |
 
 ### equipment-sizing.test.js
 
@@ -234,7 +234,7 @@
 | 167 | validator rejects empty background | 対象外: 旧互換 |  | 背景画像は fleet-scene/v1 で廃止 |
 | 168 | validator rejects background size | 対象外: 旧互換 |  | 背景画像は fleet-scene/v1 で廃止 |
 | 169 | 2000 action limit is global across maps, exact limit validates without recursive graph traversal | 移植済み | 2000 action limit is global across maps, exact limit validates<br>accepts 2000 actions and rejects 2001 | G10 で解消。グラフ走査はトリガー廃止で不要 |
-| 170 | time formatting carries rounded seconds and minutes | 対象外: S2以降 |  | 時刻表示の書式（エディター） |
+| 170 | time formatting carries rounded seconds and minutes | 移植済み | formatTime uses m:ss.s with carry on rounding<br>formatTime treats negative and non-finite values as 0 | S2c（timelineView.ts） |
 
 ### scenario-library.test.js
 
