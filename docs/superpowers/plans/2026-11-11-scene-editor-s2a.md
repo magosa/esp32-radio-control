@@ -45,6 +45,7 @@
 
 ```text
 web-controller/
+  scene/historyTypes.ts           履歴の共有型（SceneHistoryMeta / SceneHistoryRecord / SaveState / AppendRequest）。段階0で作成済み。Task 1・4・5 はここから import し、再定義しない
   fleet/sceneHistoryStore.ts      履歴の検証・追記・読込（Hub 専有）
   fleet/sceneHttp.ts              /api/scenes/* の HTTP 処理（Origin・型・サイズ・409）
   server.ts                       sceneHttp を Next の前に差し込む（変更）
@@ -249,6 +250,25 @@ web-controller/
 - [ ] **Step 3:** 実行: `npm --prefix web-controller run test:browser` → 全件 PASS。
 - [ ] **Step 4:** 全回帰: `test:scene`・`test:fleet`・`test:localization`・`test:appearance`・`tsc --noEmit` が失敗 0。
 - [ ] **Step 5:** コミット `test(scenes): add browser tests for the scene editor foundation`
+
+---
+
+## 並列実行（git worktree）
+
+統合ブランチは `feat/scene-editor-s2a`。各担当は統合ブランチから worktree を切り、担当ファイル以外を変更しない。完了ごとに統合ブランチへマージする。
+
+| 段階 | 担当 | 範囲 | 触るファイル（これ以外は変更しない） |
+|---|---|---|---|
+| 0 | 私 | 共有型 | `scene/historyTypes.ts`、本計画書 |
+| 1 | A | Task 1 → 2 | `fleet/sceneHistoryStore.ts`、`fleet/sceneHttp.ts`、`server.ts`、対応するテスト |
+| 1 | B | Task 3 → 4、Task 6 Step 1（`copyMapLayout`） | `scene/editorHistory.ts`、`scene/historyClient.ts`、`scene/model.ts`、対応するテスト |
+| 1 | C | Task 7 | `scene/mapColors.ts`、`app/(console)/scenes/MapStage.tsx`、`app/(console)/scenes/mapStage.module.css` |
+| 2 | 私 | Task 5 と、`MapTabs.tsx`・`HistoryDialog.tsx` の空の枠（最終の props を確定） | `hooks/useSceneProject.tsx`、`app/(console)/scenes/{page.tsx,scenes.module.css,ProjectBar.tsx,MapTabs.tsx,HistoryDialog.tsx}`、`ConsoleShell.tsx` |
+| 2 | D | Task 6（Step 2 以降） | `app/(console)/scenes/MapTabs.tsx` のみ |
+| 2 | E | Task 8 | `app/(console)/scenes/HistoryDialog.tsx`、`ProjectBar.tsx` の JSON 保存／読込部分 |
+| 3 | 私 | Task 9 | `package.json`、`playwright.config.ts`、`browser-tests/*` |
+
+C の `MapStage` の CSS は `scenes.module.css` と分けるため、専用の `mapStage.module.css` を使う（衝突を避けるため）。
 
 ---
 
