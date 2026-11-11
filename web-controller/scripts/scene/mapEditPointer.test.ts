@@ -116,6 +116,18 @@ test("strokeBlocks shallow line is 8-neighbour connected and symmetric", () => {
   }
 });
 
+test("strokeBlocks is symmetric on pairs where rounding differs by direction", () => {
+  // Without the canonical start/end ordering these pairs round differently when reversed.
+  const pairs: Array<[number, number, number, number, EditGridMm]> = [
+    [54, 11, 32, 0, 20],
+    [49, 1, 4, 23, 40],
+  ];
+  for (const [ac, ar, bc, br, grid] of pairs) {
+    const a = cellIndex(ac, ar), b = cellIndex(bc, br);
+    assert.deepEqual(strokeBlocks(a, b, grid), strokeBlocks(b, a, grid));
+  }
+});
+
 test("strokeBlocks fast horizontal drag covers every column", () => {
   const cells = strokeBlocks(cellIndex(0, 10), cellIndex(54, 10), 20);
   assert.equal(cells.length, 55);
