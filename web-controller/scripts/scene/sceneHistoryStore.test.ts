@@ -169,6 +169,17 @@ test("a second open of the same folder is refused until close", () => {
   SceneHistoryStore.open(dir).close();
 });
 
+test("a writer.lock left by a dead process is taken over; unreadable or live locks are not", () => {
+  const dir = tempDir();
+  const lock = path.join(dir, "writer.lock");
+  fs.writeFileSync(lock, JSON.stringify({ pid: 2147483646, started: "2026-01-01T00:00:00.000Z" }));
+  SceneHistoryStore.open(dir).close();
+  fs.writeFileSync(lock, "garbage");
+  assert.throws(() => SceneHistoryStore.open(dir), /writer\.lock/);
+  fs.writeFileSync(lock, JSON.stringify({ pid: process.pid }));
+  assert.throws(() => SceneHistoryStore.open(dir), /writer\.lock/);
+});
+
 test("leftover *.tmp files are ignored on open", () => {
   const dir = tempDir();
   const first = SceneHistoryStore.open(dir);

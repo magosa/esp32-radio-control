@@ -1,17 +1,33 @@
 import { createServer } from "http";
+import path from "path";
 import next from "next";
 import { WebSocketServer } from "ws";
 import { FleetHub } from "./fleet/hub";
 import { isTrustedLocalizerRequest } from "./fleet/localizerAccess";
+import { SceneHistoryStore } from "./fleet/sceneHistoryStore";
+import { handleSceneRequest } from "./fleet/sceneHttp";
 
 const port = parseInt(process.env.PORT || "3000", 10);
 const dev = process.env.NODE_ENV !== "production";
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
+// 履歴が破損・番号抜け・二重起動のときは例外で起動を止める。
+const sceneStore = SceneHistoryStore.open(process.env.SCENE_HISTORY_DIR || path.join(process.cwd(), "data", "scene-history"));
+for (const signal of ["SIGINT", "SIGTERM", "SIGBREAK"] as const) {
+  process.on(signal, () => process.exit(0));
+}
+process.on("exit", () => sceneStore.close());
+
 app.prepare().then(() => {
   const server = createServer((req, res) => {
-    handle(req, res);
+    handleSceneRequest(req, res, sceneStore).then((handled) => {
+      if (!handled) handle(req, res);
+    }, (error) => {
+      console.error("[scene-http]", error);
+      if (!res.headersSent) res.statusCode = 500;
+      res.end();
+    });
   });
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: 600000 });

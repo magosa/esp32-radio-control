@@ -28,6 +28,33 @@ function bad(message: string): never {
   throw new SceneHistoryError(message);
 }
 
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+// 排他作成で取得する。持ち主のプロセスが既に存在しない古いロック（強制終了の残り）だけは引き継ぐ。
+function acquireLock(lockPath: string): number {
+  try {
+    return fs.openSync(lockPath, "wx");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    let pid: unknown;
+    try {
+      pid = (JSON.parse(fs.readFileSync(lockPath, "utf8")) as { pid?: unknown }).pid;
+    } catch {
+      throw error;
+    }
+    if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0 || processAlive(pid)) throw error;
+    fs.rmSync(lockPath, { force: true });
+    return fs.openSync(lockPath, "wx");
+  }
+}
+
 // 外部入力（JSON 本文）を AppendRequest として検証する。project の中身は append 側で検証する。
 export function parseAppendRequest(value: unknown): AppendRequest {
   if (typeof value !== "object" || value === null || Array.isArray(value)) bad("request body must be an object");
@@ -92,7 +119,7 @@ export class SceneHistoryStore {
     const lockPath = path.join(dir, LOCK_NAME);
     let fd: number;
     try {
-      fd = fs.openSync(lockPath, "wx");
+      fd = acquireLock(lockPath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST")
         throw new Error(`履歴の ${LOCK_NAME} が存在します。他のサーバーを終了してください。異常終了後は稼働していないことを確認し、このファイルだけを削除してください。`);
