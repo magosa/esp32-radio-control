@@ -390,7 +390,7 @@ export function TimelineCard(props: TimelineCardProps) {
   const ticks = useMemo(() => rulerTicks(horizon, px), [horizon, px]);
   const warnings = analysis.warnings.length + analysis.errors.length;
   const playheadLeft = timeToPx(Math.min(playback.time, Math.max(playback.duration, 0)), px);
-  const handlers = { onBarPointerDown, onHandlePointerDown, onOpen: openAction, onDelete: askDeleteActions, onResizeKey };
+  const handlers = { onBarPointerDown, onHandlePointerDown, onOpen: openAction, onDelete: (_trackId: string, actionId: string) => askDeleteActions(actionId), onResizeKey };
 
   return <section className={`${consoleStyles.preferenceCard} ${styles.timelineCard} ${timeline.root}`} aria-label="時間軸">
     <div className={timeline.header}>

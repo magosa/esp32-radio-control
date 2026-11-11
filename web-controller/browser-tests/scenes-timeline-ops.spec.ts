@@ -190,3 +190,90 @@ test("double-clicking an empty part of a lane opens the add dialog", async ({ pa
   await target.dblclick({ position: { x: 24 * PX, y: box.height / 2 } });
   await expect(page.getByRole("dialog")).toBeVisible();
 });
+
+const dialogs = (page: Page) => page.locator("dialog[open]");
+
+async function addHumanMove(page: Page, apply: boolean) {
+  const target = lane(page, "人 1");
+  await target.scrollIntoViewIfNeeded();
+  const box = (await target.boundingBox())!;
+  await target.dblclick({ position: { x: 24 * PX, y: box.height / 2 } });
+  await expect(dialogs(page)).toHaveCount(1);
+  if (apply) await dialogs(page).first().getByRole("button", { name: "適用" }).click();
+}
+
+test("adding an action through the dialog saves one revision; cancelling saves nothing", async ({ page }) => {
+  await openSeeded(page, [timelineMap({ locked: false })], 1280);
+  const before = await latestRevision(page);
+  await addHumanMove(page, false);
+  await dialogs(page).first().getByRole("button", { name: "キャンセル" }).click();
+  await expect(dialogs(page)).toHaveCount(0);
+  await settled(page, before);
+  await addHumanMove(page, true);
+  await expect(dialogs(page)).toHaveCount(0);
+  await settled(page, before + 1);
+  const human = (await savedTracks(page)).find((t) => t.id === "hm")!;
+  expect(human.actions.length).toBe(2);
+});
+
+test("the coordinate picker sets the destination, and cancelling it changes nothing", async ({ page }) => {
+  await openSeeded(page, [timelineMap({ locked: false })], 1280);
+  const before = await latestRevision(page);
+  await addHumanMove(page, false);
+  const main = dialogs(page).first();
+  await main.getByRole("button", { name: "マップで指定" }).click();
+  await expect(dialogs(page)).toHaveCount(2);
+  const picker = dialogs(page).last();
+  const readout = picker.getByText(/X \d+ \/ Y \d+/).first();
+  const initial = await readout.textContent();
+  const map = picker.locator('svg[aria-label^="e2e map"]');
+  const box = (await map.boundingBox())!;
+  await page.mouse.click(box.x + box.width * 0.7, box.y + box.height * 0.3);
+  const picked = await readout.textContent();
+  expect(picked).not.toBe(initial);
+  await picker.getByRole("button", { name: "キャンセル" }).click();
+  await expect(dialogs(page)).toHaveCount(1);
+  await expect(main.getByText(initial!.match(/X \d+ \/ Y \d+/)![0])).toBeVisible();
+  await main.getByRole("button", { name: "マップで指定" }).click();
+  await page.mouse.click(box.x + box.width * 0.7, box.y + box.height * 0.3);
+  const coords = (await readout.textContent())!.match(/X (\d+) \/ Y (\d+)/)!;
+  await dialogs(page).last().getByRole("button", { name: "適用" }).click();
+  await expect(dialogs(page)).toHaveCount(1);
+  await main.getByRole("button", { name: "適用" }).click();
+  await expect(dialogs(page)).toHaveCount(0);
+  await settled(page, before + 1);
+  const saved = (await (await page.request.get("/api/scenes/latest")).json()).project.maps[0].tracks.find((t: { id: string }) => t.id === "hm").actions;
+  const added = saved.find((a: { id: string }) => a.id !== "h1");
+  expect(added.x).toBe(Number(coords[1]));
+  expect(added.y).toBe(Number(coords[2]));
+});
+test("a robot lane opens the sequence editor; applying it adds one action in one revision", async ({ page }) => {
+  await openSeeded(page, [timelineMap({ locked: false })], 1280);
+  const before = await latestRevision(page);
+  const target = lane(page, "ロボット 1");
+  await target.scrollIntoViewIfNeeded();
+  const box = (await target.boundingBox())!;
+  await target.dblclick({ position: { x: 24 * PX, y: box.height / 2 } });
+  const editor = page.getByRole("dialog", { name: "シーケンスを一括設定" });
+  await expect(editor).toBeVisible();
+  await editor.getByRole("button", { name: "適用" }).click();
+  await expect(editor).toHaveCount(0);
+  await settled(page, before + 1);
+  expect((await savedTracks(page)).find((t) => t.id === "rb")!.actions.length).toBe(4);
+});
+
+test("Delete on a bar asks first; cancelling keeps it, confirming removes it in one revision", async ({ page }) => {
+  await openSeeded(page, [timelineMap({ locked: false })], 1280);
+  const before = await latestRevision(page);
+  await bar(page, "m3").focus();
+  await page.keyboard.press("Delete");
+  const ask = page.getByRole("dialog").filter({ hasText: "削除します" });
+  await expect(ask).toBeVisible();
+  await ask.getByRole("button", { name: "キャンセル" }).click();
+  await settled(page, before);
+  await bar(page, "m3").focus();
+  await page.keyboard.press("Delete");
+  await page.getByRole("dialog").filter({ hasText: "削除します" }).getByRole("button", { name: "削除" }).click();
+  await settled(page, before + 1);
+  expect((await savedTracks(page)).find((t) => t.id === "rb")!.actions.map((a) => a.id)).toEqual(["m1", "m2"]);
+});
