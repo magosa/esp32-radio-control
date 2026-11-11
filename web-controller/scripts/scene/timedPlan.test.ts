@@ -50,6 +50,19 @@ test("fixed timeline uses exact bar start/end and keeps mm segments as the plann
   close(plan.duration, 10);
 });
 
+test("untrusted initial keys cannot override actor identity in samplePlan", () => {
+  const { map, track } = fixture(), robot = track("robot");
+  robot.robotId = "robot-a";
+  Object.assign(robot.initial!, { id: "other", kind: "human", robotId: "r9", name: "spoof", count: 99 });
+  const [actor] = samplePlan(compilePlan(map), 0).actors;
+  assert.equal(actor.id, robot.id);
+  assert.equal(actor.kind, "robot");
+  assert.equal(actor.robotId, "robot-a");
+  assert.equal(actor.name, robot.name);
+  assert.equal(actor.count, 1);
+  assert.deepEqual([actor.x, actor.y, actor.yaw, actor.roomId], [90, 90, 0, "room"]);
+});
+
 test("same-row overlap is an error and does not slip the bar or block other rows", () => {
   const { map, track, action } = fixture(), t = track("display"), other = track("display");
   action(t, "wait", { position: 2, runSeconds: 5 });

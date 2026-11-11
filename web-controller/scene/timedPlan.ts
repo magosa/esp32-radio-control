@@ -343,7 +343,9 @@ export function samplePlan(plan: ScenePlan, time: number): SceneState {
     count: t.kind === "human" ? t.count ?? 1 : 1,
     ...(t.kind === "robot" ? { robotRole: t.robotRole ?? "cleaning" } : {}),
     robotId: t.kind === "robot" ? t.robotId ?? null : null,
-    ...(t.initial as Pose), aggregated: false, moving: false,
+    x: t.initial!.x, y: t.initial!.y, yaw: t.initial!.yaw, roomId: t.initial!.roomId,
+    ...(t.initial!.coordinateMode ? { coordinateMode: t.initial!.coordinateMode } : {}),
+    aggregated: false, moving: false,
   }));
   const actorById = new Map(actors.map((actor) => [actor.id, actor]));
   const movements = new Map<string, PlanEntry>(), displays = new Map<string, SceneDisplay>();
