@@ -41,3 +41,7 @@ wifi_diag_test/wifi_secrets.h
 web-controller/data/
 _esp32_status.txt
 *.tsbuildinfo
+
+# Playwright
+web-controller/test-results/
+web-controller/playwright-report/
