@@ -5,9 +5,10 @@ import { cellColRow, cellIndex, type Edge } from "./grid";
 import { defaultId, type IdFactory } from "./ids";
 import {
   addChargingZone, addDoorAt, addFurniture, addGate, addPartitionWall, deleteFixture, previewDoorAt,
-  renameFixture, rotateFurnitureBy, setDoorKind, setFurnitureRotation,
+  renameFixture, rotateFurnitureBy, setDoorKind, setFurnitureRotation, setFurnitureType,
 } from "./mapEditFixtures";
 import { toJapanese } from "./mapEditMessages";
+import { validateMapName } from "./mapTabsLogic";
 import { blockCells, entranceRect, rectangleBlocks, strokeBlocks, type DrawMode } from "./mapEditPointer";
 import {
   addRegion, commitElevator, eraseCells, paintCells, removeRegionChecked, setRoomProps,
@@ -18,7 +19,6 @@ import { CELL_COUNT, EDIT_GRID_OPTIONS, type EditGridMm } from "./units";
 
 export const MAP_UNDO_LIMIT = 100;
 const MAX_TRACKS = 128;
-const MAX_NAME_LENGTH = 120;
 
 export type MapTool =
   "room" | "corridor" | "erase" | "elevator" | "select" | "door" | "gate" | "partition" | "furniture" | "charging";
@@ -83,6 +83,7 @@ export interface MapEditSession {
   setRoomProps(patch: Partial<Pick<Room, "name" | "kind" | "material" | "color">>): void;
   rotateSelected(): void;
   setSelectedRotation(rotation: Rotation): void;
+  setSelectedFurnitureType(type: FurnitureType): void;
   renameSelected(name: string): void;
   setSelectedDoorKind(kind: "automatic" | "flapper"): void;
   deleteSelected(): void;
@@ -183,12 +184,19 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
     return Math.abs(b.col - a.col) >= Math.abs(b.row - a.row) ? cellIndex(b.col, a.row) : cellIndex(a.col, b.row);
   }
 
+  // The lower-left cell of the edit-grid block that holds the cell.
+  function blockOrigin(cell: number): number {
+    const k = draft().editGridMm / 20;
+    const { col, row } = cellColRow(cell);
+    return cellIndex(Math.floor(col / k) * k, Math.floor(row / k) * k);
+  }
+
   function updateStroke(cell: number) {
     const s = active!;
     const grid = draft().editGridMm;
     s.invalid = false;
     if (s.tool === "gate" || s.tool === "elevator") {
-      const cells = entranceRect(s.start, cell, entrance, doorCells);
+      const cells = entranceRect(blockOrigin(s.start), blockOrigin(cell), entrance, doorCells);
       if (cells) {
         s.cells = new Set(cells);
         error = null;
@@ -198,7 +206,7 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
         error = toJapanese(new Error(`cannot fit a ${doorCells}-cell entrance`));
       }
     } else if (s.tool === "partition") {
-      s.cells = new Set(rectangleBlocks(s.start, snappedPartitionEnd(s.start, cell), 20));
+      s.cells = new Set(rectangleBlocks(blockOrigin(s.start), snappedPartitionEnd(blockOrigin(s.start), blockOrigin(cell)), 20));
     } else if (s.tool === "furniture" || s.tool === "charging" || drawMode === "rectangle") {
       s.cells = new Set(rectangleBlocks(s.start, cell, grid));
     } else if (s.cells.size === 0) {
@@ -230,7 +238,7 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
       roomId = placed.roomId;
       itemId = placed.doorId;
     } else if (s.tool === "partition") {
-      const placed = addPartitionWall(map, s.start, snappedPartitionEnd(s.start, s.last), makeId);
+      const placed = addPartitionWall(map, blockOrigin(s.start), snappedPartitionEnd(blockOrigin(s.start), blockOrigin(s.last)), makeId);
       commit(placed.map);
       roomId = placed.roomId;
       itemId = placed.wallId;
@@ -497,6 +505,16 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
       }
       bump();
     },
+    setSelectedFurnitureType(type) {
+      furnitureType = type;
+      const furniture = selectedFurniture();
+      if (furniture) {
+        attempt(() => { commit(setFurnitureType(draft(), furniture.id, type)); });
+      } else {
+        error = null;
+      }
+      bump();
+    },
     renameSelected(name) {
       withSelectedItem("名前を変更するドアまたは壁を「選択」でクリックしてください。", (id) => renameFixture(draft(), id, name));
     },
@@ -525,9 +543,9 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
       };
       if (active) return fail("ドラッグを終了してから適用してください。");
       const map = draft();
-      const name = map.name.trim();
-      if (name === "") return fail("マップ名を入力してください。");
-      if (name.length > MAX_NAME_LENGTH) return fail(`マップ名は${MAX_NAME_LENGTH}文字以下で入力してください。`);
+      const named = validateMapName(map.name);
+      if (!named.ok) return fail(named.error);
+      const name = named.name;
       if (map.rooms.length === 0) return fail("1つ以上の領域を描いてください。");
       const added = map.rooms.filter((room) => !originalRoomIds.has(room.id));
       if (map.tracks.length + added.length > MAX_TRACKS) {

@@ -5,7 +5,7 @@ import { regionBounds, validateFloorPlan } from "../../scene/floorPlan";
 import { mergedDoors } from "../../scene/equipment";
 import {
   addChargingZone, addDoorAt, addFurniture, addGate, addPartitionWall, deleteFixture, previewDoorAt,
-  renameFixture, rotateFurnitureBy, setDoorKind, setFurnitureRotation,
+  renameFixture, rotateFurnitureBy, setDoorKind, setFurnitureRotation, setFurnitureType,
 } from "../../scene/mapEditFixtures";
 import { createSafety, pathProblem } from "../../scene/safety";
 import type { Room, SceneMap } from "../../scene/types";
@@ -166,6 +166,23 @@ test("furniture accepts 1x1, 2x3, top-row and right-column cells and rejects bad
   pure(map, () => assert.throws(() => addFurniture(map, [cellIndex(40, 3)], "plant", 0, ids()), /領域内/));
   pure(one.map, () => assert.throws(() => addFurniture(one.map, [cellIndex(5, 5)], "plant", 0, ids("x"))));
   pure(map, () => assert.throws(() => addFurniture(map, rect(29, 5, 2, 1), "desk", 0, ids())));
+});
+
+test("setFurnitureType changes only the type of the chosen piece and rejects unknown input", () => {
+  const map = plan(rect(0, 0, 30, 20));
+  const first = addFurniture(map, rect(5, 5, 2, 3), "desk", 90, ids("a"));
+  const both = addFurniture(first.map, [cellIndex(10, 5)], "plant", 0, ids("b"));
+  const before = structuredClone(fp(both.map).furniture);
+  const changed = pure(both.map, () => setFurnitureType(both.map, first.itemId, "chair"));
+  const [a, b] = fp(changed).furniture;
+  assert.equal(a.type, "chair");
+  assert.deepEqual({ ...a, type: "desk" }, before[0]);
+  assert.deepEqual(b, before[1]);
+  const same = setFurnitureType(changed, first.itemId, "chair");
+  assert.deepEqual(same, changed);
+  pure(both.map, () => assert.throws(() => setFurnitureType(both.map, first.itemId, "sofa" as never), /家具の種類/));
+  pure(both.map, () => assert.throws(() => setFurnitureType(both.map, "missing", "chair"), /家具/));
+  pure(both.map, () => assert.throws(() => setFurnitureType(plan(rect(0, 0, 5, 5)), "none", "desk"), /家具/));
 });
 
 test("rotating furniture swaps its footprint; a rotation that leaves the room is rejected and changes nothing", () => {

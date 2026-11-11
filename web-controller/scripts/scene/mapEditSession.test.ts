@@ -340,6 +340,101 @@ test("partition wall: a short wall places with a warning that clears on the next
   assert.match(s.error() ?? "", /2セル以上/);
 });
 
+test("furniture: the type of a placed piece can be changed and undone", () => {
+  const s = session(emptyMap(room("floor", rect(0, 5, 9, 14))));
+  s.setMode("room");
+  s.setTool("furniture");
+  s.setDrawMode("rectangle");
+  s.setFurnitureType("plant");
+  drag(s, cellIndex(1, 8), cellIndex(2, 9));
+  assert.equal(s.draft().floorPlan?.furniture[0].type, "plant");
+  s.setSelectedFurnitureType("chair");
+  assert.equal(s.draft().floorPlan?.furniture[0].type, "chair");
+  assert.equal(s.furnitureType(), "chair");
+  assert.equal(s.error(), null);
+  s.undo();
+  assert.equal(s.draft().floorPlan?.furniture[0].type, "plant");
+  s.selectItem(null);
+  s.setSelectedFurnitureType("desk");
+  assert.equal(s.draft().floorPlan?.furniture[0].type, "plant");
+  assert.equal(s.furnitureType(), "desk");
+  assert.equal(s.error(), null);
+});
+
+test("furniture: a placed piece that is not furniture keeps its state when the type changes", () => {
+  const s = session(emptyMap(room("floor", rect(0, 5, 29, 24))));
+  s.setMode("room");
+  s.setTool("partition");
+  drag(s, cellIndex(5, 10), cellIndex(15, 10));
+  const before = structuredClone(s.draft());
+  s.setSelectedFurnitureType("chair");
+  assert.deepEqual(s.draft(), before);
+  assert.equal(s.error(), null);
+});
+
+test("edit grid: gate, elevator and partition drags start on the grid block", () => {
+  const floor = () => session(emptyMap(room("floor", rect(0, 0, 54, 30))));
+  const g = floor();
+  g.setGrid(80);
+  g.setMode("room");
+  g.setTool("gate");
+  g.setDoorCells(7);
+  g.setEntrance("bottom");
+  g.strokeBegin(cellIndex(13, 9));
+  const cells = g.stroke()?.cells ?? [];
+  const cols = new Set(cells.map((cell) => cell % 55));
+  const rows = new Set(cells.map((cell) => Math.floor(cell / 55)));
+  assert.deepEqual(Array.from(cols).sort((a, b) => a - b), [12, 13, 14, 15, 16, 17, 18]);
+  assert.deepEqual(Array.from(rows), [8]);
+  g.strokeMove(cellIndex(13, 22));
+  const moved = g.stroke()?.cells ?? [];
+  assert.deepEqual(Array.from(new Set(moved.map((cell) => Math.floor(cell / 55)))).sort((a, b) => a - b), [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+  g.strokeCancel();
+  const p = floor();
+  p.setGrid(80);
+  p.setMode("room");
+  p.setTool("partition");
+  p.strokeBegin(cellIndex(10, 10));
+  p.strokeMove(cellIndex(27, 11));
+  assert.deepEqual((p.stroke()?.cells ?? []).map((cell) => cell % 55).filter((v, i, a) => a.indexOf(v) === i), [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]);
+  assert.deepEqual(Array.from(new Set((p.stroke()?.cells ?? []).map((cell) => Math.floor(cell / 55)))), [8]);
+  p.strokeEnd(cellIndex(27, 11));
+  const wall = p.draft().floorPlan?.walls?.[0];
+  assert.equal(wall?.y1, 8 * 20 + 10);
+  assert.equal(wall?.x1, 8 * 20 + 10);
+  assert.equal(wall?.x2, 24 * 20 + 10);
+});
+
+test("edit grid at 20mm leaves gate, elevator and partition positions unchanged", () => {
+  const s = session(emptyMap(room("floor", rect(0, 0, 54, 30))));
+  s.setMode("room");
+  s.setTool("gate");
+  s.setDoorCells(7);
+  s.setEntrance("bottom");
+  s.strokeBegin(cellIndex(13, 9));
+  const cols = (s.stroke()?.cells ?? []).map((cell) => cell % 55);
+  assert.equal(Math.min(...cols), 13);
+  assert.equal(Math.max(...cols), 19);
+  s.strokeCancel();
+});
+
+test("edit grid: coarse partition and gate placements stay valid and are committed as one operation each", () => {
+  const s = session(emptyMap(room("floor", rect(0, 0, 54, 30))));
+  s.setGrid(100);
+  s.setMode("room");
+  s.setTool("gate");
+  s.setDoorCells(8);
+  s.setEntrance("left");
+  const undoBefore = s.canUndo();
+  drag(s, cellIndex(7, 12), cellIndex(15, 12));
+  assert.equal(s.error(), null);
+  assert.equal(s.draft().floorPlan?.walls?.length, 3);
+  assert.equal(undoBefore, true);
+  s.undo();
+  assert.equal(s.draft().floorPlan?.walls?.length, 0);
+  assert.equal(s.draft().editGridMm, 100);
+});
+
 test("furniture: place, rotate with undo, then delete", () => {
   const s = session(emptyMap(room("floor", rect(0, 5, 9, 14))));
   s.setMode("room");
@@ -491,12 +586,16 @@ test("result: rejects a drag in progress, bad names, empty maps and empty region
   s.undo();
   s.setName("   ");
   assert.deepEqual(s.result(), { ok: false, error: "マップ名を入力してください。" });
-  s.setName("あ".repeat(121));
+  s.setName("あ".repeat(61));
   const tooLong = s.result();
   assert.equal(tooLong.ok, false);
-  assert.match(tooLong.ok ? "" : tooLong.error, /120文字/);
-  s.setName("あ".repeat(120));
+  assert.match(tooLong.ok ? "" : tooLong.error, /60文字/);
+  s.setName("あ".repeat(60));
   assert.equal(s.result().ok, true);
+  s.setName("😀".repeat(60));
+  assert.equal(s.result().ok, true);
+  s.setName("😀".repeat(61));
+  assert.equal(s.result().ok, false);
   const none = session(emptyMap());
   assert.deepEqual(none.result(), { ok: false, error: "1つ以上の領域を描いてください。" });
   assert.equal(none.error(), "1つ以上の領域を描いてください。");

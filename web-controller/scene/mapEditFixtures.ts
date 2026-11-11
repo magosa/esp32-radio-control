@@ -131,6 +131,17 @@ export function setFurnitureRotation(map: SceneMap, itemId: string, rotation: Ro
   return applyRotation(map, itemId, () => rotation);
 }
 
+const FURNITURE_TYPES: readonly FurnitureType[] = ["desk", "chair", "plant", "reception-monitor"];
+
+export function setFurnitureType(map: SceneMap, itemId: string, type: FurnitureType): SceneMap {
+  check(FURNITURE_TYPES.includes(type), "家具の種類が正しくありません。");
+  const result = working(map);
+  const item = result.floorPlan!.furniture.find((value) => value.id === itemId);
+  check(item, "種類を変更する家具を「選択」でクリックしてください。");
+  item.type = type;
+  return result;
+}
+
 export function addChargingZone(
   map: SceneMap, cells: number[], makeId: IdFactory = defaultId,
 ): { map: SceneMap; zoneId: string } {
