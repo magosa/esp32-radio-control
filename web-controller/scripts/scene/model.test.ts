@@ -360,3 +360,112 @@ test("display templates and event hatch options persist and reject unknown value
     assert.throws(() => validateProject(trial), pattern);
   }
 });
+
+import { copyMapLayout } from "../../scene/model";
+import { cellIndex as copyCell } from "../../scene/grid";
+import { placeDoor as copyPlaceDoor, placeGate as copyPlaceGate } from "../../scene/equipment";
+
+function copyFixture() {
+  let n = 0;
+  const makeId = () => `src-${++n}`;
+  const project = createProject("source", makeId);
+  const map = project.maps[0];
+  const block = (x: number, y: number, w: number, h: number) =>
+    Array.from({ length: h }, (_, r) => Array.from({ length: w }, (_, c) => copyCell(x + c, y + r))).flat();
+  map.editGridMm = 40;
+  map.doorMode = "strict";
+  map.name = "Source map";
+  map.rooms.push(
+    { id: "src-hall", name: "Hall", color: "#739a81", kind: "corridor", material: "concrete", cells: block(0, 0, 20, 10) },
+    { id: "src-office", name: "Office", color: "#73bafa", kind: "room", material: "wood", cells: block(20, 0, 12, 12) },
+  );
+  map.floorPlan = {
+    doors: [],
+    walls: [],
+    furniture: [{ id: "src-desk", roomId: "src-office", cell: copyCell(25, 5), type: "desk", rotation: 90 }],
+    chargingZones: [{ id: "src-charge", name: "Dock", x: 100, y: 100, width: 60, height: 60 }],
+  };
+  map.floorPlan.doors.push(...copyPlaceDoor(map, { roomId: "src-office", cell: copyCell(20, 0), edge: "left" }, makeId));
+  const gate = copyPlaceGate(map, block(2, 2, 10, 4), "bottom", makeId);
+  map.floorPlan.walls!.push(...gate.walls);
+  map.floorPlan.doors.push(gate.door);
+  const robot = newTrack(map, "robot", makeId);
+  robot.robotId = "robot-1";
+  map.tracks.push(robot);
+  robot.actions.push(newAction(map, robot, "move", makeId));
+  const room = newTrack(map, "room", makeId);
+  map.tracks.push(room);
+  room.actions.push(newAction(map, room, "event-start", makeId));
+  map.presentation = { version: 1, scenarioId: "demo", cues: [{ kind: "notice", start: 0, end: 1, label: "x", color: "#123456" }] };
+  return { project: projectForSave(project), map: projectForSave(project).maps[0] };
+}
+
+function copyIds(map: SceneMap): string[] {
+  const plan = map.floorPlan!;
+  return [
+    map.id, ...map.rooms.map((r) => r.id), ...plan.furniture.map((f) => f.id), ...plan.doors.map((d) => d.id),
+    ...(plan.walls ?? []).map((w) => w.id), ...(plan.chargingZones ?? []).map((z) => z.id),
+  ];
+}
+
+function deepFreezeCopy<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value as object)) deepFreezeCopy(child);
+  }
+  return value;
+}
+
+test("copyMapLayout assigns new ids, keeps references consistent and leaves the source untouched", () => {
+  const { project, map: source } = copyFixture();
+  const before = structuredClone(source);
+  let n = 0;
+  const copy = copyMapLayout(source, "Copied", () => `new-${++n}`);
+  assert.deepEqual(source, before);
+
+  const oldIds = new Set(copyIds(source));
+  const newIds = copyIds(copy);
+  assert.equal(new Set(newIds).size, newIds.length);
+  for (const id of newIds) assert.ok(!oldIds.has(id), `id ${id} was reused`);
+
+  const plan = copy.floorPlan!;
+  const roomIds = new Set(copy.rooms.map((r) => r.id));
+  const wallRoom = new Map((plan.walls ?? []).map((w) => [w.id, w.roomId]));
+  for (const item of [...plan.furniture, ...plan.doors, ...(plan.walls ?? [])]) assert.ok(roomIds.has(item.roomId));
+  const wallDoor = plan.doors.find((d) => d.wallId)!;
+  assert.equal(wallRoom.get(wallDoor.wallId!), wallDoor.roomId);
+  const gateWalls = (plan.walls ?? []).filter((w) => w.equipmentId);
+  assert.equal(gateWalls.length, 3);
+  assert.equal(new Set(gateWalls.map((w) => w.equipmentId)).size, 1);
+  assert.equal(wallDoor.equipmentId, gateWalls[0].equipmentId);
+  assert.ok(!(source.floorPlan!.walls ?? []).some((w) => w.equipmentId === gateWalls[0].equipmentId));
+  const edgeDoors = plan.doors.filter((d) => d.openingId);
+  assert.equal(edgeDoors.length, 10);
+  assert.equal(new Set(edgeDoors.map((d) => d.openingId)).size, 1);
+  assert.notEqual(edgeDoors[0].openingId, source.floorPlan!.doors.find((d) => d.openingId)!.openingId);
+
+  assert.equal(copy.name, "Copied");
+  assert.deepEqual(copy.tracks, []);
+  assert.equal(copy.presentation, undefined);
+  assert.equal(copy.navigation, undefined);
+  assert.equal(copy.editGridMm, 40);
+  assert.equal(copy.doorMode, "strict");
+  assert.deepEqual(copy.rooms.map((r) => [r.name, r.cells]), source.rooms.map((r) => [r.name, r.cells]));
+  assert.equal(plan.furniture.length, 1);
+  assert.equal(plan.furniture[0].rotation, 90);
+  assert.equal(plan.chargingZones!.length, 1);
+  assert.equal(plan.chargingZones![0].name, "Dock");
+
+  const combined = validateProject({ ...project, maps: [...project.maps, copy] });
+  assert.equal(combined.maps.length, 2);
+});
+
+test("copyMapLayout works on frozen input and with the default id factory", () => {
+  const { project, map } = copyFixture();
+  deepFreezeCopy(map);
+  const a = copyMapLayout(map, "A");
+  const b = copyMapLayout(map, "B");
+  assert.notEqual(a.id, b.id);
+  assert.notEqual(a.rooms[0].id, b.rooms[0].id);
+  assert.equal(validateProject({ ...project, maps: [a, b] }).maps.length, 2);
+});
