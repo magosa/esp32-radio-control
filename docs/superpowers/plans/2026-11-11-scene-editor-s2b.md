@@ -16,12 +16,13 @@
 
 - 画面は**全画面ダイアログ**（上流と同じ作業コピー方式）。ページに直接組み込まない。
 - 編集グリッド（20/40/60/80/100mm）の切替は**マップエディターの中だけ**。保存は `SceneMap.editGridMm`。
-- ドア・ゲート・EV の入口幅は 10 マス固定をやめ、**最小 120mm・最大 240mm・20mm 刻み（6〜12 マス）の可変**にする。最小の 120mm は安全円の直径（半径 60mm×2）と同じで、**ロボットが通れる最小幅**である。
+- ドア・ゲート・EV の入口幅は 10 マス固定をやめ、**最小 140mm・最大 240mm・20mm 刻み（7〜12 マス）の可変**にする。幅は壁の切り欠きの長さで、枠（4mm×2）を引いた有効な開口は 132〜232mm になる。最小の有効な開口 132mm は安全円の直径 120mm より広く、**ロボットが通れる**（120mm の切り欠きは有効 112mm となり通れない）。
+- 枠（`DOOR_FRAME_MM = 4`）は**残す**。
 - 実装順は一任。
 
 ## 私の判断（計画書の確認時に覆せる）
 
-- **枠の廃止（F0）**: 現行の `DOOR_FRAME_MM = 4` は、切り欠きの両端に 4mm の壁を残し、有効な開口を 8mm 狭める。実測で、120mm（6 マス）の入口は有効 112mm となり、安全判定が「狭すぎるドアに接触します」と拒否した（140mm は通行可）。そこで `DOOR_FRAME_MM` を 0 にし、**入口の幅＝壁の切り欠き＝有効な開口**とする。
+- **入口幅の根拠**: 実測（現行コード、枠 4mm）で、切り欠き 120mm（6 マス）は有効 112mm となり安全判定が「狭すぎるドアに接触します」と拒否し、140mm（7 マス）は有効 132mm で通行可だった。所有者が最小を 140mm に決めた。
 - **間仕切り壁**: 上流は「2 セル以上」だったため踏襲する（20mm マスなら 40mm 以上）。安全円の直径 120mm より短い壁は、通行の障害として意味が小さいので、**置けるが警告を出す**（上流は無警告）。
 - **ゾーニングの色**: 上流の 5 色パレット（`#8d9bff #58d8ca #ffbd70 #73bafa #bd9afa`）を踏襲する。
 - **壁の位置**: マスの中心線（上流と同じ）。
@@ -31,8 +32,8 @@
 
 - 座標は mm・左下原点・Y 上。マス番号は `row * 55 + col`、row 0 が最下段。描ける範囲は 1100×620mm（55×31 マス）。
 - 編集グリッドは `[20, 40, 60, 80, 100]`。粗いグリッドで塗る・消す・ドラッグするときは `editBlockCells` でまとめ、範囲外は無視する。
-- 入口幅は 6〜12 マス（`DOOR_MIN_CELLS = 6`、`DOOR_MAX_CELLS = 12`）。**既存データの設備は読み込み時にも保存時にも変更しない**（200mm・192mm の既存ドアはそのまま有効）。
-- 安全半径 60mm 固定（`SAFETY_RADIUS_MM`）。入口幅の下限 120mm は `2 × SAFETY_RADIUS_MM` から導出し、数値を直書きしない。
+- 入口幅は 7〜12 マス（`DOOR_MIN_CELLS = 7`、`DOOR_MAX_CELLS = 12`）。**既存データの設備は読み込み時にも保存時にも変更しない**（200mm・192mm の既存ドアはそのまま有効）。
+- 安全半径 60mm 固定（`SAFETY_RADIUS_MM`）。最小入口幅の有効な開口 `DOOR_MIN_CELLS × CELL_MM − 2 × DOOR_FRAME_MM`（= 132mm）が `2 × SAFETY_RADIUS_MM`（= 120mm）以上であることを、**テストで不変条件として検査する**（定数を変えたときに通れない最小幅になるのを防ぐ）。
 - 編集操作の関数は入力を変更せず、失敗時は理由を `Error` で投げる（呼び出し側が画面に表示する）。成功時だけ新しい `SceneMap` を返す。
 - ダイアログは `<dialog>` + `showModal()`。`window.alert/confirm/prompt` を使わない。取消（Esc・キャンセル）は draft を捨てる。未適用の変更があるときの取消は確認ダイアログを出す。
 - 見た目はフリート画面（ガラス調・ライト／ダーク）。マップの描画色は `scene/mapColors.ts`（テーマ非依存）。文字 24/20/16/14/12px、操作部品 44px 以上、`focus-visible` を維持。
@@ -44,7 +45,7 @@
 ## Review Focus
 
 1. 最上段・最右列（row 30 / col 54）と、粗いグリッドの半端（40mm で右端 x=1080〜1100、上端 y=600〜620）での塗り・消し・ドラッグが範囲外へはみ出す、または取りこぼすこと。
-2. 120mm 幅の入口（6 マス）に置いたドア・ゲート・EV で、ロボットが実際に通行可と判定されること、119mm 相当（5 マス）は選べないこと。
+2. 最小幅（140mm・7 マス）の入口に置いたドア・ゲート・EV で、ロボットが実際に通行可と判定されること。120mm（6 マス）以下は選べないこと。
 3. 最後の 1 セルを消せてしまい、参照されている領域が空になること（トラックの初期位置・動作が参照する領域は削除も不可）。
 4. EV を廊下の上に塗ったとき、廊下の全セルを覆ってしまう、または他の部屋を侵食すること。
 5. 取消（Esc・キャンセル・ドラッグ中の中断・ポインター喪失）で draft や元のマップが変わること、ドラッグが途中で残ること。
@@ -56,7 +57,7 @@
 
 ```text
 web-controller/
-  scene/equipment.ts            入口幅を可変にする・枠を廃止（変更）
+  scene/equipment.ts            入口幅を可変にする（変更）
   scene/mapEditPointer.ts       ポインター→マス、ドラッグ範囲、補間、粗いグリッド対応（純粋）
   scene/mapEditRegions.ts       領域の追加・削除・塗る・消す・EV 切り出し・属性変更（純粋）
   scene/mapEditFixtures.ts      ドア・ゲート・間仕切り壁・家具・回転・削除・充電（純粋）
@@ -73,33 +74,34 @@ web-controller/
 
 ---
 
-### Task 1: 入口幅を可変にし、枠を廃止する
+### Task 1: 入口幅を可変にする
 
 **Files:**
-- Modify: `web-controller/scene/equipment.ts`、`web-controller/scene/floorPlan.ts`、`web-controller/scene/navigation.ts`、`web-controller/scripts/scene/equipment.test.ts`（影響は定数 `DOOR_FRAME_MM`・`DOOR_CELLS`・`DOOR_MM` を参照する箇所のみ）
+- Modify: `web-controller/scene/equipment.ts`、`web-controller/scene/floorPlan.ts`（定数の参照のみ。必要がなければ触らない）、`web-controller/scripts/scene/equipment.test.ts`（影響は定数 `DOOR_CELLS`・`DOOR_MM` を参照する箇所。**`DOOR_FRAME_MM`・`navigation.ts` は変更しない**）
 
 **Interfaces:**
 - Produces:
-  - `DOOR_MIN_CELLS = 6`、`DOOR_MAX_CELLS = 12`、`DOOR_DEFAULT_CELLS = 10`（既存の見た目・テストと揃える）
-  - `DOOR_FRAME_MM = 0`
-  - `doorWidthOk(cells: number): boolean`（整数かつ 6〜12）
+  - `DOOR_MIN_CELLS = 7`、`DOOR_MAX_CELLS = 12`、`DOOR_DEFAULT_CELLS = 10`（既存の見た目・テストと揃える）
+  - `DOOR_FRAME_MM = 4`（変更なし）
+  - `doorWidthOk(cells: number): boolean`（整数かつ 7〜12）
   - `placeDoor(map, candidate, makeId?, cells?: number): Door[]`（`cells` 省略時は 10）
-  - `placeElevator(map, roomId, cells, entrance, makeId?)`（入口幅は与えた矩形の入口側の長さから決め、6〜12 マス以外は拒否）
-  - `placeGate(map, cells, entrance?, makeId?)`（ゲートの入口側の長さが 6〜12 マス以外は拒否）
+  - `placeElevator(map, roomId, cells, entrance, makeId?)`（入口幅は与えた矩形の入口側の長さから決め、7〜12 マス以外は拒否）
+  - `placeGate(map, cells, entrance?, makeId?)`（ゲートの入口側の長さが 7〜12 マス以外は拒否）
   - `equipmentRectangle(start, end, entrance?, elevator?, cells?: number): number[]`（EV の入口側の長さを `cells` に固定する。省略時は 10）
   - `nearestDoorWall(map, x, y, opts?)`（独立壁の候補の長さを `opts.cells`（省略時 10）にする）
 
 - [ ] **Step 1: 失敗するテストを書く**（`equipment.test.ts` に追加・更新）
-  - `DOOR_FRAME_MM === 0`。幅 6・8・10・12 マスのドアで、`mergedDoors` の開口の長さが 120・160・200・240。
-  - 幅 6 マス（開口 120mm）のドアを通る直線（開口の中心線上）を `pathProblem(createSafety(map), …, "robot")` が `""` にする（`safety.test.ts` の補助関数と同じ構成でよい）。
-  - 幅 5 と 13 は `placeDoor` が例外（理由に「6〜12」を含む）。`doorWidthOk` が 5 → false、6 → true、12 → true、13 → false、7.5 → false。
-  - ゲート・EV でも 6 と 12 は置ける、5 と 13 は拒否される。EV の入口側の長さが選んだ幅になる。
-  - 既存の 10 マスのテストは、期待値の枠 4mm を 0 に直して通す（開口 192→200 など）。
-  - **既存データ互換**: 枠 4mm 前提で保存された 200mm のドア（`openingId` 付きの 10 セル）を読み込んでも `validateFloorPlan` が通り、開口の長さは 200（枠なしの計算）になる。変更前の保存を壊さないこと。
+  - 幅 7・8・10・12 マスのドアで、`mergedDoors` の切り欠きが 140・160・200・240mm、有効な開口（`opening` の長さ）が 132・152・192・232mm。
+  - **不変条件**: `DOOR_MIN_CELLS * CELL_MM - 2 * DOOR_FRAME_MM >= 2 * SAFETY_RADIUS_MM`。
+  - 幅 7 マス（有効 132mm）のドアを通る直線（開口の中心線上）を `pathProblem(createSafety(map), …, "robot")` が `""` にする（`safety.test.ts` の補助関数と同じ構成でよい）。幅 6 マス（有効 112mm）は `placeDoor` が拒否する（実測で通行不可になる幅を作らせない）。
+  - 幅 6 と 13 は `placeDoor` が例外（理由に「7〜12」を含む）。`doorWidthOk` が 6 → false、7 → true、12 → true、13 → false、7.5 → false。
+  - ゲート・EV でも 7 と 12 は置ける、6 と 13 は拒否される。EV の入口側の長さが選んだ幅になる。
+  - 既存の 10 マスのテストは変更しない（枠 4mm のまま、開口 192mm）。
+  - **既存データ互換**: 保存済みの 10 マス（200mm・有効 192mm）のドアは、`validateFloorPlan` を通り、開口の長さも変わらない。範囲外の幅（たとえば 5 マスで保存済みのデータ）も、読み込み時には拒否しない（配置時のみ検査）。
 - [ ] **Step 2:** `cd web-controller; npx tsx --test --test-reporter=tap scripts/scene/equipment.test.ts` で FAIL を確認。
-- [ ] **Step 3:** 実装。`DOOR_MM` を `cells * CELL_MM` の関数にし、固定の `DOOR_CELLS` を引数に置き換える。`inset()` は枠 0 のとき長さを変えない。`navigation.ts` の `doorWallSegments`（[navigation.ts:57-59](../../../web-controller/scene/navigation.ts#L57-L59)）は、ドアの前後に `points` から `opening` までの壁線分を作るため、枠 0 では**長さ 0 の線分**を出力してしまう。長さ 0 の線分は出力しない（`navigation.test.ts` に「枠 0 のドアの前後に長さ 0 の壁が出ない」テストを追加）。入口幅の範囲（6〜12 マス）は**配置時だけ**検査し、`validateFloorPlan` には課さない（既存データの 200mm・192mm のドアを読み込めなくしない。検証の下限は既存の `MIN_DOOR_MM = 8` のまま）。
+- [ ] **Step 3:** 実装。`DOOR_MM` を `cells * CELL_MM` の関数にし、固定の `DOOR_CELLS` を引数に置き換える。入口幅の範囲（7〜12 マス）は**配置時だけ**検査し、`validateFloorPlan` には課さない（既存データを読み込めなくしない。検証の下限は既存の `MIN_DOOR_MM = 8` のまま）。
 - [ ] **Step 4:** PASS、`test:scene` 全件、`tsc --noEmit`、`test:browser`（既存の S2a の 23 件が壊れていないこと）。
-- [ ] **Step 5:** コミット `feat(scene): make door width selectable (120-240mm) and remove the door frame`
+- [ ] **Step 5:** コミット `feat(scene): make door width selectable (140-240mm)`
 
 ### Task 2: ポインターとドラッグ範囲（並列 A）
 
@@ -121,7 +123,7 @@ web-controller/
   - 40mm: 右端ブロック（x=1080〜1100）のセルをクリックすると 20mm マス 2 個のみ（1 列×2 行）、右上隅は 1 列×1 行のブロック（x=1080〜1100、y=600〜620 の 2 マス）。80mm: 右上隅ブロックは 3 列×3 行 = 9 マス（x=1040〜1100、y=560〜620）。
   - `rectangleBlocks`: 20mm で (0,0)-(2,2) が 9 マス、始点と終点を入れ替えても同じ、同一点は 1 マス、40mm の半端を含む矩形が範囲外のセルを返さない。
   - `strokeBlocks`: 斜めに 10 マス離れた 2 点の間に抜けがなく、すべて 8 近傍で連続する。逆向きでも同じ集合。同一点は 1 ブロック。
-  - `entranceRect`: 下入口・幅 6・始点 (10,10) → 6 列×(始点〜終点の行数)。上入口で反対向きにドラッグしても同じ。範囲外にはみ出す幅は `null`。
+  - `entranceRect`: 下入口・幅 7・始点 (10,10) → 7 列×(始点〜終点の行数)。上入口で反対向きにドラッグしても同じ。範囲外にはみ出す幅は `null`。
 - [ ] **Step 2〜4:** FAIL 確認 → 実装 → PASS・型チェック。
 - [ ] **Step 5:** コミット `feat(scene): add map-edit pointer and drag-range helpers`
 
@@ -140,7 +142,7 @@ web-controller/
   - `dropInvalidFixtures(map): { map: SceneMap; removed: number }`（領域外になった家具、外周でなくなったドア・壁に紐づくドアを削除。1 件でも消したら呼び出し側が「形状変更により領域外になった家具・外周でなくなったドアを作業コピーから削除しました。」を出す）
   - `setRoomProps(map, roomId, patch: Partial<Pick<Room,"name"|"kind"|"material"|"color">>): SceneMap`（名前 120 文字以内・色 `#rrggbb`）
   - `removeRegionChecked(map, roomId): SceneMap`（`removeRegion` を包み、参照されている領域・最後の領域は拒否。既存の拒否理由を日本語に直す）
-  - `commitElevator(map, roomId, cells: number[], entrance: Edge, doorCells: number, makeId?): SceneMap`（`placeElevator` を包む。入口幅 `doorCells` が 6〜12 でなければ拒否）
+  - `commitElevator(map, roomId, cells: number[], entrance: Edge, doorCells: number, makeId?): SceneMap`（`placeElevator` を包む。入口幅 `doorCells` が 7〜12 でなければ拒否）
 
 - [ ] **Step 1: 失敗するテストを書く**
   - `addRegion`: 101 件目は拒否、色が 5 色で巡回、名前が連番、入力 map が変わらない。
@@ -150,7 +152,7 @@ web-controller/
   - 家具がある領域のセルを消すと、その家具が消え `removed` に数が入る。外周でなくなったドアも消える。
   - `removeRegionChecked`: トラックの `roomId`・`initial.roomId`・アクションの `roomId` から参照されている領域は拒否、最後の領域も拒否。
   - `setRoomProps`: 空文字の名前は拒否（トリム後）、121 文字は拒否、`red` は拒否、`#ABCDEF` は許可。
-  - `commitElevator`: 幅 6 と 12 は通り、5 と 13 は拒否。
+  - `commitElevator`: 幅 7 と 12 は通り、6 と 13 は拒否。
   - すべての関数で入力 map を `structuredClone` と比較し、不変であること。
 - [ ] **Step 2〜4:** FAIL 確認 → 上流 `map-editor.js` の `createRegion`・`deleteRegion`・`commitStroke`・`removeInvalidFixtures` を参照して実装 → PASS・型チェック。
 - [ ] **Step 5:** コミット `feat(scene): add region editing operations`
@@ -176,8 +178,8 @@ web-controller/
   - `setDoorKind(map, itemId, kind: "automatic" | "flapper"): SceneMap`（`openingId` を共有する全部材）
 
 - [ ] **Step 1: 失敗するテストを書く**
-  - ドア: 幅 6・12 で置ける／幅 5・13 は拒否／10 マス連続の外周が無い場所は拒否／ゲート・EV の入口幅が選んだ値になる。独立壁の上にも置ける。`previewDoorAt` は置けない位置で例外を投げず `null`。
-  - **通行**: 幅 6 のドアを置いたマップで、ロボットが開口の中心線を通る経路が `pathProblem === ""`（Review Focus 2）。
+  - ドア: 幅 7・12 で置ける／幅 6・13 は拒否／10 マス連続の外周が無い場所は拒否／ゲート・EV の入口幅が選んだ値になる。独立壁の上にも置ける。`previewDoorAt` は置けない位置で例外を投げず `null`。
+  - **通行**: 幅 7 のドアを置いたマップで、ロボットが開口の中心線を通る経路が `pathProblem === ""`（Review Focus 2）。
   - 壁: 同じマス（`start===end`）は拒否／斜めにドラッグすると水平か垂直に丸められる／壁が領域外にはみ出す場合は拒否／長さ 100mm の壁は `warning` あり、120mm 以上は `warning === null`／座標がマスの中心線（`col*20+10`）。
   - 家具: 1×1・2×3 の長机・領域外・他の家具との重なりを拒否／回転で幅と高さが入れ替わる／回転して領域からはみ出す場合は拒否し元の状態を保つ。
   - 充電: 範囲が領域外にはみ出さない、名前が連番。
@@ -255,7 +257,7 @@ web-controller/
   - キャンセルで元のマップも履歴も変わらない。未適用の変更があるときに Esc を押すと確認が出て、「続ける」で戻れる。
   - 適用後に Ctrl+Z（ページ側）でマップ編集 1 回分が戻る。
   - 消しゴムで最後の 1 セルを消そうとするとエラーが出て、領域が残る。参照されている領域は削除できない（トラックを持つ領域を作るために、前提データは `/api/scenes/history` へ POST して用意する）。
-  - ドア: 幅 120mm で置ける／選択肢に 100mm・260mm が無い。ゲートと EV を置ける。
+  - ドア: 幅 140mm で置ける／選択肢に 120mm・260mm が無く、140〜240mm を 20mm 刻みで選べる。ゲートと EV を置ける。
   - 家具を置き、90° 回転し、削除できる。間仕切り壁が 100mm なら警告が出る。
   - 編集グリッドを 40mm に切り替えると 1 回のクリックで 2×2 マスが塗られる（セル数がステータスに出る）。
   - 元に戻す／やり直しが 100 段階を超えても動き、新しい操作で「やり直し」が無効になる。
@@ -272,7 +274,7 @@ web-controller/
 
 | 段階 | 担当 | 範囲 | 触るファイル |
 |---|---|---|---|
-| 0 | 私 | Task 1（入口幅・枠。共有の定数に触るため先に済ませる） | `scene/equipment.ts`、`floorPlan.ts`、`navigation.ts`、`equipment.test.ts` |
+| 0 | 私 | Task 1（入口幅。共有の定数に触るため先に済ませる） | `scene/equipment.ts`、`floorPlan.ts`、`equipment.test.ts` |
 | 1 | A | Task 2 | `scene/mapEditPointer.ts`、そのテスト |
 | 1 | B | Task 3 | `scene/mapEditRegions.ts`、そのテスト |
 | 1 | C | Task 4 | `scene/mapEditFixtures.ts`、そのテスト |
