@@ -113,6 +113,8 @@ export interface SceneState {
   events: SceneEvent[];
   actionStates: Record<string, ActionState>;
   roomActivities: RoomActivity[];
+  // Actors in the middle of a move or turn; they never count as working in a room.
+  travelling: string[];
   doors: DoorSample[];
   duration: number;
   errors: string[];
@@ -425,8 +427,17 @@ export function samplePlan(plan: ScenePlan, time: number): SceneState {
 
   const travelling = new Set(entries.filter((e) => !e.blocked && e.action.type === "move" && e.start !== null &&
     time >= e.start && time < e.end! && (e.action.motion === "rotate" || moved(e.from!, e.to!))).map((e) => e.track.id));
+  const roomActivities = roomActivitiesOf(map, actors, travelling);
+  return {
+    actors, displays: Array.from(displays.values()), events: Array.from(events.values()), actionStates, roomActivities,
+    travelling: Array.from(travelling), doors: sampleDoorPlan(plan, time), duration: plan.duration, errors: plan.errors, warnings: plan.warnings,
+  };
+}
+
+// Which rooms have a robot at work in them: stationary, not travelling and not parked on a charging pad.
+export function roomActivitiesOf(map: SceneMap, actors: readonly SceneActor[], travelling: ReadonlySet<string>): RoomActivity[] {
   const chargers = map.floorPlan?.chargingZones ?? [];
-  const roomActivities = map.rooms.filter((room) => room.kind === "room").flatMap((room) => {
+  return map.rooms.filter((room) => room.kind === "room").flatMap((room) => {
     const robots = actors.filter((actor) => actor.kind === "robot" && !actor.moving && !travelling.has(actor.id) &&
       roomContainsPoint(room, actor.x, actor.y) && !chargers.some((zone) => actor.x >= zone.x &&
         actor.x <= zone.x + zone.width && actor.y >= zone.y && actor.y <= zone.y + zone.height));
@@ -434,10 +445,6 @@ export function samplePlan(plan: ScenePlan, time: number): SceneState {
     const labels = Array.from(new Set(robots.map((robot) => ROLE_LABELS[robot.robotRole ?? "cleaning"])));
     return [{ roomId: room.id, text: labels.join(" / "), actorIds: robots.map((robot) => robot.id) }];
   });
-  return {
-    actors, displays: Array.from(displays.values()), events: Array.from(events.values()), actionStates, roomActivities,
-    doors: sampleDoorPlan(plan, time), duration: plan.duration, errors: plan.errors, warnings: plan.warnings,
-  };
 }
 
 export function actionPreview(map: SceneMap, trackId: string, action: Action): ActionPreview {
