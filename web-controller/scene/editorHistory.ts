@@ -10,9 +10,9 @@ export function initHistory<T>(present: T): EditorHistory<T> {
   return { present, past: [], future: [] };
 }
 
-export function pushEdit<T>(h: EditorHistory<T>, next: T): EditorHistory<T> {
+export function pushEdit<T>(h: EditorHistory<T>, next: T, limit: number = UNDO_LIMIT): EditorHistory<T> {
   const past = [...h.past, h.present];
-  if (past.length > UNDO_LIMIT) past.splice(0, past.length - UNDO_LIMIT);
+  if (past.length > limit) past.splice(0, past.length - limit);
   return { present: next, past, future: [] };
 }
 
