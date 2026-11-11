@@ -6,12 +6,25 @@ import { CELL_COUNT, CELL_MM, COLUMNS, ROWS } from "./units";
 
 // Nearest 20mm multiple to upstream EQUIPMENT_ENTRANCE_CELLS = 6 (≈207.5mm).
 export const DOOR_CELLS = 10;
+export const DOOR_DEFAULT_CELLS = DOOR_CELLS;
+// Narrowest selectable door: its opening (140 - 2*4 = 132mm) still clears the 120mm safety circle.
+export const DOOR_MIN_CELLS = 7;
+export const DOOR_MAX_CELLS = 12;
 // Upstream 6 ratio units.
 export const DOOR_FRAME_MM = 4;
 // Upstream 35 ratio units.
 const DOOR_SNAP_MM = 24;
-const DOOR_MM = DOOR_CELLS * CELL_MM;
 const EDGES: readonly Edge[] = ["top", "bottom", "left", "right"];
+
+// Placement-only: saved doors of any width keep loading, so validateFloorPlan never applies this.
+export const doorWidthOk = (cells: number): boolean =>
+  Number.isInteger(cells) && cells >= DOOR_MIN_CELLS && cells <= DOOR_MAX_CELLS;
+
+function widthOf(cells: number | undefined): number {
+  const width = cells ?? DOOR_DEFAULT_CELLS;
+  if (!doorWidthOk(width)) throw new Error(`door width must be ${DOOR_MIN_CELLS}-${DOOR_MAX_CELLS} cells (${DOOR_MIN_CELLS * CELL_MM}-${DOOR_MAX_CELLS * CELL_MM}mm)`);
+  return width;
+}
 
 export type EdgeDoorCandidate = { roomId: string; cell: number; edge: Edge };
 export type WallDoorCandidate = Segment & { roomId: string; wallId: string; independent: true };
@@ -38,16 +51,17 @@ const touchesWall = (map: SceneMap, b: Bounds) => {
 };
 
 // Placement-only constraint; loading and saving never resize existing equipment.
-export function equipmentRectangle(start: number, end: number, entrance: Edge = "bottom", elevator = false): number[] {
+export function equipmentRectangle(start: number, end: number, entrance: Edge = "bottom", elevator = false, doorCells?: number): number[] {
   check(isCell(start) && isCell(end) && EDGES.includes(entrance), "equipment range or entrance edge is invalid");
+  const width = widthOf(doorCells);
   const a = cellColRow(start), b = cellColRow(end);
   let { col: x2, row: y2 } = b;
   if (elevator) {
-    if (isHorizontal(entrance)) x2 = a.col + (x2 < a.col ? 1 - DOOR_CELLS : DOOR_CELLS - 1);
-    else y2 = a.row + (y2 < a.row ? 1 - DOOR_CELLS : DOOR_CELLS - 1);
+    if (isHorizontal(entrance)) x2 = a.col + (x2 < a.col ? 1 - width : width - 1);
+    else y2 = a.row + (y2 < a.row ? 1 - width : width - 1);
   }
   check(x2 >= 0 && x2 < COLUMNS && y2 >= 0 && y2 < ROWS,
-    `cannot fit a ${DOOR_CELLS}-cell entrance; drag from inside the map`);
+    `cannot fit a ${width}-cell entrance; drag from inside the map`);
   const cells: number[] = [];
   for (let y = Math.min(a.row, y2); y <= Math.max(a.row, y2); y++) {
     for (let x = Math.min(a.col, x2); x <= Math.max(a.col, x2); x++) cells.push(y * COLUMNS + x);
@@ -55,21 +69,22 @@ export function equipmentRectangle(start: number, end: number, entrance: Edge = 
   return cells;
 }
 
-export function placeDoor(map: SceneMap, candidate: DoorCandidate | null, makeId: IdFactory = defaultId): Door[] {
+export function placeDoor(map: SceneMap, candidate: DoorCandidate | null, makeId: IdFactory = defaultId, doorCells?: number): Door[] {
   check(candidate, "click near a wall");
   check(map.floorPlan, "map has no floor plan");
+  const count = widthOf(doorCells), doorMm = count * CELL_MM;
   if ("independent" in candidate) {
     const wall = map.floorPlan.walls?.find((item) => item.id === candidate.wallId);
     check(wall, "independent door wall not found");
     const horizontal = wall.y1 === wall.y2;
     const low = horizontal ? wall.x1 : wall.y1, high = horizontal ? wall.x2 : wall.y2;
-    check(high - low >= DOOR_MM, `automatic doors need a continuous ${DOOR_CELLS}-cell (${DOOR_MM}mm) wall`);
+    check(high - low >= doorMm, `automatic doors need a continuous ${count}-cell (${doorMm}mm) wall`);
     const center = horizontal ? (candidate.x1 + candidate.x2) / 2 : (candidate.y1 + candidate.y2) / 2;
-    const from = Math.max(low, Math.min(high - DOOR_MM, low + Math.floor((center - low - DOOR_MM / 2) / CELL_MM) * CELL_MM));
+    const from = Math.max(low, Math.min(high - doorMm, low + Math.floor((center - low - doorMm / 2) / CELL_MM) * CELL_MM));
     const door: Door = {
       id: makeId(), roomId: wall.roomId, wallId: wall.id, kind: "automatic",
       x1: horizontal ? from : wall.x1, y1: horizontal ? wall.y1 : from,
-      x2: horizontal ? from + DOOR_MM : wall.x1, y2: horizontal ? wall.y1 : from + DOOR_MM,
+      x2: horizontal ? from + doorMm : wall.x1, y2: horizontal ? wall.y1 : from + doorMm,
     };
     const trial = structuredClone(map);
     trial.floorPlan!.doors.push(door);
@@ -83,11 +98,11 @@ export function placeDoor(map: SceneMap, candidate: DoorCandidate | null, makeId
   const adjacentOwner = (cell: number) =>
     map.rooms.find((item) => item.cells.includes(cellNeighbor(cell, candidate.edge)))?.id ?? null;
   const adjacent = adjacentOwner(candidate.cell);
-  for (let i = 0; i < DOOR_CELLS; i++) {
+  for (let i = 0; i < count; i++) {
     const cell = candidate.cell + i * step;
     check(isCell(cell) && (!horizontal || cellColRow(cell).row === cellColRow(candidate.cell).row) &&
-      boundaryEdge(room, cell, candidate.edge), `automatic doors need ${DOOR_CELLS} contiguous cells on the same outer edge`);
-    check(adjacentOwner(cell) === adjacent, `the ${DOOR_CELLS} door cells must face the same adjacent region`);
+      boundaryEdge(room, cell, candidate.edge), `automatic doors need ${count} contiguous cells on the same outer edge`);
+    check(adjacentOwner(cell) === adjacent, `the ${count} door cells must face the same adjacent region`);
     doors.push({ id: makeId(), openingId, roomId: room.id, cell, edge: candidate.edge });
   }
   const trial = structuredClone(map);
@@ -102,8 +117,10 @@ export function placeElevator(map: SceneMap, roomId: string, cells: number[], en
     "only a new, empty elevator region can be placed; existing elevators are not resized");
   check(EDGES.includes(entrance), "elevator entrance edge is invalid");
   const bounds = regionBounds(cells);
-  check((isHorizontal(entrance) ? bounds.width : bounds.height) === DOOR_MM && isRectangle(cells, bounds),
-    `new elevators must be a rectangle with a ${DOOR_CELLS}-cell entrance`);
+  const entranceMm = isHorizontal(entrance) ? bounds.width : bounds.height;
+  const count = entranceMm / CELL_MM;
+  check(isRectangle(cells, bounds) && doorWidthOk(count),
+    `new elevators must be a rectangle with a ${DOOR_MIN_CELLS}-${DOOR_MAX_CELLS}-cell entrance`);
   const occupied = new Set(cells);
   const overlaps = trial.rooms.filter((item) => item !== room && item.cells.some((cell) => occupied.has(cell)));
   check(!overlaps.some((item) => item.kind !== "corridor" || item.cells.every((cell) => occupied.has(cell))),
@@ -113,7 +130,7 @@ export function placeElevator(map: SceneMap, roomId: string, cells: number[], en
   room.cells = [...cells];
   room.entranceEdge = entrance;
   const boundary = room.cells.filter((cell) => boundaryEdge(room, cell, entrance));
-  trial.floorPlan!.doors.push(...placeDoor(trial, { roomId: room.id, cell: Math.min(...boundary), edge: entrance }, makeId));
+  trial.floorPlan!.doors.push(...placeDoor(trial, { roomId: room.id, cell: Math.min(...boundary), edge: entrance }, makeId, count));
   validateFloorPlan(trial);
   return trial;
 }
@@ -127,6 +144,9 @@ export function placeGate(map: SceneMap, cells: number[], entrance: Edge = "bott
   check(!(map.floorPlan?.furniture ?? []).some((item) => furnitureCells(item).some((cell) => cells.includes(cell))),
     "gates must not overlap furniture");
   check(!touchesWall(map, bounds), "gates must not overlap existing walls or gates");
+  // Checked last so structural problems keep their specific reasons.
+  check(doorWidthOk((isHorizontal(entrance) ? bounds.width : bounds.height) / CELL_MM),
+    `gate entrance must be ${DOOR_MIN_CELLS}-${DOOR_MAX_CELLS} cells (${DOOR_MIN_CELLS * CELL_MM}-${DOOR_MAX_CELLS * CELL_MM}mm)`);
   const { x, y } = bounds, right = x + bounds.width, top = y + bounds.height;
   const equipmentId = makeId();
   const segments = isHorizontal(entrance)
@@ -156,10 +176,11 @@ export function edgePoints(cell: number, edge: Edge): [number, number, number, n
 
 export function nearestDoorWall(
   map: SceneMap, x: number, y: number,
-  { roomId = "", edge = "auto", maxDistance = DOOR_SNAP_MM }: { roomId?: string; edge?: Edge | "auto"; maxDistance?: number } = {},
+  { roomId = "", edge = "auto", maxDistance = DOOR_SNAP_MM, cells }: { roomId?: string; edge?: Edge | "auto"; maxDistance?: number; cells?: number } = {},
 ): DoorCandidate | null {
   check(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(maxDistance) && maxDistance >= 0 &&
     (edge === "auto" || EDGES.includes(edge)), "door position is invalid");
+  const doorMm = widthOf(cells) * CELL_MM;
   let nearest: DoorCandidate | null = null, distance = maxDistance ** 2;
   const rooms = [...map.rooms].sort((a, b) => Number(b.id === roomId) - Number(a.id === roomId));
   for (const room of rooms) for (const cell of room.cells) for (const side of EDGES) {
@@ -175,7 +196,7 @@ export function nearestDoorWall(
   for (const wall of map.floorPlan?.walls ?? []) {
     const horizontal = wall.y1 === wall.y2;
     const low = horizontal ? wall.x1 : wall.y1, high = horizontal ? wall.x2 : wall.y2;
-    const span = Math.min(DOOR_MM, high - low);
+    const span = Math.min(doorMm, high - low);
     const coordinate = Math.max(low, Math.min(high, horizontal ? x : y));
     const candidate = (x - (horizontal ? coordinate : wall.x1)) ** 2 + (y - (horizontal ? wall.y1 : coordinate)) ** 2;
     if (candidate > distance) continue;

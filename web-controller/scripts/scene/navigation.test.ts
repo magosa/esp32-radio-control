@@ -149,7 +149,7 @@ test("new boundary doors yield one navigation door with a 192mm opening", () => 
 test("rectangular gate overlays keep floor cells and leave the flapper opening clear", () => {
   for (const entrance of EDGES) {
     const p = map(region("floor", rect(0, 0, 30, 20), "corridor"));
-    const gate = placeGate(p, equipmentRectangle(cellIndex(4, 3), cellIndex(11, 7), entrance), entrance, ids());
+    const gate = placeGate(p, equipmentRectangle(cellIndex(4, 3), cellIndex(11, 9), entrance), entrance, ids());
     fp(p).walls!.push(...gate.walls);
     fp(p).doors.push(gate.door);
     const n = buildNavigation(p);
