@@ -93,7 +93,7 @@ test("delete asks for confirmation, selects a remaining tab, and the last map ca
     await page.getByRole("button", { name: `マップ「${n}」を削除` }).first().click();
     await page.getByRole("dialog").getByRole("button", { name: "削除する" }).click();
   }
-  await expect(page.getByRole("button", { name: /を削除$/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /^マップ「.*」を削除$/ })).toBeDisabled();
 });
 
 test("arrow keys move the selection; copying a layout creates a new independent map", async ({ page }) => {

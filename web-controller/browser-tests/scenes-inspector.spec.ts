@@ -170,7 +170,8 @@ for (const theme of ["light", "dark"] as const) {
     expect(css).toBe(`rgb(${expected.join(", ")})`);
     for (const point of [[3, 3], [1270, 3], [3, 880]]) {
       const pixel = await pixelAt(page, point[0], point[1]);
-      expect(Math.max(...pixel.map((v, i) => Math.abs(v - expected[i]))), `pixel at ${point}`).toBeLessThanOrEqual(2);
+      // A see-through dialog differs by tens; 1-3 is anti-aliasing noise at the screen edge.
+      expect(Math.max(...pixel.map((v, i) => Math.abs(v - expected[i]))), `pixel at ${point}`).toBeLessThanOrEqual(4);
     }
     for (const selector of ["dialog[open] h2", "dialog[open] label span", "dialog[open] output"]) {
       const { fg, bg } = await textAndBackground(page, selector);
