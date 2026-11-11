@@ -15,6 +15,7 @@ import type {
   VehicleMode,
   VehicleState,
 } from "@/fleet/protocol";
+import type { ExhibitCommand, ExhibitSession } from "@/scene/exhibitSession";
 
 export type FleetConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
@@ -39,6 +40,12 @@ export interface PendingOperation {
   done?: boolean;
 }
 
+// offsetMs = Hub clock - this browser's clock, so a screen on another PC reads the same scene time.
+export interface ExhibitView {
+  session: ExhibitSession;
+  offsetMs: number;
+}
+
 function useFleetSocketConnection() {
   const [status, setStatus] = useState<FleetConnectionStatus>("disconnected");
   const [vehicles, setVehicles] = useState<VehicleState[]>([]);
@@ -51,7 +58,8 @@ function useFleetSocketConnection() {
   const [poseState, setPoseState] = useState<PoseStateMessage | null>(null);
   const [markerAssignment, setMarkerAssignment] = useState<PendingOperation & { robotId: string } | null>(null);
   const [fieldSave, setFieldSave] = useState<PendingOperation | null>(null);
-
+  const [exhibit, setExhibit] = useState<ExhibitView | null>(null);
+  const [exhibitOp, setExhibitOp] = useState<PendingOperation | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const assignmentSequence = useRef(0);
 
@@ -78,6 +86,8 @@ function useFleetSocketConnection() {
         setAssignment((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。保存状態を確認してください" } : previous);
         setMarkerAssignment((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。保存状態を確認してください" } : previous);
         setFieldSave((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。保存状態を確認してください" } : previous);
+        setExhibitOp((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。状態を確認してください" } : previous);
+        setExhibit(null);
         setPoseState(null);
         reconnectTimer = setTimeout(connect, 2000);
       };
@@ -99,6 +109,10 @@ function useFleetSocketConnection() {
           ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "保存に失敗しました" } : previous);
         setFieldSave((previous) => previous?.requestId === msg.requestId
           ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "保存に失敗しました" } : previous);
+        setExhibitOp((previous) => previous?.requestId === msg.requestId
+          ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "展示の操作に失敗しました" } : previous);
+      } else if (msg.type === "exhibitState") {
+        setExhibit({ session: msg.session, offsetMs: msg.serverNow - Date.now() });
       } else if (msg.type === "poseState") {
         setPoseState(msg);
       } else if (msg.type === "routeStatus") {
@@ -148,6 +162,13 @@ function useFleetSocketConnection() {
     return () => clearTimeout(timer);
   }, [fieldSave]);
 
+  useEffect(() => {
+    if (!exhibitOp?.pending) return;
+    const timer = setTimeout(() => setExhibitOp((previous) => previous?.pending
+      ? { ...previous, pending: false, error: "結果を確認できませんでした。接続を確認してください" } : previous), 8000);
+    return () => clearTimeout(timer);
+  }, [exhibitOp]);
+
   const send = useCallback((msg: ClientInboundMessage) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -173,6 +194,12 @@ function useFleetSocketConnection() {
     const requestId = `${Date.now()}-${++assignmentSequence.current}`;
     const sent = send({ type: "setFieldConfig", requestId, config });
     setFieldSave({ requestId, pending: sent, error: sent ? undefined : "ハブ未接続" });
+  }, [send]);
+
+  const sendExhibit = useCallback((command: ExhibitCommand) => {
+    const requestId = `${Date.now()}-${++assignmentSequence.current}`;
+    const sent = send({ type: "exhibitCommand", requestId, command });
+    setExhibitOp({ requestId, pending: sent, error: sent ? undefined : "ハブ未接続" });
   }, [send]);
 
   const sendCommand = useCallback(
@@ -255,6 +282,9 @@ function useFleetSocketConnection() {
     assignMarker,
     fieldSave,
     saveFieldConfig,
+    exhibit,
+    exhibitOp,
+    sendExhibit,
     routeStatus,
     availableRoutes,
     images,

@@ -10,8 +10,6 @@ export interface ExhibitSession {
   position: number;
   // Hub clock (ms since epoch) when `position` was valid.
   startedAt: number;
-  // Rises with every change so a client can ignore a stale message.
-  revision: number;
 }
 
 export type ExhibitCommand =
@@ -21,7 +19,7 @@ export type ExhibitCommand =
   | { type: "seek"; time: number }
   | { type: "close" };
 
-export const initialExhibit = (now = 0): ExhibitSession => ({ mapId: null, running: false, position: 0, startedAt: now, revision: 0 });
+export const initialExhibit = (now = 0): ExhibitSession => ({ mapId: null, running: false, position: 0, startedAt: now });
 
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 
@@ -51,7 +49,7 @@ export function exhibitTime(session: ExhibitSession, now: number, duration = Inf
 // Returns the next session, or the reason the command cannot apply.
 export function applyExhibit(session: ExhibitSession, command: ExhibitCommand, now: number): ExhibitSession | string {
   const at = exhibitTime(session, now);
-  const next = (change: Partial<ExhibitSession>): ExhibitSession => ({ ...session, ...change, revision: session.revision + 1 });
+  const next = (change: Partial<ExhibitSession>): ExhibitSession => ({ ...session, ...change });
   switch (command.type) {
     case "open":
       return next({ mapId: command.mapId, running: false, position: 0, startedAt: now });

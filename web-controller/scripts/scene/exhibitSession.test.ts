@@ -4,12 +4,11 @@ import { applyExhibit, exhibitTime, initialExhibit, parseExhibitCommand, type Ex
 
 const open = (now = 1000): ExhibitSession => applyExhibit(initialExhibit(0), { type: "open", mapId: "m1" }, now) as ExhibitSession;
 
-test("opening a map starts paused at 0 and raises the revision", () => {
+test("opening a map starts paused at 0", () => {
   const session = open();
   assert.equal(session.mapId, "m1");
   assert.equal(session.running, false);
   assert.equal(exhibitTime(session, 99_999), 0);
-  assert.equal(session.revision, 1);
 });
 
 test("play advances the time with the clock; pause freezes it", () => {
@@ -50,7 +49,7 @@ test("play and seek are refused while no map is open; close resets", () => {
   assert.equal(closed.position, 0);
 });
 
-test("repeating play or pause changes nothing (no new revision)", () => {
+test("repeating play or pause changes nothing", () => {
   const playing = applyExhibit(open(0), { type: "play" }, 0) as ExhibitSession;
   assert.equal(applyExhibit(playing, { type: "play" }, 500), playing);
   const paused = open();

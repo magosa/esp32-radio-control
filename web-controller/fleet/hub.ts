@@ -6,12 +6,14 @@ import { RouteEngine } from "./routeEngine";
 import { isDeviceDescription, RobotStore } from "./robotStore";
 import { FieldConfigStore, isFieldConfig } from "./fieldConfigStore";
 import { parseLocalizerHello, parsePoseFrame, PoseStore } from "./poseStore";
+import { applyExhibit, initialExhibit, parseExhibitCommand, type ExhibitSession } from "../scene/exhibitSession";
 import type {
   ClientInboundMessage,
   ClientOutboundMessage,
   DeviceInboundMessage,
   DisplayLayoutMode,
   DriveCommand,
+  ExhibitStateMessage,
   ExpressionId,
   FleetStateMessage,
   PoseStateMessage,
@@ -40,6 +42,8 @@ export class FleetHub {
   private localizerWs: WebSocket | null = null;
   private localizerLastMessageAt = 0;
   private poseBroadcastTimer: NodeJS.Timeout | null = null;
+  // 展示画面のシーンと時刻。保存せず、Hub を再起動すると未選択に戻る。
+  private exhibit: ExhibitSession = initialExhibit(Date.now());
 
   constructor(store = new RobotStore(path.join(defaultDataDir(), "fleet.json")),
     fieldStore = new FieldConfigStore(path.join(defaultDataDir(), "field.json"))) {
@@ -155,6 +159,7 @@ export class FleetHub {
     this.clients.add(ws);
     this.sendToClient(ws, this.getFleetState());
     this.sendToClient(ws, this.getPoseState());
+    this.sendToClient(ws, this.getExhibitState());
 
     ws.on("message", (raw) => {
       const msg = this.parseJson<ClientInboundMessage>(raw.toString());
@@ -222,6 +227,19 @@ export class FleetHub {
 
   private handleClientMessage(msg: ClientInboundMessage, client: WebSocket): void {
     switch (msg.type) {
+      case "exhibitCommand": {
+        if (typeof msg.requestId !== "string") throw new Error("Invalid exhibit command");
+        const command = parseExhibitCommand(msg.command);
+        if (!command) throw new Error("Invalid exhibit command");
+        const next = applyExhibit(this.exhibit, command, Date.now());
+        if (typeof next === "string") throw new Error(next);
+        if (next !== this.exhibit) {
+          this.exhibit = next;
+          this.broadcastToClients(this.getExhibitState());
+        }
+        this.sendToClient(client, { type: "operationResult", requestId: msg.requestId, ok: true });
+        break;
+      }
       case "assignMarker": {
         if (typeof msg.requestId !== "string" || typeof msg.robotId !== "string"
           || !(msg.markerId === null || Number.isInteger(msg.markerId))
@@ -380,6 +398,10 @@ export class FleetHub {
 
   private broadcastFleetState(): void {
     this.broadcastToClients(this.getFleetState());
+  }
+
+  private getExhibitState(): ExhibitStateMessage {
+    return { type: "exhibitState", session: this.exhibit, serverNow: Date.now() };
   }
 
   private getPoseState(): PoseStateMessage {

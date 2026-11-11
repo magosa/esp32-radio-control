@@ -236,7 +236,9 @@ export type ClientInboundMessage =
   | ClientDisplayLayoutRequestMessage
   | { type: "assignCamera"; requestId: string; robotId: string; cameraDeviceId: string | null }
   | { type: "assignMarker"; requestId: string; robotId: string; markerId: number | null; markerHeightMm?: number }
-  | { type: "setFieldConfig"; requestId: string; config: FieldConfig };
+  | { type: "setFieldConfig"; requestId: string; config: FieldConfig }
+  // 展示画面へ配信するシーンと時刻の操作。command の検証は Hub が行う。
+  | { type: "exhibitCommand"; requestId: string; command: unknown };
 
 // ---- Server -> 操作UI ----
 
@@ -267,7 +269,15 @@ export interface OperationResultMessage {
   error?: string;
 }
 
-export type ClientOutboundMessage = FleetStateMessage | RouteStatusMessage | ImageFrameBroadcastMessage | OperationResultMessage | PoseStateMessage;
+export type ClientOutboundMessage = FleetStateMessage | RouteStatusMessage | ImageFrameBroadcastMessage | OperationResultMessage | PoseStateMessage
+  | ExhibitStateMessage;
+
+// serverNow は送信時の Hub の時計(ms)。別PCの展示画面が自分の時計との差を求めるのに使う。
+export interface ExhibitStateMessage {
+  type: "exhibitState";
+  session: import("../scene/exhibitSession").ExhibitSession;
+  serverNow: number;
+}
 
 // ---- 測位(俯瞰カメラのArUco検出) ----
 // 座標はrobot_pose/v3と同じ: 領域左下(0,0)・右上(1600,900)の比率座標、yawは右0°・反時計回り正。
