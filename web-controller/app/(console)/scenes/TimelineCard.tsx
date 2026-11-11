@@ -4,7 +4,7 @@ import { Bot, DoorOpen, Maximize2, Monitor, User } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { compilePlan, samplePlan, type ActionState } from "@/scene/timedPlan";
 import {
-  addProblem, addRequest, moveOffset, previewDrop, rangeIds, resizeOffset, KEY_RESIZE_STEP_S, MAX_RUN_S, MIN_RESIZE_S,
+  addProblem, addRequest, barStatus, moveOffset, previewDrop, rangeIds, resizeOffset, KEY_RESIZE_STEP_S, MAX_RUN_S, MIN_RESIZE_S,
   type Dragged, type DropPreview,
 } from "@/scene/timelineDrag";
 import { adjustTimeline, type TimelineAlignment } from "@/scene/timelineEdit";
@@ -16,7 +16,7 @@ import type { Action, ActionType, SceneMap, Track, TrackKind } from "@/scene/typ
 import consoleStyles from "../console.module.css";
 import type { EditorShared, PlaybackControls } from "./editorTypes";
 import styles from "./scenes.module.css";
-import { TimelineBar, type BarStatus } from "./TimelineBar";
+import { TimelineBar } from "./TimelineBar";
 import timeline from "./timeline.module.css";
 import { TrackPalette } from "./TrackPalette";
 
@@ -43,14 +43,6 @@ interface DropView {
   position: number;
   type: ActionType;
   preview: DropPreview;
-}
-
-function statusAt(state: ActionState | undefined, time: number): BarStatus {
-  if (!state) return "waiting";
-  if (state.status === "blocked") return "blocked";
-  if (state.start === null || time < state.start) return "waiting";
-  if (state.end !== null && time < state.end) return "running";
-  return state.status === "failed" ? "failed" : "complete";
 }
 
 const barTitle = (action: Action, state: ActionState | undefined) =>
@@ -476,7 +468,7 @@ export function TimelineCard(props: TimelineCardProps) {
                 const state = analysis.states[action.id];
                 return <TimelineBar key={action.id} action={action} trackId={track.id} color={track.color}
                   position={position} runSeconds={runSeconds} px={px} selected={selectedBlocks.has(action.id)} dragging={dragged}
-                  status={statusAt(state, playback.time)} title={barTitle(action, state)} {...handlers} />;
+                  status={barStatus(state, playback.time)} title={barTitle(action, state)} {...handlers} />;
               })}
               {track.actions.map((action) => {
                 const state = analysis.states[action.id];

@@ -104,3 +104,16 @@ export function inkFor(background: string): string {
   if (!/^#[0-9a-f]{6}$/i.test(background)) return INK_DARK;
   return contrastRatio(background, INK_LIGHT) >= contrastRatio(background, INK_DARK) ? INK_LIGHT : INK_DARK;
 }
+
+export type BarStatus = "blocked" | "waiting" | "running" | "complete" | "failed";
+
+// The plan is sampled once at its end, so `blocked` and `failed` are the verdict for the whole run.
+// A bar the plan expects to fail says so before it starts too, instead of looking merely "waiting".
+export function barStatus(state: { status: string; start: number | null; end: number | null } | undefined, time: number): BarStatus {
+  if (!state) return "waiting";
+  if (state.status === "blocked") return "blocked";
+  if (state.status === "failed") return "failed";
+  if (state.start === null || time < state.start) return "waiting";
+  if (state.end !== null && time < state.end) return "running";
+  return "complete";
+}

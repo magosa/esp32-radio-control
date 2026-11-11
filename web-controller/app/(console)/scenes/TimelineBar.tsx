@@ -1,13 +1,12 @@
 "use client";
 
 import { memo, type KeyboardEvent, type PointerEvent } from "react";
-import { inkFor, KEY_RESIZE_STEP_S, MAX_RUN_S, MIN_RESIZE_S } from "@/scene/timelineDrag";
+import { inkFor, KEY_RESIZE_STEP_S, MAX_RUN_S, MIN_RESIZE_S, type BarStatus } from "@/scene/timelineDrag";
 import { barBox, formatTime } from "@/scene/timelineView";
 import { actionTypeLabel } from "@/scene/trackEdit";
 import type { Action } from "@/scene/types";
 import styles from "./timeline.module.css";
 
-export type BarStatus = "blocked" | "waiting" | "running" | "complete" | "failed";
 
 // Words, not just colours: a blocked move says so on the bar itself.
 export function statusText(status: BarStatus, type: Action["type"]): string {
@@ -17,6 +16,9 @@ export function statusText(status: BarStatus, type: Action["type"]): string {
 
 export const kindText = (action: Pick<Action, "type" | "motion">): string =>
   action.type === "move" && action.motion === "rotate" ? "向き変更" : actionTypeLabel(action.type);
+
+// One character per state for bars too narrow for the full word; the dashed frame still marks blocked bars.
+const SHORT_STATE: Record<BarStatus, string> = { blocked: "不", waiting: "待", running: "実", complete: "済", failed: "失" };
 
 export interface TimelineBarProps {
   action: Action;
@@ -68,6 +70,7 @@ function TimelineBarView(props: TimelineBarProps) {
       <span className={styles.meta}>
         <span data-part="length">{runSeconds.toFixed(1)}s</span>
         <span className={styles.state} data-part="status">{state}</span>
+        <span className={styles.stateShort} data-part="status-short" aria-hidden="true">{SHORT_STATE[status]}</span>
       </span>
     </div>
     <div className={styles.handle} role="slider" tabIndex={0} aria-orientation="horizontal"

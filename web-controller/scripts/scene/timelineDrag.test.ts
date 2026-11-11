@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  addProblem, addRequest, contrastRatio, inkFor, INK_DARK, INK_LIGHT, moveOffset, previewDrop, rangeIds, resizeOffset,
+  addProblem, addRequest, barStatus, contrastRatio, inkFor, INK_DARK, INK_LIGHT, moveOffset, previewDrop, rangeIds, resizeOffset,
 } from "../../scene/timelineDrag";
 import { COLORS } from "../../scene/model";
 import type { Action, SceneMap, Track, TrackKind } from "../../scene/types";
@@ -111,4 +111,35 @@ test("inkFor picks the readable ink: at least 4.5:1 for every track colour and f
   assert.equal(inkFor("#ffffff"), INK_DARK);
   assert.equal(inkFor("#000000"), INK_LIGHT);
   assert.equal(inkFor("not-a-colour"), INK_DARK);
+});
+
+const planned = (status: "blocked" | "waiting" | "running" | "complete" | "failed", start: number | null, end: number | null) => ({ status, start, end });
+
+test("barStatus follows the clock for a healthy action", () => {
+  const state = planned("complete", 2, 6);
+  assert.equal(barStatus(state, 0), "waiting");
+  assert.equal(barStatus(state, 1.99), "waiting");
+  assert.equal(barStatus(state, 2), "running");
+  assert.equal(barStatus(state, 5.99), "running");
+  assert.equal(barStatus(state, 6), "complete");
+  assert.equal(barStatus(state, 100), "complete");
+});
+
+test("barStatus shows a blocked action as blocked at every time, even before it starts", () => {
+  const state = planned("blocked", null, null);
+  for (const time of [0, 3, 100]) assert.equal(barStatus(state, time), "blocked");
+});
+
+test("barStatus shows an action the plan expects to fail as failed before, during and after it", () => {
+  const state = planned("failed", 17, 18);
+  for (const time of [0, 16.9, 17, 17.5, 18, 100]) assert.equal(barStatus(state, time), "failed", `at ${time}`);
+});
+
+test("barStatus without a plan entry is waiting", () => {
+  assert.equal(barStatus(undefined, 5), "waiting");
+});
+
+test("barStatus with a missing start is waiting for a healthy action and does not throw", () => {
+  assert.equal(barStatus(planned("complete", null, null), 5), "waiting");
+  assert.equal(barStatus(planned("running", 2, null), 5), "complete");
 });
