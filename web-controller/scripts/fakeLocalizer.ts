@@ -1,13 +1,17 @@
 // 俯瞰カメラなしで測位UIを確認するための疑似localizer。
-// 使い方: tsx scripts/fakeLocalizer.ts [--assign] [--drop]
-//   --assign: 走行機の先頭2台にマーカーID0/1を割り当てる(未割当の場合のみ)
+// 使い方: tsx scripts/fakeLocalizer.ts [--assign] [--drop] [--count=N]
+//   --assign: 走行機の先頭N台にマーカーID0..N-1を割り当てる(未割当の場合のみ)
 //   --drop:   マーカー1を周期的に隠し、未検出・復帰の挙動を確認する
+//   --count=N: 台数(1〜8、既定2)
 import WebSocket from "ws";
+import { MAX_ROBOTS } from "../localization/geometry";
 
 const host = process.env.FLEET_HUB_HOST || "localhost";
 const port = process.env.FLEET_HUB_PORT || "3000";
 const assign = process.argv.includes("--assign");
 const drop = process.argv.includes("--drop");
+const requested = Number(process.argv.find((arg) => arg.startsWith("--count="))?.slice("--count=".length));
+const count = Number.isInteger(requested) && requested >= 1 ? Math.min(requested, MAX_ROBOTS) : 2;
 const origin = `http://localhost:${port}`;
 
 if (assign) {
@@ -16,7 +20,7 @@ if (assign) {
     const msg = JSON.parse(raw.toString());
     if (msg.type !== "fleetState") return;
     const robots = (msg.robots ?? []) as { robotId: string; markerId: number | null }[];
-    robots.slice(0, 2).forEach((robot, index) => {
+    robots.slice(0, count).forEach((robot, index) => {
       if (robot.markerId === null) {
         client.send(JSON.stringify({ type: "assignMarker", requestId: `sim-${index}`, robotId: robot.robotId, markerId: index }));
       }
@@ -37,7 +41,7 @@ function connect(): void {
     ws.send(JSON.stringify({ type: "localizerHello", camera: "Simulated overhead camera", width: 1920, height: 1080 }));
     timer = setInterval(() => {
       const t = Date.now() / 1000;
-      const markers = [0, 1].map((markerId) => {
+      const markers = Array.from({ length: count }, (_, markerId) => {
         const angle = t * (0.5 + markerId * 0.2) + markerId * Math.PI;
         const hidden = drop && markerId === 1 && Math.floor(t / 4) % 2 === 1;
         // 比率座標(1600x900): 中心まわりの円運動。yawは進行方向(反時計回りなら接線)に合わせる。

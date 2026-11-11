@@ -1,0 +1,8 @@
+.group { display: grid; flex: 1 1 100%; gap: 8px; padding-top: 4px; border-top: 1px solid var(--line); }
+.status { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ink); font-size: var(--text-body); }
+.status svg { width: 18px; height: 18px; flex-shrink: 0; }
+.buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.buttons button, .buttons a { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; text-decoration: none; }
+.buttons svg { width: 18px; height: 18px; }
+.buttons button:focus-visible, .buttons a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.error { margin: 0; padding: 10px 12px; border: 1px solid var(--warning-ink); border-radius: 6px; background: var(--tl-warn-bg, transparent); color: var(--warning-ink); font-size: var(--text-body); font-weight: 600; overflow-wrap: anywhere; }

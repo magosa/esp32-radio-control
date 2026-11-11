@@ -86,7 +86,10 @@ test("pose frames with invalid values are rejected", () => {
   assert.equal(parsePoseFrame({ ...valid, referenceIds: [40, 40] }), null);
   assert.equal(parsePoseFrame({ ...valid, referenceIds: [3] }), null);
   assert.equal(parsePoseFrame({ ...valid, referenceIds: undefined }), null);
-  assert.equal(parsePoseFrame({ ...valid, markers: new Array(9).fill({ markerId: 0, valid: false }) }), null);
+  assert.equal(parsePoseFrame({ ...valid, markers: new Array(13).fill({ markerId: 0, valid: false }) }), null);
+  assert.ok(parsePoseFrame({ ...valid, markers: new Array(12).fill({ markerId: 0, valid: false }) }), "up to 12 markers per frame");
+  assert.ok(parsePoseFrame({ ...valid, markers: [{ markerId: 7, valid: false }] }), "marker ID 7 is the last robot ID");
+  assert.equal(parsePoseFrame({ ...valid, markers: [{ markerId: 8, valid: false }] }), null);
 });
 
 test("localizer sockets are limited to loopback pages of this Hub", () => {
@@ -113,7 +116,8 @@ test("marker assignments persist, stay unique and fall back for legacy files", (
   store.register({ deviceId: "b", name: "B", fw: "t", capabilities: ["drive"] });
   store.assignMarker("robot-a", 0, 120);
   assert.throws(() => store.assignMarker("robot-b", 0), /already assigned/);
-  assert.throws(() => store.assignMarker("robot-b", 4), /invalid/);
+  assert.throws(() => store.assignMarker("robot-b", 8), /invalid/);
+  assert.throws(() => store.assignMarker("robot-b", -1), /invalid/);
   assert.throws(() => store.assignMarker("robot-b", 1.5), /invalid/);
   assert.throws(() => store.assignMarker("robot-b", 1, -5), /Invalid marker height/);
   assert.throws(() => store.assignMarker("missing", 1), /Robot not found/);
@@ -240,3 +244,33 @@ test("Hub keeps the first active localizer and only replaces a silent one", (con
     }
   });
 });
+
+test("PoseStore tracks eight robots from one frame, each by its own marker, and loses only the hidden one", () => {
+  const robots = Array.from({ length: 8 }, (_, id): RobotDefinition => ({ robotId: `robot-${id}`, driveDeviceId: `d${id}`, cameraDeviceId: null, markerId: id, markerHeightMm: 90 }));
+  const markers = (hidden: number[] = []) => Array.from({ length: 8 }, (_, markerId) => hidden.includes(markerId)
+    ? { markerId, valid: false as const }
+    : { markerId, valid: true as const, x: 100 + markerId * 150, y: 450, yawDeg: markerId * 10, insideField: true });
+  const store = connectedStore();
+  assert.ok(parsePoseFrame({ ...frame(0, 0), markers: markers() } as never), "a frame with eight markers is accepted");
+  store.ingest(frame(0, 0, { markers: markers() }), field);
+  const poses = store.snapshot(robots, field).poses;
+  assert.equal(poses.length, 8);
+  poses.forEach((pose, id) => {
+    assert.equal(pose.tracking, "tracking", `robot ${id}`);
+    assert.equal(Math.round(pose.xMm!), 100 + id * 150);
+    assert.equal(pose.headingDeg, id * 10);
+  });
+  store.ingest(frame(0, 0, { markers: markers([3]) }), field);
+  const after = store.snapshot(robots, field).poses;
+  assert.deepEqual(after.filter((pose) => pose.tracking !== "tracking").map((pose) => [pose.robotId, pose.tracking]), [["robot-3", "lost"]]);
+});
+
+test("RobotStore keeps eight marker IDs unique across eight robots", () => withTempDir((directory) => {
+  const store = new RobotStore(path.join(directory, "fleet.json"));
+  for (let id = 0; id < 8; id++) store.register({ deviceId: `d${id}`, name: `D${id}`, fw: "t", capabilities: ["drive"] });
+  for (let id = 0; id < 8; id++) store.assignMarker(`robot-d${id}`, id);
+  assert.deepEqual(new RobotStore(path.join(directory, "fleet.json")).getRobots().map((robot) => robot.markerId), [0, 1, 2, 3, 4, 5, 6, 7]);
+  store.register({ deviceId: "d8", name: "D8", fw: "t", capabilities: ["drive"] });
+  assert.throws(() => store.assignMarker("robot-d8", 7), /already assigned/);
+  assert.throws(() => store.assignMarker("robot-d8", 8), /invalid/);
+}));
