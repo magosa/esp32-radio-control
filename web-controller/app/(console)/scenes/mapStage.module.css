@@ -1,0 +1,13 @@
+.stage { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+.zoomButton {
+  min-height: 44px; min-width: 44px; padding: 0 14px;
+  color: var(--ink); background: var(--surface-strong);
+  border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
+}
+.zoomButton[aria-pressed="true"] { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: -2px; font-weight: 600; }
+.zoomButton:focus-visible, .scroll:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.scroll { overflow: auto; touch-action: pan-x pan-y; border: 1px solid var(--line); border-radius: 8px; }
+/* Extra type selector beats the global `.fleet svg { width: 18px; height: 18px }` icon rule. */
+.scroll svg.map { display: block; width: 100%; height: auto; max-width: none; flex-shrink: 0; user-select: none; }
+.status { margin: 0; color: var(--ink); font-size: 0.875rem; }
