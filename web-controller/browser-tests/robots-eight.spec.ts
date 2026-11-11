@@ -80,7 +80,7 @@ test("each of the eight robots can hold one of the eight marker IDs, and an ID i
   await page.goto("/robots");
   for (let id = 0; id < COUNT; id++) {
     const select = page.getByLabel(`${names[id]}の測位マーカーID`);
-    await expect(select).toHaveValue(String(id));
+    await expect(select).toHaveValue(String(id), { timeout: 30_000 }); // the first load compiles the page
     await expect(select.locator("option")).toHaveCount(COUNT + 1);
     const taken = select.locator(`option[value="${(id + 1) % COUNT}"]`);
     await expect(taken).toBeDisabled();
