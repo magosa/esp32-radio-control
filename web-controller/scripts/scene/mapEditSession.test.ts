@@ -213,6 +213,23 @@ test("a successful action clears a stale error", () => {
   assert.equal(s.error(), null);
 });
 
+test("room labels can be toggled as an edit, also on a map without a floor plan", () => {
+  const s = session(emptyMap(room("a", [0, 1])));
+  assert.equal(s.draft().floorPlan?.showRoomLabels, undefined);
+  s.setRoomLabels(true);
+  assert.equal(s.draft().floorPlan?.showRoomLabels, true);
+  s.setRoomLabels(true);
+  s.undo();
+  assert.equal(s.draft().floorPlan?.showRoomLabels, undefined);
+  const bare = emptyMap(room("a", [0, 1]));
+  delete bare.floorPlan;
+  const t = session(bare);
+  t.setRoomLabels(true);
+  assert.equal(t.draft().floorPlan?.showRoomLabels, true);
+  assert.deepEqual(t.draft().floorPlan?.doors, []);
+  assert.equal(t.result().ok, true);
+});
+
 test("the region limit is reported without changing the map", () => {
   const rooms = Array.from({ length: 100 }, (_, i) => room(`r${i}`, [i]));
   const s = session(emptyMap(...rooms));

@@ -88,6 +88,7 @@ export interface MapEditSession {
   setSelectedDoorKind(kind: "automatic" | "flapper"): void;
   deleteSelected(): void;
   setName(name: string): void;
+  setRoomLabels(show: boolean): void;
   undo(): void;
   redo(): void;
   result(): MapEditResult;
@@ -530,6 +531,11 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
     },
     setName(name) {
       commit({ ...draft(), name });
+      bump();
+    },
+    setRoomLabels(show) {
+      const map = draft();
+      commit({ ...map, floorPlan: { ...(map.floorPlan ?? { doors: [], furniture: [] }), showRoomLabels: show } });
       bump();
     },
     undo: () => history("undo"),

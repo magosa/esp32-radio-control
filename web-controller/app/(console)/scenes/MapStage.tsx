@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type PointerEvent, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from "react";
 import { roomAnchor } from "@/scene/floorPlan";
 import { mergedDoors } from "@/scene/equipment";
 import { snapToEditGrid } from "@/scene/grid";
@@ -20,6 +20,10 @@ export interface MapStageProps {
   showGrid: boolean;
   gridMm: EditGridMm;
   onPick?: (p: { x: number; y: number }) => void;
+  // Drawn inside the SVG above the map, in the SVG's own units (use svgY for y).
+  overlay?: ReactNode;
+  // Single-finger touches draw instead of scrolling; only pinch gestures stay with the browser.
+  drawing?: boolean;
 }
 
 const MATERIALS: readonly Material[] = ["wood", "tile", "carpet", "concrete"];
@@ -158,7 +162,7 @@ function useScale(): [RefObject<SVGSVGElement>, number] {
   return [ref, scale];
 }
 
-export function MapStage({ map, time, showGrid, gridMm, onPick }: MapStageProps) {
+export function MapStage({ map, time, showGrid, gridMm, onPick, overlay, drawing }: MapStageProps) {
   const [zoom, setZoom] = useState<ZoomId>("fit");
   const [svgRef, scale] = useScale();
   const down = useRef<{ x: number; y: number } | null>(null);
@@ -186,7 +190,7 @@ export function MapStage({ map, time, showGrid, gridMm, onPick }: MapStageProps)
           </button>
         ))}
       </div>
-      <div className={styles.scroll} tabIndex={onPick ? 0 : undefined}>
+      <div className={drawing ? `${styles.scroll} ${styles.drawing}` : styles.scroll} tabIndex={onPick ? 0 : undefined}>
         <svg ref={svgRef} className={styles.map} viewBox={VIEW_BOX} style={{ width: zoomWidth(zoom) }} role="img"
           aria-label={mapSummary(map, { time, actors: state.actors })}
           onPointerDown={onPick ? (e) => { down.current = { x: e.clientX, y: e.clientY }; } : undefined}
@@ -226,6 +230,7 @@ export function MapStage({ map, time, showGrid, gridMm, onPick }: MapStageProps)
             const at = room?.cells.length ? roomAnchor(room) : null;
             return at ? <Label key={event.actionId} text={event.text} x={at.x} y={at.y} scale={scale} color={event.color} /> : null;
           })}
+          {overlay}
         </svg>
       </div>
       {firstError && <p className={styles.status} role="status">計画エラー: {firstError}</p>}

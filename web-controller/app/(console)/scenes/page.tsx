@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { compilePlan } from "@/scene/timedPlan";
 import { useSceneProject } from "@/hooks/useSceneProject";
 import consoleStyles from "../console.module.css";
+import { MapEditorDialog } from "./MapEditorDialog";
 import { MapStage } from "./MapStage";
 import { MapTabs } from "./MapTabs";
 import { ProjectBar } from "./ProjectBar";
@@ -29,6 +30,7 @@ export default function ScenesPage() {
   const { project, activeMap, activeMapId } = scene;
   const [time, setTime] = useState(0);
   const [showGrid, setShowGrid] = useState(true);
+  const [editing, setEditing] = useState(false);
   const duration = useMemo(() => (activeMap ? compilePlan(activeMap).duration : 0), [activeMap]);
 
   useEffect(() => { setTime((value) => Math.min(value, duration)); }, [duration]);
@@ -66,6 +68,7 @@ export default function ScenesPage() {
             <input type="checkbox" checked={showGrid} onChange={(event) => setShowGrid(event.target.checked)} />
             グリッド {activeMap.editGridMm}mm
           </label>
+          <button type="button" className={consoleStyles.secondary} onClick={() => setEditing(true)}>マップを編集</button>
         </div>
       </section>
       <aside className={`${consoleStyles.preferenceCard} ${styles.sideCard}`} aria-label="設定">
@@ -77,5 +80,11 @@ export default function ScenesPage() {
       <h2>時間軸</h2>
       <p>バーの編集は、S2c で追加します。</p>
     </section>
+    <MapEditorDialog map={activeMap} open={editing} onClose={() => setEditing(false)}
+      onApply={(next) => scene.commit((draft) => {
+        const index = draft.maps.findIndex((item) => item.id === next.id);
+        if (index < 0) throw new Error("編集中のマップが見つかりません。");
+        draft.maps[index] = next;
+      }, "マップの編集")} />
   </div>;
 }
