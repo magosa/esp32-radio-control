@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { MAX_ROBOT_MARKER_ID } from "../localization/geometry";
 import type { DeviceCapability, DeviceDescription, RobotDefinition } from "./protocol";
 
 interface StoredFleet {
@@ -10,7 +11,7 @@ interface StoredFleet {
 
 const CAPABILITIES: DeviceCapability[] = ["drive", "display", "camera"];
 export const DEFAULT_MARKER_HEIGHT_MM = 90;
-export const MAX_MARKER_ID = 3;
+export const MAX_MARKER_ID = MAX_ROBOT_MARKER_ID;
 const MAX_MARKER_HEIGHT_MM = 1000;
 
 export function isDeviceDescription(value: unknown): value is DeviceDescription {

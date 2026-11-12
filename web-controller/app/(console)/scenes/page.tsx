@@ -11,6 +11,7 @@ import consoleStyles from "../console.module.css";
 import { ActionDialog } from "./ActionDialog";
 import { CoordinatePicker } from "./CoordinatePicker";
 import type { ActionEditRequest, EditMap, PickRequest } from "./editorTypes";
+import { ExhibitControls } from "./ExhibitControls";
 import { Inspector } from "./Inspector";
 import { MapEditorDialog } from "./MapEditorDialog";
 import { MapStage } from "./MapStage";
@@ -113,6 +114,7 @@ function Editor({ scene, project, map, mapId }: {
             グリッド {map.editGridMm}mm
           </label>
           <button type="button" className={consoleStyles.secondary} onClick={() => setMapEditing(true)}>マップを編集</button>
+          <ExhibitControls map={map} duration={duration} />
         </div>
       </section>
       <Inspector {...shared} playback={playback} onEditMap={() => setMapEditing(true)} />
