@@ -4,7 +4,7 @@ import { CircleCheck, CircleX, Download, Pause, Play, RotateCcw, Square, Triangl
 import { useState } from "react";
 import { useFleetSocket } from "@/hooks/useFleetSocket";
 import { useSceneProject } from "@/hooks/useSceneProject";
-import { idleSnapshot, type RobotRunStatus, type RunPhase, type RunRobot, type RunSnapshot } from "@/scene/runTypes";
+import { idleSnapshot, type RobotRunStatus, type RunEvasion, type RunPhase, type RunRobot, type RunSnapshot } from "@/scene/runTypes";
 import { headingArrow, svgY } from "@/scene/mapView";
 import { SAFETY_RADIUS_MM } from "@/scene/units";
 import consoleStyles from "../console.module.css";
@@ -15,15 +15,20 @@ const PHASE: Record<RunPhase, string> = {
   idle: "待機", arming: "確認中", running: "実行中", waiting: "完了待ち", halted: "停止中", finished: "完了", aborted: "中止",
 };
 const ROBOT_STATUS: Record<RobotRunStatus, string> = {
-  idle: "待機", driving: "走行中", arrived: "到着済み", waiting: "到着待ち", lost: "見失い", failed: "失敗", excluded: "対象外",
+  idle: "待機", driving: "走行中", arrived: "到着済み", waiting: "到着待ち", evading: "退避中", lost: "見失い", failed: "失敗", excluded: "対象外",
 };
 const POSITION: Record<string, string> = { waiting: "待機中", moving: "移動中", arrived: "到着済み", failed: "動かせません" };
 
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(1).padStart(4, "0")}`;
 const mark = (ok: boolean, warn?: boolean) => warn ? <TriangleAlert aria-label="警告" /> : ok ? <CircleCheck aria-label="満たしています" /> : <CircleX aria-label="満たしていません" />;
 
-function RunOverlay({ robots }: { robots: RunRobot[] }) {
+function RunOverlay({ robots, evasions }: { robots: RunRobot[]; evasions: RunEvasion[] }) {
   return <g pointerEvents="none">
+    {evasions.map((e) => <g key={`${e.yielder}-${e.priority}`} data-part="evasion-band">
+      <line x1={e.band.from.x} y1={svgY(e.band.from.y)} x2={e.band.to.x} y2={svgY(e.band.to.y)} stroke="#ffbd70" strokeOpacity={0.35}
+        strokeWidth={e.band.halfWidthMm * 2} strokeLinecap="round" />
+      <circle cx={e.spot.x} cy={svgY(e.spot.y)} r={SAFETY_RADIUS_MM / 2} fill="none" stroke="#ffbd70" strokeWidth={4} />
+    </g>)}
     {robots.map((robot) => {
       const color = robot.status === "lost" || robot.status === "failed" ? "#ff7b83" : "#58d8ca";
       const arrow = robot.pose ? headingArrow(robot.pose.yaw, SAFETY_RADIUS_MM, 18) : null;
@@ -84,7 +89,7 @@ export function SceneRunPanel() {
           {project?.maps.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
       </label>
-      <strong className={styles.phase} data-phase={run.phase} role="status">{PHASE[run.phase]}</strong>
+      <strong className={styles.phase} data-phase={run.phase} role="status">{run.phase === "waiting" && run.evasions.length > 0 ? "退避中" : PHASE[run.phase]}</strong>
       <span aria-label="進行時計">{clock(run.clock)} / 計画 {clock(run.duration)}</span>
       <span>経過（実時間）{clock(run.realMs / 1000)}　止まっていた時間 +{(run.waitedMs / 1000).toFixed(1)}秒</span>
       <div className={styles.actions}>
@@ -130,13 +135,13 @@ export function SceneRunPanel() {
 
     {map && <section className={styles.card} aria-label="実行マップ">
       <h3>マップ（実線＝実機の測位位置、破線＝目標）</h3>
-      <MapStage map={map} time={Math.min(run.clock, Math.max(run.duration, 0))} showGrid={false} gridMm={map.editGridMm} overlay={<RunOverlay robots={run.robots} />} />
+      <MapStage map={map} time={Math.min(run.clock, Math.max(run.duration, 0))} showGrid={false} gridMm={map.editGridMm} overlay={<RunOverlay robots={run.robots} evasions={run.evasions} />} />
     </section>}
 
     <section className={styles.cards} aria-label="ロボット別">
       {run.robots.map((robot) => <article key={robot.trackId} className={styles.card} data-status={robot.status}>
         <h3>{robot.name}<span>{ROBOT_STATUS[robot.status]}</span></h3>
-        <p>追跡 {robot.tracking}{robot.markerId !== null ? ` ・ ID ${robot.markerId}` : ""}</p>
+        <p>追跡 {robot.tracking}{robot.markerId !== null ? ` ・ ID ${robot.markerId}` : ""}{robot.priority !== null ? ` ・ 優先 ${robot.priority}` : ""}</p>
         {robot.bar && <p>{robot.bar}（{robot.barStart?.toFixed(1)}〜{robot.barEnd?.toFixed(1)}秒）</p>}
         {robot.posErrMm !== null && <p>位置誤差 {robot.posErrMm.toFixed(1)}mm　向き誤差 {robot.yawErrDeg?.toFixed(1)}°　継続 {robot.settledSec.toFixed(1)} / 0.3秒</p>}
         {robot.note && <p>{robot.note}</p>}

@@ -64,6 +64,7 @@ function useFleetSocketConnection() {
   const [exhibitOp, setExhibitOp] = useState<PendingOperation | null>(null);
   const [runState, setRunState] = useState<SceneRunStateMessage | null>(null);
   const [runOp, setRunOp] = useState<PendingOperation | null>(null);
+  const [settingsOp, setSettingsOp] = useState<(PendingOperation & { robotId: string }) | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const assignmentSequence = useRef(0);
 
@@ -118,6 +119,8 @@ function useFleetSocketConnection() {
           ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "展示の操作に失敗しました" } : previous);
         setRunOp((previous) => previous?.requestId === msg.requestId
           ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "操作に失敗しました" } : previous);
+        setSettingsOp((previous) => previous?.requestId === msg.requestId
+          ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "保存に失敗しました" } : previous);
       } else if (msg.type === "exhibitState") {
         setExhibit({ session: msg.session, offsetMs: msg.serverNow - Date.now() });
       } else if (msg.type === "sceneRunState") {
@@ -209,6 +212,12 @@ function useFleetSocketConnection() {
     const requestId = `${Date.now()}-${++assignmentSequence.current}`;
     const sent = send({ type: "exhibitCommand", requestId, command });
     setExhibitOp({ requestId, pending: sent, error: sent ? undefined : "ハブ未接続" });
+  }, [send]);
+
+  const saveRobotSettings = useCallback((robotId: string, priority: number | null, footprintMm?: { w: number; d: number }) => {
+    const requestId = `${Date.now()}-${++assignmentSequence.current}`;
+    const sent = send({ type: "setRobotSettings", requestId, robotId, priority, footprintMm });
+    setSettingsOp({ requestId, robotId, pending: sent, error: sent ? undefined : "ハブ未接続" });
   }, [send]);
 
   const sendRun = useCallback((command: RunCommand) => {
@@ -303,6 +312,8 @@ function useFleetSocketConnection() {
     runState,
     runOp,
     sendRun,
+    settingsOp,
+    saveRobotSettings,
     routeStatus,
     availableRoutes,
     images,

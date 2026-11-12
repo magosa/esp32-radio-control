@@ -22,6 +22,10 @@ export interface RobotDefinition {
   markerId: number | null;
   // 走行面からマーカー印刷面までの高さ(mm)。高さ補正に使う。
   markerHeightMm: number;
+  // シーン実行で道を譲る順(小さいほど優先、null は後ろ)。
+  priority?: number | null;
+  // 上から見た外形(mm, 60〜80)。表示と記録だけに使い、安全判定の半径は全台60mm固定。
+  footprintMm?: { w: number; d: number };
 }
 
 // ロボット顔の表情ID (esp32_rc_car.ino の enum ExpressionId と同期させること)
@@ -236,6 +240,7 @@ export type ClientInboundMessage =
   | ClientDisplayLayoutRequestMessage
   | { type: "assignCamera"; requestId: string; robotId: string; cameraDeviceId: string | null }
   | { type: "assignMarker"; requestId: string; robotId: string; markerId: number | null; markerHeightMm?: number }
+  | { type: "setRobotSettings"; requestId: string; robotId: string; priority: number | null; footprintMm?: { w: number; d: number } }
   | { type: "setFieldConfig"; requestId: string; config: FieldConfig }
   // 展示画面へ配信するシーンと時刻の操作。command の検証は Hub が行う。
   | { type: "exhibitCommand"; requestId: string; command: unknown }

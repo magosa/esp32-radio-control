@@ -280,6 +280,15 @@ export class FleetHub {
         this.sendToClient(client, { type: "operationResult", requestId: msg.requestId, ok: true });
         break;
       }
+      case "setRobotSettings": {
+        const footprint = msg.footprintMm;
+        if (typeof msg.requestId !== "string" || typeof msg.robotId !== "string" || !(msg.priority === null || Number.isInteger(msg.priority))
+          || !(footprint === undefined || (typeof footprint === "object" && footprint !== null))) throw new Error("Invalid robot settings");
+        this.store.setSettings(msg.robotId, msg.priority, footprint);
+        this.broadcastFleetState();
+        this.sendToClient(client, { type: "operationResult", requestId: msg.requestId, ok: true });
+        break;
+      }
       case "setFieldConfig": {
         if (typeof msg.requestId !== "string" || !isFieldConfig(msg.config)) throw new Error("Invalid field configuration");
         this.fieldStore.set(msg.config);
@@ -475,7 +484,7 @@ export class FleetHub {
   }
 
   private runTick(): void {
-    this.runner.tick({ poses: this.getPoseState(), online: (id) => this.registry.getDeviceState(id)?.status === "online" });
+    this.runner.tick({ poses: this.getPoseState(), robots: this.store.getRobots(), online: (id) => this.registry.getDeviceState(id)?.status === "online" });
     this.syncRunHandover();
     if (!this.runner.prepared && this.runTimer) {
       clearInterval(this.runTimer);

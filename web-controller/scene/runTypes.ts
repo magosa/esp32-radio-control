@@ -2,7 +2,7 @@
 
 export type RunPhase = "idle" | "arming" | "running" | "waiting" | "halted" | "finished" | "aborted";
 
-export type HaltKind = "operator" | "lost" | "stuck" | "outside" | "localizer" | "references" | "device" | "timeout";
+export type HaltKind = "operator" | "lost" | "stuck" | "outside" | "localizer" | "references" | "device" | "timeout" | "blocked";
 
 export type RunCommand =
   | { type: "prepare"; mapId: string }
@@ -24,13 +24,26 @@ export interface RunCheck {
 
 export type PositionState = "waiting" | "moving" | "arrived" | "failed";
 
-export type RobotRunStatus = "idle" | "driving" | "arrived" | "waiting" | "lost" | "failed" | "excluded";
+export type RobotRunStatus = "idle" | "driving" | "arrived" | "waiting" | "evading" | "lost" | "failed" | "excluded";
+
+// D14: one robot steps out of another's way and comes back.
+export interface RunEvasion {
+  yielder: string;
+  priority: string;
+  // Why this one yields (D15).
+  reason: string;
+  stage: "going" | "waiting" | "returning";
+  spot: { x: number; y: number };
+  // The priority robot's remaining path and the band kept free around it.
+  band: { from: { x: number; y: number }; to: { x: number; y: number }; halfWidthMm: number };
+}
 
 export interface RunRobot {
   trackId: string;
   name: string;
   robotId: string | null;
   markerId: number | null;
+  priority: number | null;
   tracking: string;
   status: RobotRunStatus;
   bar: string | null;
@@ -74,6 +87,7 @@ export interface RunResultRow {
 export interface RunSnapshot {
   phase: RunPhase;
   mapId: string | null;
+  evasions: RunEvasion[];
   mapName: string;
   // One line: why the clock is stopped, or the state.
   reason: string;
@@ -117,9 +131,10 @@ export function parseRunCommand(value: unknown): RunCommand | null {
       return null;
   }
 }
+
 export const idleSnapshot = (): RunSnapshot => ({
   phase: "idle", mapId: null, mapName: "", reason: "シーンを選んでください。", halt: null, resume: [], clock: 0, duration: 0,
-  realMs: 0, waitedMs: 0, checks: [], canStart: false, positioning: { active: false, items: [] }, robots: [], log: [], rows: [],
+  realMs: 0, waitedMs: 0, checks: [], canStart: false, positioning: { active: false, items: [] }, robots: [], evasions: [], log: [], rows: [],
 });
 
 export const isRunActive = (phase: RunPhase): boolean => phase === "running" || phase === "waiting" || phase === "halted";

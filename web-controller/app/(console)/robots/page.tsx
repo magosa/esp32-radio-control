@@ -29,8 +29,31 @@ function MarkerHeight({ robot, disabled, onCommit }: { robot: RobotState; disabl
   </label>;
 }
 
+// An integer field that commits on blur/Enter; `blankOk` lets it be cleared to null.
+function IntField({ label, value, min, max, blankOk, disabled, hint, onCommit }: {
+  label: string; value: number | null; min: number; max: number; blankOk?: boolean; disabled: boolean; hint: string;
+  onCommit: (value: number | null) => void;
+}) {
+  const [draft, setDraft] = useState(value === null ? "" : String(value));
+  const [synced, setSynced] = useState(value);
+  if (synced !== value) {
+    setSynced(value);
+    setDraft(value === null ? "" : String(value));
+  }
+  const blank = draft.trim() === "";
+  const number = Number(draft);
+  const valid = blank ? !!blankOk : Number.isInteger(number) && number >= min && number <= max;
+  const commit = () => { if (valid && (blank ? null : number) !== value) onCommit(blank ? null : number); };
+  return <label>{label}
+    <input type="number" inputMode="numeric" min={min} max={max} step="1" value={draft} disabled={disabled} aria-invalid={!valid}
+      onChange={(event) => setDraft(event.target.value)} onBlur={commit}
+      onKeyDown={(event) => { if (event.key === "Enter") commit(); }} />
+    <small>{valid ? hint : `${min}〜${max}の整数を入力してください`}</small>
+  </label>;
+}
+
 export default function RobotsPage() {
-  const { status, devices, robots, assignment, assignCamera, poseState, markerAssignment, assignMarker } = useFleetSocket();
+  const { status, devices, robots, assignment, assignCamera, poseState, markerAssignment, assignMarker, settingsOp, saveRobotSettings } = useFleetSocket();
   const connected = status === "connected";
   const cameras = devices.filter((device) => device.capabilities.includes("camera"));
 
@@ -77,6 +100,17 @@ export default function RobotsPage() {
           onCommit={(height) => assignMarker(robot.robotId, robot.markerId, height)} />
         {robotMarker && <p className={styles.assignmentStatus} role={robotMarker.error ? "alert" : "status"}>
           {robotMarker.pending ? "保存中…" : robotMarker.error || "保存しました"}
+        </p>}
+        <IntField label="優先順位" value={robot.priority ?? null} min={1} max={99} blankOk disabled={!connected || !!settingsOp?.pending}
+          hint="小さいほど優先。空欄は後ろ" onCommit={(value) => saveRobotSettings(robot.robotId, value)} />
+        <IntField label="外形 幅 (mm)" value={robot.footprintMm?.w ?? 80} min={60} max={80} disabled={!connected || !!settingsOp?.pending}
+          hint="安全判定の半径は全台60mm固定。表示と記録のみ"
+          onCommit={(value) => saveRobotSettings(robot.robotId, robot.priority ?? null, { w: value ?? 80, d: robot.footprintMm?.d ?? 80 })} />
+        <IntField label="外形 奥行 (mm)" value={robot.footprintMm?.d ?? 80} min={60} max={80} disabled={!connected || !!settingsOp?.pending}
+          hint="上から見た大きさ"
+          onCommit={(value) => saveRobotSettings(robot.robotId, robot.priority ?? null, { w: robot.footprintMm?.w ?? 80, d: value ?? 80 })} />
+        {settingsOp?.robotId === robot.robotId && <p className={styles.assignmentStatus} role={settingsOp.error ? "alert" : "status"}>
+          {settingsOp.pending ? "保存中…" : settingsOp.error || "保存しました"}
         </p>}
         <p className={styles.trackingLine} data-tracking={tracking} role="status">
           {tracking === "tracking" ? null : <TriangleAlert aria-hidden="true" />}測位: {TRACKING_LABEL[tracking]}
