@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Square,
-  Search, Check, Camera, Video, VideoOff, Play, RotateCcw, TriangleAlert,
+  Search, Check, Camera, Video, VideoOff, RotateCcw, TriangleAlert,
 } from "lucide-react";
 import { useFleetSocket, type VehicleImage } from "@/hooks/useFleetSocket";
-import type { DriveCommand, ExpressionId, DisplayLayoutMode, VehicleTelemetry } from "@/fleet/protocol";
+import type { DriveCommand, ExpressionId, DisplayLayoutMode, VehicleState, VehicleTelemetry } from "@/fleet/protocol";
+import { isRunActive } from "@/scene/runTypes";
 import styles from "../console.module.css";
 
 const EXPRESSIONS: { label: string; id: ExpressionId }[] = [
@@ -133,14 +134,18 @@ function VehicleSnapshot({ image }: { image?: VehicleImage }) {
 }
 
 export default function ControlPage() {
-  const { status, vehicles, devices, robots, routeStatus, availableRoutes, images, sendCommand, setMode,
-    startRoute, stopRoute, requestSnapshot, requestStream, requestExpression, requestDisplayLayout, emergencyEpoch } = useFleetSocket();
+  const { status, vehicles, devices, robots, images, runState, sendCommand,
+    requestSnapshot, requestStream, requestExpression, requestDisplayLayout, emergencyEpoch } = useFleetSocket();
   const [selectionMode, setSelectionMode] = useState<"single" | "group">("single");
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [speed, setSpeed] = useState(190);
-  const [selectedRouteId, setSelectedRouteId] = useState("");
+  const run = runState?.state;
+  const sceneRobotIds = new Set(run && (isRunActive(run.phase) || run.positioning.active) ? run.robots.map((robot) => robot.robotId) : []);
+  // Auto mode is set from the run screen; here it is only shown.
+  const modeLabel = (vehicle: VehicleState) => vehicle.mode === "manual" ? "手動"
+    : robots.some((robot) => robot.driveDeviceId === vehicle.deviceId && sceneRobotIds.has(robot.robotId)) ? "シーン実行" : "簡易ルート";
   const streamingIds = new Set(devices.filter((device) => device.streaming).map((device) => device.deviceId));
   const streamingRef = useRef(streamingIds);
   streamingRef.current = streamingIds;
@@ -180,7 +185,7 @@ export default function ControlPage() {
   };
   const blockReason = !connected ? "ハブ未接続" : !targets.length ? "操作対象未選択"
     : targets.some((vehicle) => vehicle.status !== "online") ? "操作対象に未接続のロボットがあります"
-    : targets.some((vehicle) => vehicle.mode !== "manual") ? "操作対象を手動モードに切り替えてください" : null;
+    : targets.some((vehicle) => vehicle.mode !== "manual") ? "操作対象は実行中です。実行画面で止めると手動に戻ります" : null;
   const showSelectionWarning = blockReason === "操作対象未選択";
 
   return <>
@@ -208,7 +213,7 @@ export default function ControlPage() {
               {selected && <Check aria-hidden="true" />}</div>
               <span className={styles.deviceId}>{vehicle.deviceId}</span>
               <span className={styles.vehicleStatus}><i data-online={connected && vehicle.status === "online"} />
-                {connected && vehicle.status === "online" ? "接続中" : "未接続"}<span>{vehicle.mode === "manual" ? "手動" : "自動"}</span>
+                {connected && vehicle.status === "online" ? "接続中" : "未接続"}<span>{modeLabel(vehicle)}</span>
               </span></>;
             return selectionMode === "single" ? <button key={vehicle.deviceId} className={styles.vehicle}
               aria-pressed={selected} onClick={() => setFocusedId(vehicle.deviceId)}>{contents}</button>
@@ -245,15 +250,8 @@ export default function ControlPage() {
             <h3>制御モード</h3>
             {targets.length > 0 ? targets.map((vehicle) => <div key={vehicle.deviceId} className={styles.modeRow}>
               {selectionMode === "group" && <strong>{vehicle.name}</strong>}
-              <div className={styles.segmented} role="group" aria-label={`${vehicle.name}の制御モード`}>
-                <button aria-pressed={vehicle.mode === "manual"} disabled={!connected || vehicle.status !== "online"}
-                  onClick={() => setMode(vehicle.deviceId, "manual")}>手動</button>
-                <button aria-pressed={vehicle.mode === "auto"} disabled={!connected || vehicle.status !== "online"}
-                  onClick={() => {
-                    sendCommand([vehicle.deviceId], "e", 0, 0);
-                    setMode(vehicle.deviceId, "auto");
-                  }}>自動</button>
-              </div>
+              <span>{modeLabel(vehicle)}</span>
+              {vehicle.mode !== "manual" && <Link href="/run">実行画面を開く ▸</Link>}
             </div>) : <p className={styles.muted}>未選択</p>}
             {selectionMode === "single" && focused && <div className={styles.telemetry}>
               <h3>モーター出力</h3>
@@ -284,19 +282,7 @@ export default function ControlPage() {
             </details>}
           </div>
         </div>
-        <section className={styles.routes} aria-label="自動ルート">
-          <div className={styles.sectionHeading}><h3>自動ルート</h3><span>{routeStatus?.running ? `実行中 · ${Math.floor(routeStatus.elapsedMs / 1000)}秒` : "停止中"}</span></div>
-          <div className={styles.routeActions}>
-            <select aria-label="自動ルートを選択" value={selectedRouteId} disabled={!connected || routeStatus?.running}
-              onChange={(event) => setSelectedRouteId(event.target.value)}>
-              <option value="">ルートを選択</option>{availableRoutes.map((route) => <option key={route.id} value={route.id}>{route.label}</option>)}
-            </select>
-            <button className={styles.primary} disabled={!connected || !selectedRouteId || !!routeStatus?.running || !online.some((vehicle) => vehicle.mode === "auto")}
-              onClick={() => startRoute(selectedRouteId)}><Play />開始</button>
-            <button className={styles.secondary} disabled={!connected || !routeStatus?.running} onClick={stopRoute}><Square />停止</button>
-          </div>
-          <p className={styles.muted}>対象: {online.filter((vehicle) => vehicle.mode === "auto").map((vehicle) => vehicle.name).join("、") || "自動モードのロボットなし"}</p>
-        </section>
+        <p className={styles.muted}>自動ルートは「実行」画面へ移動しました（<Link href="/run">実行画面を開く ▸</Link>）。</p>
       </section>
     </div>
   </>;

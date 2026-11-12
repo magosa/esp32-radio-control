@@ -249,7 +249,7 @@
   .controlBody { grid-template-columns: minmax(0, 1fr); }
 }
 /* ナビが7項目になり、701〜1180pxではタイトルとナビが1行に収まらずタイトルが縦に潰れるため、2段にする。 */
-@media (min-width: 701px) and (max-width: 1180px) {
+@media (min-width: 701px) and (max-width: 1360px) {
   .header { flex-direction: column; align-items: stretch; gap: 12px; padding: 12px 0; }
   .headerActions { justify-content: flex-start; flex-shrink: 1; }
 }

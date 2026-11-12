@@ -1,5 +1,6 @@
 .page { --card-padding: 12px; --card-gap: 10px; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; gap: var(--card-gap); padding-top: 12px; min-height: 720px; }
 .state { padding: var(--layout-gap) 0; color: var(--muted); font-size: var(--text-body); }
+.runBanner { margin: 0; padding: 8px 12px; border: 1px solid var(--warning-ink); border-radius: 8px; color: var(--warning-ink); font-weight: 600; }
 .narrow { max-width: 560px; margin: var(--layout-gap) auto 0; display: grid; gap: 12px; }
 .narrow h2 { font-size: var(--text-section); }
 

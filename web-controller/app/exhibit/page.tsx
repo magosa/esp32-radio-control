@@ -125,7 +125,7 @@ function Alignment({ poses, scale }: { poses: readonly MeasuredPose[]; scale: nu
 }
 
 export default function ExhibitPage() {
-  const { exhibit, poseState, status } = useFleetSocket();
+  const { exhibit, poseState, runState, status } = useFleetSocket();
   const project = useLatestProject();
   const now = useNow();
   const scale = useScale();
@@ -145,6 +145,8 @@ export default function ExhibitPage() {
 
   const clearance = useClearance(poseState?.field.referenceSizeMm ?? 33);
   const idleText = align || status !== "connected" ? "" : exhibit?.session.mapId && !map ? "展示するマップが見つかりません" : "展示待機中";
+  // Small and centred at the bottom, away from the corner markers.
+  const runNotice = runState?.state.phase === "halted" ? "全台停止中（調整中です）" : runState?.state.phase === "waiting" ? "ロボットの到着を待っています" : "";
 
   return (
     <div className={styles.screen} data-state={map ? "playing" : "idle"} data-time={time.toFixed(2)}>
@@ -159,6 +161,11 @@ export default function ExhibitPage() {
         {[[0, 0], [FIELD_WIDTH_MM - clearance, 0], [0, FIELD_HEIGHT_MM - clearance], [FIELD_WIDTH_MM - clearance, FIELD_HEIGHT_MM - clearance]].map(([x, y]) => (
           <rect key={`${x}-${y}`} data-part="marker-clearance" x={x} y={y} width={clearance} height={clearance} fill="#000" />
         ))}
+        {runNotice && (
+          <text data-part="run-notice" x={FIELD_WIDTH_MM / 2} y={FIELD_HEIGHT_MM - 12} textAnchor="middle" fontSize={Math.max(10, 14 / Math.max(scale, 0.01))} fill={MAP_COLORS.grid} opacity={0.8}>
+            {runNotice}
+          </text>
+        )}
         {!map && idleText && (
           <text x={FIELD_WIDTH_MM / 2} y={FIELD_HEIGHT_MM / 2} textAnchor="middle" fontSize={Math.max(14, 18 / Math.max(scale, 0.01))} fill={MAP_COLORS.grid} opacity={0.5}>
             {idleText}

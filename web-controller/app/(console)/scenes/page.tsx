@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { roomContainsPoint } from "@/scene/floorPlan";
 import { EMPTY_SELECTION, pruneSelection, type SceneSelection } from "@/scene/sceneSelection";
 import { compilePlan } from "@/scene/timedPlan";
@@ -116,8 +117,10 @@ function Editor({ scene, project, map, mapId }: {
   const actionTrack = actionRequest ? map.tracks.find((track) => track.id === actionRequest.trackId) : undefined;
   const editMap = () => { setLibraryOpen(false); setMapEditing(true); };
 
-  return <div ref={pageRef} className={styles.page} style={{ height: pageHeight }}>
-    <ProjectBar project={project} commit={scene.commit} undo={scene.undo} redo={scene.redo} canUndo={scene.canUndo}
+  return <div ref={pageRef} className={styles.page} style={{ height: pageHeight, ...(scene.locked ? { gridTemplateRows: "auto auto auto minmax(0, 1fr) auto" } : {}) }}>
+    {scene.locked && <p className={styles.runBanner} role="status">
+      シーンを実行中です。編集するには実行を終了してください（<Link href="/run">実行画面を開く ▸</Link>）
+    </p>}    <ProjectBar project={project} commit={scene.commit} undo={scene.undo} redo={scene.redo} canUndo={scene.canUndo}
       canRedo={scene.canRedo} saveState={scene.saveState} history={scene.history} reload={scene.reload} />
     <MapTabs project={project} activeMapId={mapId} onSelect={scene.setActiveMap} commit={scene.commit} />
     <div className={styles.workspace}>
@@ -139,7 +142,8 @@ function Editor({ scene, project, map, mapId }: {
             <div className={styles.anchor}>
               <button type="button" className={consoleStyles.secondary} aria-expanded={exhibitOpen} aria-haspopup="dialog"
                 onClick={() => setExhibitOpen((open) => !open)}>展示 ▾</button>
-              {exhibitOpen && <div className={styles.exhibitPopover}><ExhibitControls map={map} duration={duration} /></div>}
+              {exhibitOpen && <div className={styles.exhibitPopover}><ExhibitControls map={map} duration={duration} />
+                <p><Link href="/run">実行画面を開く ▸</Link></p></div>}
             </div>
           </div>
           <div className={styles.stageBody}>
