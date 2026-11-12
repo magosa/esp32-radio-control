@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>S5 ワイヤーフレーム: シーン実行画面</title>
+<style>
+  :root { --ink:#222; --mute:#666; --line:#9aa3a0; --fill:#eef1ef; --fill2:#dfe5e2; --warn:#c2410c; --ok:#15803d; --info:#1d4ed8; --bad:#b91c1c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; background: #fff; color: var(--ink); font: 14px/1.5 "Yu Gothic UI", "Meiryo", sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 32px 0 8px; }
+  .lead { color: var(--mute); margin: 0 0 16px; max-width: 1100px; }
+  .board { position: relative; border: 2px solid var(--ink); background: #fff; padding: 12px; margin-bottom: 8px; }
+  .w1280 { width: 1280px; } .w768 { width: 768px; } .w600 { width: 600px; }
+  .cap { font-weight: 700; margin: 24px 0 6px; }
+  .legend { max-width: 1280px; margin: 0 0 24px; padding-left: 20px; }
+  .legend li { margin: 2px 0; }
+  /* parts */
+  .nav { display: flex; gap: 6px; align-items: center; padding: 6px 8px; background: var(--fill2); border: 1px dashed var(--line); margin-bottom: 10px; }
+  .nav b { flex: 1; font-size: 15px; }
+  .nav span { padding: 2px 8px; border: 1px solid var(--line); background: #fff; font-size: 12px; }
+  .nav .stop { border-color: var(--bad); color: var(--bad); font-weight: 700; }
+  .nav .here { background: var(--ink); color: #fff; }
+  .box { border: 1px dashed var(--line); background: var(--fill); padding: 8px; position: relative; }
+  .box > h3 { margin: 0 0 6px; font-size: 13px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1; }
+  .btn { display: inline-block; padding: 4px 12px; border: 1.5px solid var(--ink); background: #fff; font-weight: 700; }
+  .btn.off { color: #999; border-color: #bbb; border-style: dashed; font-weight: 400; }
+  .btn.primary { background: var(--ink); color: #fff; }
+  .btn.danger { border-color: var(--bad); color: var(--bad); }
+  .chip { display: inline-block; padding: 1px 10px; border-radius: 12px; border: 1.5px solid var(--ink); font-weight: 700; background: #fff; }
+  .chip.run { border-color: var(--ok); color: var(--ok); } .chip.wait { border-color: var(--info); color: var(--info); }
+  .chip.halt { border-color: var(--bad); color: var(--bad); } .chip.warn { border-color: var(--warn); color: var(--warn); }
+  .chip.idle { border-color: #999; color: #666; }
+  .clock { font: 700 22px/1 "Consolas", monospace; }
+  .small { font-size: 12px; color: var(--mute); }
+  .grid2 { display: grid; grid-template-columns: 1fr 380px; gap: 10px; }
+  .map { height: 330px; border: 1.5px solid var(--ink); background:
+      repeating-linear-gradient(0deg, transparent 0 19px, #d3dad7 19px 20px), repeating-linear-gradient(90deg, transparent 0 19px, #d3dad7 19px 20px), #f7f9f8; position: relative; overflow: hidden; }
+  .map .corner { position: absolute; width: 36px; height: 36px; background: #222; }
+  .rob { position: absolute; width: 26px; height: 26px; border: 2px solid var(--ink); background: #fff; font-size: 11px; text-align: center; line-height: 22px; font-weight: 700; }
+  .rob.ghost { border-style: dashed; color: #888; border-color: #888; background: transparent; }
+  .rob.lost { border-color: var(--bad); color: var(--bad); background: #fde8e8; }
+  .ring { position: absolute; width: 60px; height: 60px; border: 1px dashed var(--warn); border-radius: 50%; }
+  .zone { position: absolute; border: 2px dashed var(--info); background: rgba(29,78,216,.08); font-size: 11px; color: var(--info); padding: 1px 4px; }
+  .path { position: absolute; height: 0; border-top: 2px dashed #777; }
+  .cards { display: grid; gap: 6px; }
+  .card { border: 1.5px solid var(--ink); background: #fff; padding: 6px 8px; }
+  .card.bad { border-color: var(--bad); background: #fdf2f2; } .card.wait { border-color: var(--info); background: #f1f5fe; }
+  .card .t { display: flex; gap: 6px; align-items: center; font-weight: 700; }
+  .meter { height: 8px; background: var(--fill2); border: 1px solid var(--line); margin-top: 3px; position: relative; }
+  .meter i { position: absolute; left: 0; top: 0; bottom: 0; background: #888; }
+  .tl { display: grid; grid-template-columns: 110px 1fr; gap: 3px 8px; align-items: center; }
+  .tl .lane { position: relative; height: 22px; background: #fff; border: 1px solid var(--line); }
+  .bar { position: absolute; top: 2px; height: 16px; border: 1.5px solid #555; background: var(--fill2); font-size: 10px; padding: 0 3px; overflow: hidden; white-space: nowrap; }
+  .bar.done { background: #cfe8d5; border-color: var(--ok); } .bar.cur { background: #fff; border: 2px solid var(--ink); font-weight: 700; }
+  .bar.wait { background: #dbe6fb; border-color: var(--info); } .bar.bad { background: #fbd5d5; border-color: var(--bad); }
+  .head { position: absolute; top: -3px; bottom: -3px; width: 0; border-left: 2px solid var(--bad); }
+  .log { font: 12px/1.6 "Consolas", "Yu Gothic UI", monospace; background: #fff; border: 1px solid var(--line); padding: 6px; height: 130px; overflow: hidden; }
+  .log .w { color: var(--info); } .log .e { color: var(--bad); } .log .o { color: var(--ok); }
+  .check { display: grid; grid-template-columns: 22px 1fr auto; gap: 2px 8px; align-items: center; }
+  .ok { color: var(--ok); font-weight: 700; } .ng { color: var(--bad); font-weight: 700; }
+  .banner { border: 2px solid; padding: 8px 10px; font-weight: 700; }
+  .banner.halt { border-color: var(--bad); background: #fdf2f2; color: var(--bad); } .banner.wait { border-color: var(--info); background: #f1f5fe; color: var(--info); }
+  .banner.warn { border-color: var(--warn); background: #fff4ec; color: var(--warn); } .banner.ok { border-color: var(--ok); background: #effaf1; color: var(--ok); }
+  table { border-collapse: collapse; width: 100%; background: #fff; }
+  th, td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--fill2); }
+  .n { position: absolute; top: -10px; left: -10px; z-index: 5; width: 22px; height: 22px; border-radius: 50%; background: var(--bad); color: #fff; font: 700 12px/22px sans-serif; text-align: center; font-style: normal; }
+  .n.r { left: auto; right: -10px; }
+  .stack { display: grid; gap: 10px; }
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .note { border-left: 4px solid var(--warn); background: #fff7ed; padding: 6px 10px; margin: 8px 0; max-width: 1100px; }
+</style>
+</head>
+<body>
+<h1>S5 ワイヤーフレーム: シーン実行画面（確認用・低忠実度）</h1>
+<p class="lead">灰色の箱は部品の位置と中身を示すだけで、色・余白・文字の大きさは実装時に既存画面（ガラス調・ライト/ダーク・5配色）に合わせます。赤い番号は、凡例の項目と、末尾の「確認したい点」に対応します。ここに描いていない画面や操作は作りません。</p>
+
+<div class="note"><b>このワイヤーフレームの範囲:</b> 新しい画面「実行」（<code>/run</code>）、ロボット設定への2項目の追加、シーン画面の導線、展示画面での停止中の扱い。進行時計・退避・異常時の<b>処理そのもの</b>は設計書（8章）のとおりで、ここでは「画面にどう見せ、何を操作できるか」だけを決めます。</div>
+
+<!-- ===================== W1 ===================== -->
+<h2>W1　実行画面（実行中）　1280px</h2>
+<div class="board w1280" id="w1">
+  <div class="nav"><b>シーン実行</b><span>制御</span><span>フロア</span><span>ロボット</span><span>シーン</span><span class="here">実行</span><span>測位</span><span>表示設定</span><span>Bluetooth</span><span class="stop">全台停止</span></div>
+
+  <div class="box" style="margin-bottom:10px"><i class="n">1</i>
+    <div class="row">
+      <div>実行するシーン　<span class="btn">プロジェクト名 ▾</span> <span class="btn">マップ: オフィス ▾</span></div>
+      <span class="chip wait">完了待ち</span>
+      <div><span class="small">進行時計（停止中）</span> <span class="clock">0:12.4</span> <span class="small">/ 計画 1:05.0</span></div>
+      <div class="small">経過（実時間）0:15.6　<b>止まっていた時間 +3.2秒</b></div>
+      <span class="grow"></span>
+      <span class="btn off">開始</span><span class="btn">一時停止</span><span class="btn danger">中止</span>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="stack">
+      <div class="box"><i class="n">2</i><h3>マップ（計画=破線、実機の測位位置=実線、安全半径60mm、演出つき）</h3>
+        <div class="map">
+          <div class="corner" style="left:0;top:0"></div><div class="corner" style="right:0;top:0"></div><div class="corner" style="left:0;bottom:0"></div><div class="corner" style="right:0;bottom:0"></div>
+          <div class="path" style="left:80px;top:200px;width:300px"></div>
+          <div class="rob ghost" style="left:300px;top:187px">R1</div>
+          <div class="rob" style="left:262px;top:188px">R1</div><div class="ring" style="left:245px;top:171px"></div>
+          <div class="rob" style="left:520px;top:90px">R2</div><div class="ring" style="left:503px;top:73px"></div>
+          <div class="rob ghost" style="left:540px;top:60px">R2</div>
+          <div class="zone" style="left:440px;top:190px;width:150px;height:90px">退避帯（R3 が R4 に道を譲る）</div>
+          <div class="rob" style="left:470px;top:230px">R3</div><div class="rob" style="left:640px;top:230px">R4</div>
+          <div class="rob lost" style="left:120px;top:90px">R5</div>
+          <div class="small" style="position:absolute;left:60px;bottom:6px;background:#fff;padding:0 4px">四隅は基準マーカーのため空白</div>
+        </div>
+      </div>
+      <div class="box"><i class="n">5</i><h3>進行（計画の動作バーと、実機の到着状況。縦線＝進行時計）</h3>
+        <div class="tl">
+          <div>R1 ロボット 1</div><div class="lane"><div class="bar done" style="left:2%;width:18%">移動A ✓</div><div class="bar cur" style="left:22%;width:24%">移動B 走行中</div><div class="bar" style="left:50%;width:20%">移動C</div><div class="head" style="left:34%"></div></div>
+          <div>R2 ロボット 2</div><div class="lane"><div class="bar done" style="left:2%;width:30%">移動 ✓</div><div class="bar wait" style="left:34%;width:12%">到着待ち</div><div class="bar" style="left:50%;width:30%">旋回→移動</div><div class="head" style="left:34%"></div></div>
+          <div>R3 ロボット 3</div><div class="lane"><div class="bar done" style="left:2%;width:14%">待機 ✓</div><div class="bar cur" style="left:20%;width:26%">退避中</div><div class="bar" style="left:50%;width:36%">移動</div><div class="head" style="left:34%"></div></div>
+        </div>
+        <div class="small" style="margin-top:4px">灰=未着手　白＋太枠=実行中　青=完了待ち（全台が待つ）　緑=到着確認済　赤=失敗</div>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="box"><i class="n">3</i><h3>ロボット別（最大8台。8台のときは2列に詰める）</h3>
+        <div class="cards">
+          <div class="card"><div class="t">R1 ロボット 1 <span class="chip run">走行中</span> <span class="small">ID 0・優先 1</span></div>
+            <div class="small">移動B（8.0〜14.0秒）　位置誤差 34.2mm　向き 3.1°</div><div class="meter"><i style="width:60%"></i></div></div>
+          <div class="card wait"><div class="t">R2 ロボット 2 <span class="chip wait">到着待ち</span> <span class="small">ID 1・優先 2</span></div>
+            <div class="small">位置 12.0mm ✓　向き 7.4° ✗　継続 0.0 / 0.3秒</div><div class="meter"><i style="width:0%"></i></div></div>
+          <div class="card"><div class="t">R3 ロボット 3 <span class="chip warn">退避中</span> <span class="small">ID 2・優先 3</span></div>
+            <div class="small">R4 に道を譲り、離脱点へ移動中</div></div>
+          <div class="card"><div class="t">R4 ロボット 4 <span class="chip run">走行中</span> <span class="small">ID 3・優先 4</span></div>
+            <div class="small">優先機（R3 より先に終わるバー）</div></div>
+          <div class="card bad"><div class="t">R5 ロボット 5 <span class="chip halt">見失い</span> <span class="small">ID 4・優先 5</span></div>
+            <div class="small">最後の位置を障害物として扱っています</div></div>
+        </div>
+      </div>
+      <div class="box"><i class="n">4</i><h3>いまの全体の状態</h3>
+        <div class="banner wait">全台が待っています: R2 が到着判定（向き 5°以内）を満たすまで</div>
+        <div class="banner halt" style="margin-top:6px">R5 を見失い中: 次の同期点で全台停止します</div>
+        <div class="small" style="margin-top:4px">待機の理由は常に1行で表示します（待つ側＝全台、待たれる側＝R2）。異常は別行で重ねて出します。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="box" style="margin-top:10px"><i class="n">6</i><h3>イベントログ（新しい順。実行ごとに保持）</h3>
+    <div class="log">
+      <div class="e">0:12.4　R5 を見失いました（最後の位置 (240, 410) を障害物にします）</div>
+      <div class="w">0:12.0　全台待機: R2 が未到着（向き 7.4°）</div>
+      <div class="w">0:10.8　退避: R3 が R4 に道を譲ります（理由: R3 に退避できる場所がある）</div>
+      <div class="o">0:08.0　R1 移動A 到着確認（位置 8.1mm / 向き 1.2°）</div>
+      <div>0:00.0　開始</div>
+    </div>
+  </div>
+</div>
+<ol class="legend">
+  <li><b>1 実行バー</b>: シーン・マップの選択、状態、進行時計、実時間との差（止まっていた時間）、操作ボタン。操作は状態で出し分けます（W3）。ヘッダーの「全台停止」は従来どおり常に有効。</li>
+  <li><b>2 マップ</b>: 編集画面と同じ描画（床・扉・演出）。計画の位置（破線）と測位の位置（実線）を重ね、60mmの安全半径、退避帯、見失った機体の最後の位置を示します。四隅の空白は展示画面と同じ。</li>
+  <li><b>3 ロボット別カード</b>: 追跡状態、いまのバー、到着判定の3条件（位置20mm・向き5°・0.3秒継続）の達成状況、優先順位。異常のある機体は色と文字で目立たせます（色だけに頼らない）。</li>
+  <li><b>4 全体の状態</b>: なぜ進行時計が止まっているか、を常に1行で。</li>
+  <li><b>5 進行</b>: 編集画面の時間軸と同じ見た目の簡易版（読み取り専用）。</li>
+  <li><b>6 イベントログ</b>: 到着確認、待機、退避、見失い、再試行、操作者の操作。</li>
+</ol>
+
+<!-- ===================== W2 ===================== -->
+<h2>W2　実行前の確認（開始できない状態）　1280px の上部のみ</h2>
+<div class="board w1280" id="w2">
+  <div class="box" style="margin-bottom:10px">
+    <div class="row">
+      <div>実行するシーン　<span class="btn">プロジェクト名 ▾</span> <span class="btn">マップ: オフィス ▾</span></div>
+      <span class="chip idle">確認中</span><span class="clock">0:00.0</span><span class="small">/ 計画 1:05.0</span>
+      <span class="grow"></span><span class="btn off">開始</span><span class="small">（下の ✗ をすべて解消すると開始できます）</span>
+    </div>
+  </div>
+  <div class="cols2">
+    <div class="box"><i class="n">7</i><h3>実行前の確認（満たしたものから ✓ になります）</h3>
+      <div class="check">
+        <span class="ok">✓</span><span>測位カメラが動作中</span><span class="small">遅延 42ms / 9.8fps</span>
+        <span class="ok">✓</span><span>基準マーカーが3枚以上</span><span class="small">4/4</span>
+        <span class="ok">✓</span><span>シーンの全ロボットにマーカーが割り当て済み</span><span class="small">4台</span>
+        <span class="ok">✓</span><span>全ロボットが追跡中</span><span class="small">4/4</span>
+        <span class="ng">✗</span><span>全ロボットが初期位置にいる（位置20mm・向き5°）</span><span class="small">3/4</span>
+        <span class="ng">✗</span><span>計画にエラーがない</span><span class="small">1件: 通行不可の動作</span>
+        <span class="ok">✓</span><span>駆動デバイスが接続中</span><span class="small">4/4</span>
+      </div>
+    </div>
+    <div class="box"><i class="n">8</i><h3>初期位置とのずれ（✗ のロボットだけ詳しく）</h3>
+      <table><tr><th>ロボット</th><th>位置のずれ</th><th>向きのずれ</th><th>対処</th></tr>
+        <tr><td>R3</td><td>46mm ✗</td><td>3° ✓</td><td>マップの青い目印へ手で置き直してください</td></tr></table>
+      <div class="small" style="margin-top:6px">マップ上に初期位置の目印（破線の枠）を出し、置き直しの目安にします。実機を自動で初期位置へ動かす機能は作りません（案内のみ）。</div>
+      <div class="small" style="margin-top:6px"><b>校正</b>の確認はS7（実機の校正）で追加します。S5では項目を出しません。</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== W3 ===================== -->
+<h2>W3　状態ごとの表示と、使える操作</h2>
+<div class="board w1280" id="w3">
+  <table>
+    <tr><th style="width:130px">状態</th><th style="width:200px">全体の状態の行（W1-4）</th><th style="width:230px">操作ボタン（W1-1）</th><th>備考</th></tr>
+    <tr><td><span class="chip idle">待機</span></td><td>未実行</td><td><span class="btn off">開始</span>（確認が揃うまで無効）</td><td>実行前の確認（W2）を表示</td></tr>
+    <tr><td><span class="chip idle">確認中</span></td><td>すべて ✓ になるまで</td><td><span class="btn primary">開始</span>（揃うと有効）</td><td>測位の状態を常時確認</td></tr>
+    <tr><td><span class="chip run">実行中</span></td><td>進行時計が進んでいます</td><td><span class="btn">一時停止</span> <span class="btn danger">中止</span></td><td>全ロボットが予定どおり</td></tr>
+    <tr><td><span class="chip wait">完了待ち</span></td><td><div class="banner wait" style="padding:2px 8px">全台が待っています: Rn が到着判定を満たすまで</div></td><td><span class="btn">一時停止</span> <span class="btn danger">中止</span></td><td>進行時計と演出が止まります。到着判定を満たすと自動で進みます</td></tr>
+    <tr><td><span class="chip warn">退避中</span></td><td><div class="banner warn" style="padding:2px 8px">Rn が Rm に道を譲っています</div></td><td><span class="btn">一時停止</span> <span class="btn danger">中止</span></td><td>完了待ちの一種。進行時計は止まる</td></tr>
+    <tr><td><span class="chip halt">停止中</span></td><td><div class="banner halt" style="padding:2px 8px">全台停止: 見失い／引っかかり／領域外／測位切断／基準マーカー不足／操作者の一時停止</div></td><td><span class="btn primary">再開</span> <span class="btn danger">中止</span></td><td>理由ごとの表示は W4。自動再開の条件が揃えば再開（見失い）</td></tr>
+    <tr><td><span class="chip run">完了</span></td><td><div class="banner ok" style="padding:2px 8px">最後まで実行しました</div></td><td><span class="btn">もう一度</span> <span class="btn">結果を保存</span></td><td>結果の表示は W5</td></tr>
+    <tr><td><span class="chip idle">中止</span></td><td>操作者が中止しました（全台停止済み）</td><td><span class="btn">もう一度</span> <span class="btn">結果を保存</span></td><td>途中までの結果を残します</td></tr>
+  </table>
+  <div class="small" style="margin-top:6px"><i class="n" style="position:static;display:inline-block">9</i> 「完了待ちを飛ばして次へ進める」ボタンは<b>作りません</b>（設計書のアンチゴール: 予定位置にいないまま次へ進めない）。</div>
+</div>
+
+<!-- ===================== W4 ===================== -->
+<h2>W4　停止中の表示（例: 見失い）</h2>
+<div class="board w600" id="w4">
+  <div class="banner halt"><i class="n">10</i>全台停止: R5 を見失いました（0:12.4）</div>
+  <div class="box" style="margin-top:8px"><h3>自動再開の条件（すべて満たして1秒続くと再開します）</h3>
+    <div class="check">
+      <span class="ng">✗</span><span>対象の全台が追跡中</span><span class="small">4/5</span>
+      <span class="ng">✗</span><span>R5 が追跡中に戻った</span><span class="small">見失い 3.1秒</span>
+      <span class="ok">✓</span><span>基準マーカーが3枚以上</span><span class="small">4/4</span>
+      <span class="ng">✗</span><span>R5 が停止前の位置の60mm以内</span><span class="small">未検出</span>
+    </div>
+    <div class="small" style="margin-top:4px">位置が大きくずれている場合（人が動かしたなど）は自動で再開せず、「再開」を待ちます。</div>
+  </div>
+  <div class="row" style="margin-top:8px"><span class="btn primary">再開（条件を満たすと有効）</span><span class="btn danger">中止</span><span class="small">「再開」の前に、各機体は予定位置とのずれを補正します</span></div>
+  <div class="small" style="margin-top:6px">引っかかり（1回再試行しても進めない）、領域外、測位切断も同じ形で、条件の欄だけ入れ替わります。</div>
+</div>
+
+<!-- ===================== W5 ===================== -->
+<h2>W5　実行の結果（完了／中止のあと）</h2>
+<div class="board w1280" id="w5">
+  <div class="row" style="margin-bottom:8px"><span class="chip run">完了</span><span>実時間 1:21.0（計画 1:05.0、待機の合計 +16.0秒）</span><span class="grow"></span><span class="btn">結果を保存（JSON）</span><span class="btn">もう一度</span></div>
+  <div class="box"><i class="n">11</i><h3>動作ごとの結果</h3>
+    <table>
+      <tr><th>ロボット</th><th>動作</th><th>計画（開始〜終了）</th><th>実際の到着</th><th>位置誤差</th><th>向き誤差</th><th>待たせた時間</th><th>結果</th></tr>
+      <tr><td>R1</td><td>移動A</td><td>1.0〜7.0</td><td>7.4</td><td>8.1mm</td><td>1.2°</td><td>0.4秒</td><td class="ok">到着確認</td></tr>
+      <tr><td>R2</td><td>移動</td><td>1.0〜9.0</td><td>12.4</td><td>12.0mm</td><td>4.8°</td><td>3.4秒</td><td class="ok">到着確認</td></tr>
+      <tr><td>R3</td><td>移動</td><td>2.0〜10.0</td><td>—</td><td>—</td><td>—</td><td>—</td><td class="ng">失敗: 見失い（再開後に中止）</td></tr>
+    </table>
+  </div>
+  <div class="small" style="margin-top:6px">編集画面の動作状態（予定のみ）に、実行結果（到着確認／失敗）を重ねて見られるようにする案は、後続（S7以降）に回します。</div>
+</div>
+
+<!-- ===================== W6 ===================== -->
+<h2>W6　768px の並び（タブレット）</h2>
+<div class="board w768" id="w6">
+  <div class="nav"><b>シーン実行</b><span>…</span><span class="stop">全台停止</span></div>
+  <div class="stack">
+    <div class="box"><b>①</b> 実行バー（折り返し）: シーン／状態／時計／ボタン</div>
+    <div class="box"><b>④</b> 全体の状態の行（常に画面の上部。スクロールしても固定）</div>
+    <div class="box" style="height:170px"><b>②</b> マップ（横幅いっぱい、縦は画面の約40%）</div>
+    <div class="box"><b>③</b> ロボット別カード（1列。折りたたみ可。異常のある機体を先頭に）</div>
+    <div class="box"><b>⑤</b> 進行　　<b>⑥</b> イベントログ（開閉）</div>
+  </div>
+</div>
+
+<!-- ===================== W7 ===================== -->
+<h2>W7　ロボット設定への追加（既存の「ロボット」画面）</h2>
+<div class="board w600" id="w7">
+  <div class="card"><div class="t">ロボット 1　<span class="small">robot-dev1</span> <span class="chip run">接続中</span></div>
+    <div class="small">（既存）カメラの紐付け / 測位マーカーID / マーカー高さ</div>
+    <div class="row" style="margin-top:6px"><i class="n">12</i>
+      <label>優先順位 <span class="btn">1</span> <span class="small">小さいほど優先。空欄は後ろ</span></label></div>
+    <div class="row" style="margin-top:4px"><i class="n">13</i>
+      <label>外形（上から見て） 幅 <span class="btn">80</span> × 奥行 <span class="btn">80</span> mm <span class="small">60〜80。表示と記録のみ</span></label></div>
+    <div class="small" style="margin-top:4px">安全判定の半径は全台 60mm 固定です（外形で変わりません）。</div>
+  </div>
+</div>
+
+<!-- ===================== W8 ===================== -->
+<h2>W8　シーン画面からの導線（既存の「展示」パネルの隣）</h2>
+<div class="board w1280" id="w8">
+  <div class="box"><i class="n">14</i>
+    <div class="row"><b>展示</b><span class="small">展示中: 展示用マップ（0:12.4 / 1:05.0、再生中）</span><span class="grow"></span>
+      <span class="btn">この地図を展示に出す</span><span class="btn">展示を再生</span><span class="btn">展示を終了</span><span class="btn">展示画面を開く</span><span class="btn">位置合わせ表示を開く</span><span class="btn primary">実行画面を開く ▸</span></div>
+    <div class="small" style="margin-top:4px">実行中は、展示画面の時刻が進行時計になります（手動の展示再生は、実行していないときだけ使えます）。</div>
+  </div>
+  <div class="small" style="margin-top:6px"><i class="n" style="position:static;display:inline-block">15</i> 実行中にシーンを編集した場合: 実行は開始時の内容で最後まで進みます。編集画面には「実行中（開始時の内容で実行しています）」の帯を出します。</div>
+</div>
+
+<!-- ===================== W9 ===================== -->
+<h2>W9　展示画面（50インチ）での全台停止・完了待ちの見せ方　2案</h2>
+<div class="cols2">
+  <div>
+    <div class="cap">案A（作りが少なく、来場者に見えない）</div>
+    <div class="board" style="height:200px;background:#000;color:#aaa;width:100%">
+      <div class="small" style="color:#aaa"><i class="n">16</i>画面は止まっているだけ（演出と時計が止まる）。停止の理由は操作画面だけで見ます。</div>
+    </div>
+  </div>
+  <div>
+    <div class="cap">案B（画面下中央に小さく状態を出す）</div>
+    <div class="board" style="height:200px;background:#000;color:#fff;width:100%">
+      <div style="position:absolute;left:50%;bottom:18px;transform:translateX(-50%);border:1px solid #888;padding:2px 14px;color:#ddd">全台停止中（調整中です）</div>
+      <div class="small" style="color:#aaa">四隅は空白のまま。文字は基準マーカーに近づけません。</div>
+    </div>
+  </div>
+</div>
+
+<h2>確認したい点</h2>
+<ol class="legend">
+  <li><b>(1) 画面の置き場所</b>: ナビに新しい項目「実行」（<code>/run</code>）を追加する案（図のとおり）。シーン画面に同居させる案もあるが、編集の画面が混み合うため、分ける案を推奨します。</li>
+  <li><b>(2) 到着待ちの時間切れ（W3 の「完了待ち」の行）</b>: あるロボットがいつまでも到着判定を満たさない場合、永久に全台が待つのか、一定時間（初期値 30秒、設定可）で「停止中」にして操作者の判断を待つのか。後者を推奨します（失敗を成功扱いにしない・放置しない）。</li>
+  <li><b>(3) 展示との連動（W8-14）</b>: 実行中は展示画面の時刻を進行時計にする（図のとおり）。実行していないときだけ、S4の手動再生を使えます。</li>
+  <li><b>(4) 展示画面の停止表示（W9）</b>: 案A（何も出さない）／案B（下中央に小さく表示）。</li>
+  <li><b>(5) 結果の保存（W5-11）</b>: 画面に表示するだけか、「結果を保存」で JSON を取り出せるようにするか（保存先は <code>data/runs/</code> に自動保存せず、ダウンロードのみを推奨）。</li>
+  <li><b>(6) 実行中の編集（W8-15）</b>: 実行は開始時の内容で最後まで進める（図のとおり）か、実行中は編集を禁止するか。</li>
+  <li><b>(7) 初期位置の案内（W2-8）</b>: 実機を自動で初期位置へ動かさず、置き直しの案内だけにする（図のとおり）。S7 以降で自動化を検討します。</li>
+</ol>
+</body>
+</html>
