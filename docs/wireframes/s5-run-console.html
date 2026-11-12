@@ -81,7 +81,7 @@
 <div class="note"><b>このワイヤーフレームの範囲:</b> 新しい画面「実行」（<code>/run</code>）、ロボット設定への2項目の追加、シーン画面の導線、展示画面での停止中の扱い。進行時計・退避・異常時の<b>処理そのもの</b>は設計書（8章）のとおりで、ここでは「画面にどう見せ、何を操作できるか」だけを決めます。</div>
 
 <!-- ===================== W1 ===================== -->
-<h2>W1　実行画面（実行中）　1280px</h2>
+<h2>W1　実行画面（完了待ちと見失いが重なった例）　1280px</h2>
 <div class="board w1280" id="w1">
   <div class="nav"><b>シーン実行</b><span>制御</span><span>フロア</span><span>ロボット</span><span>シーン</span><span class="here">実行</span><span>測位</span><span>表示設定</span><span>Bluetooth</span><span class="stop">全台停止</span></div>
 
@@ -189,7 +189,9 @@
     <div class="box"><i class="n">8</i><h3>初期位置とのずれ（✗ のロボットだけ詳しく）</h3>
       <table><tr><th>ロボット</th><th>位置のずれ</th><th>向きのずれ</th><th>対処</th></tr>
         <tr><td>R3</td><td>46mm ✗</td><td>3° ✓</td><td>マップの青い目印へ手で置き直してください</td></tr></table>
-      <div class="small" style="margin-top:6px">マップ上に初期位置の目印（破線の枠）を出し、置き直しの目安にします。実機を自動で初期位置へ動かす機能は作りません（案内のみ）。</div>
+      <div class="box" style="margin-top:8px;border-color:var(--warn)"><i class="n">8b</i><h3>初期位置へ自動で動かす（回答を反映した仮の案。範囲は確認中）</h3>
+        <div class="row"><span class="btn">初期位置へ移動</span><span class="chip warn">初期位置へ移動中</span><span class="small">全台が到着判定を満たすと「開始」が有効になります</span></div>
+        <div class="small" style="margin-top:4px">動かせないとき（直線が壁・家具で塞がれている等）は、この機体を ✗ にして理由を出し、手で置き直す案内に切り替えます。</div></div>
       <div class="small" style="margin-top:6px"><b>校正</b>の確認はS7（実機の校正）で追加します。S5では項目を出しません。</div>
     </div>
   </div>
@@ -203,7 +205,7 @@
     <tr><td><span class="chip idle">待機</span></td><td>未実行</td><td><span class="btn off">開始</span>（確認が揃うまで無効）</td><td>実行前の確認（W2）を表示</td></tr>
     <tr><td><span class="chip idle">確認中</span></td><td>すべて ✓ になるまで</td><td><span class="btn primary">開始</span>（揃うと有効）</td><td>測位の状態を常時確認</td></tr>
     <tr><td><span class="chip run">実行中</span></td><td>進行時計が進んでいます</td><td><span class="btn">一時停止</span> <span class="btn danger">中止</span></td><td>全ロボットが予定どおり</td></tr>
-    <tr><td><span class="chip wait">完了待ち</span></td><td><div class="banner wait" style="padding:2px 8px">全台が待っています: Rn が到着判定を満たすまで</div></td><td><span class="btn">一時停止</span> <span class="btn danger">中止</span></td><td>進行時計と演出が止まります。到着判定を満たすと自動で進みます</td></tr>
+    <tr><td><span class="chip wait">完了待ち</span></td><td><div class="banner wait" style="padding:2px 8px">全台が待っています: Rn が到着判定を満たすまで</div></td><td><span class="btn">一時停止</span> <span class="btn danger">中止</span></td><td>進行時計と演出が止まります。到着判定を満たすと自動で進みます。<b>30秒（設定可）を超えると「停止中（理由: 到着待ちの時間切れ）」になります</b></td></tr>
     <tr><td><span class="chip warn">退避中</span></td><td><div class="banner warn" style="padding:2px 8px">Rn が Rm に道を譲っています</div></td><td><span class="btn">一時停止</span> <span class="btn danger">中止</span></td><td>完了待ちの一種。進行時計は止まる</td></tr>
     <tr><td><span class="chip halt">停止中</span></td><td><div class="banner halt" style="padding:2px 8px">全台停止: 見失い／引っかかり／領域外／測位切断／基準マーカー不足／操作者の一時停止</div></td><td><span class="btn primary">再開</span> <span class="btn danger">中止</span></td><td>理由ごとの表示は W4。自動再開の条件が揃えば再開（見失い）</td></tr>
     <tr><td><span class="chip run">完了</span></td><td><div class="banner ok" style="padding:2px 8px">最後まで実行しました</div></td><td><span class="btn">もう一度</span> <span class="btn">結果を保存</span></td><td>結果の表示は W5</td></tr>
@@ -278,20 +280,20 @@
       <span class="btn">この地図を展示に出す</span><span class="btn">展示を再生</span><span class="btn">展示を終了</span><span class="btn">展示画面を開く</span><span class="btn">位置合わせ表示を開く</span><span class="btn primary">実行画面を開く ▸</span></div>
     <div class="small" style="margin-top:4px">実行中は、展示画面の時刻が進行時計になります（手動の展示再生は、実行していないときだけ使えます）。</div>
   </div>
-  <div class="small" style="margin-top:6px"><i class="n" style="position:static;display:inline-block">15</i> 実行中にシーンを編集した場合: 実行は開始時の内容で最後まで進みます。編集画面には「実行中（開始時の内容で実行しています）」の帯を出します。</div>
+  <div class="small" style="margin-top:6px"><i class="n" style="position:static;display:inline-block">15</i> <b>実行中はシーンを編集できません</b>。シーン画面は読み取り専用になり、上部に「シーンを実行中です。編集するには実行を終了してください（実行画面を開く ▸）」の帯を出します。実行を終了（完了・中止）すると編集できます。</div>
 </div>
 
 <!-- ===================== W9 ===================== -->
-<h2>W9　展示画面（50インチ）での全台停止・完了待ちの見せ方　2案</h2>
+<h2>W9　展示画面（50インチ）での全台停止・完了待ちの見せ方　→ 案Bに決定</h2>
 <div class="cols2">
   <div>
-    <div class="cap">案A（作りが少なく、来場者に見えない）</div>
+    <div class="cap">案A（不採用: 何も出さない）</div>
     <div class="board" style="height:200px;background:#000;color:#aaa;width:100%">
       <div class="small" style="color:#aaa"><i class="n">16</i>画面は止まっているだけ（演出と時計が止まる）。停止の理由は操作画面だけで見ます。</div>
     </div>
   </div>
   <div>
-    <div class="cap">案B（画面下中央に小さく状態を出す）</div>
+    <div class="cap">案B（採用: 画面下中央に小さく状態を出す）</div>
     <div class="board" style="height:200px;background:#000;color:#fff;width:100%">
       <div style="position:absolute;left:50%;bottom:18px;transform:translateX(-50%);border:1px solid #888;padding:2px 14px;color:#ddd">全台停止中（調整中です）</div>
       <div class="small" style="color:#aaa">四隅は空白のまま。文字は基準マーカーに近づけません。</div>
@@ -299,15 +301,43 @@
   </div>
 </div>
 
-<h2>確認したい点</h2>
+<h2>W10　画面の使い分け（既存の「制御」画面の自動ルートとの切り分け）</h2>
+<div class="board w1280" id="w10">
+  <table>
+    <tr><th style="width:190px">やりたいこと</th><th style="width:230px">使う画面</th><th style="width:230px">動かし方</th><th style="width:90px">測位</th><th style="width:200px">対象のロボット</th><th>ほかの方法との同時利用</th></tr>
+    <tr><td>手で操縦する</td><td>制御（<code>/control</code>）の個別制御・複数制御</td><td>人が操作（前進・後退・旋回・PWM）</td><td>不要</td><td>選んだ機体（手動モード）</td><td>シーン実行中は操作できません</td></tr>
+    <tr><td>簡易デモ（時間どおりに合流する決まった動き）</td><td>制御（<code>/control</code>）の「自動ルート」<b>（いまのまま残す）</b></td><td>時間だけで動かす（開ループ）</td><td>不要</td><td>自動モードにした機体</td><td>シーン実行中は開始できません</td></tr>
+    <tr><td><b>編集したシーンを実行する</b></td><td><b>実行（<code>/run</code>）</b>（新規）</td><td>測位で補正（閉ループ）＋完了待ち＋退避</td><td>必須</td><td>シーンの行に割り当てたロボット（開始時に自動で制御を引き継ぐ）</td><td>手動操作・簡易デモの実行中は開始できません</td></tr>
+    <tr><td>非常停止</td><td>ヘッダーの「全台停止」（全画面共通）</td><td>すべての方式を止める</td><td>—</td><td>全台</td><td>いつでも。シーン実行は「停止中（全台停止）」になり、再開か中止を選ぶ</td></tr>
+  </table>
+  <div class="cols2" style="margin-top:10px">
+    <div class="box"><i class="n">17</i><h3>制御画面の「自動ルート」パネル（シーン実行中）</h3>
+      <div class="row"><span class="btn off">開始</span><span class="btn off">停止</span></div>
+      <div class="banner wait" style="margin-top:6px">シーン実行中のため使えません　<span class="btn" style="font-weight:400">実行画面を開く ▸</span></div>
+    </div>
+    <div class="box"><i class="n">18</i><h3>実行画面の開始ボタン（簡易デモ実行中）</h3>
+      <div class="row"><span class="btn off">開始</span></div>
+      <div class="banner wait" style="margin-top:6px">簡易ルートの実行中は開始できません　<span class="btn" style="font-weight:400">制御画面で停止 ▸</span></div>
+    </div>
+  </div>
+  <div class="small" style="margin-top:6px">簡易デモは設計書どおり残し（<code>RouteEngine</code> は変更しない）、画面の移動もしません。新しく作るのは「排他の判定」と、上の2つの案内表示だけです。</div>
+</div>
+
+<h2>決まったこと（回答をワイヤーフレームに反映済み）</h2>
 <ol class="legend">
-  <li><b>(1) 画面の置き場所</b>: ナビに新しい項目「実行」（<code>/run</code>）を追加する案（図のとおり）。シーン画面に同居させる案もあるが、編集の画面が混み合うため、分ける案を推奨します。</li>
-  <li><b>(2) 到着待ちの時間切れ（W3 の「完了待ち」の行）</b>: あるロボットがいつまでも到着判定を満たさない場合、永久に全台が待つのか、一定時間（初期値 30秒、設定可）で「停止中」にして操作者の判断を待つのか。後者を推奨します（失敗を成功扱いにしない・放置しない）。</li>
-  <li><b>(3) 展示との連動（W8-14）</b>: 実行中は展示画面の時刻を進行時計にする（図のとおり）。実行していないときだけ、S4の手動再生を使えます。</li>
-  <li><b>(4) 展示画面の停止表示（W9）</b>: 案A（何も出さない）／案B（下中央に小さく表示）。</li>
-  <li><b>(5) 結果の保存（W5-11）</b>: 画面に表示するだけか、「結果を保存」で JSON を取り出せるようにするか（保存先は <code>data/runs/</code> に自動保存せず、ダウンロードのみを推奨）。</li>
-  <li><b>(6) 実行中の編集（W8-15）</b>: 実行は開始時の内容で最後まで進める（図のとおり）か、実行中は編集を禁止するか。</li>
-  <li><b>(7) 初期位置の案内（W2-8）</b>: 実機を自動で初期位置へ動かさず、置き直しの案内だけにする（図のとおり）。S7 以降で自動化を検討します。</li>
+  <li>到着待ちの時間切れ: 一定時間（初期値30秒、設定可）で「停止中（理由: 到着待ちの時間切れ）」にして、再開か中止を待つ（W3）。</li>
+  <li>展示との連動: 実行中は展示画面の時刻＝進行時計。実行していないときだけ、手動の展示再生を使える（W8）。</li>
+  <li>展示画面の停止表示: 案B（下中央に小さく表示）に決定（W9）。</li>
+  <li>結果: 画面に表示し、「結果を保存」で JSON をダウンロード。サーバーへは自動保存しない（W5）。</li>
+  <li>実行中の編集: <b>禁止</b>（W8の帯のとおり、シーン画面は読み取り専用になる）。</li>
+</ol>
+
+<h2>追加で確認したい点（切り分けの整理のため）</h2>
+<ol class="legend">
+  <li><b>(A) 画面の使い分け（W10）</b>: 簡易デモは「制御」画面にそのまま残し、排他の判定と案内だけ足す案（推奨）／簡易デモを「実行」画面のタブへ移す案。</li>
+  <li><b>(B) ロボットの制御の引き継ぎ</b>: シーンの実行を開始すると、対象のロボットを自動で「自動モード」にして制御を引き継ぎ、終了・中止で「手動モード」へ戻す（推奨）／事前に「制御」画面で自動モードにしておく。</li>
+  <li><b>(C) シーンに入っていないロボットが盤面にいる場合</b>: 実行前の確認で警告し、動かない障害物として扱う（推奨）／確認の ✗ にして開始できなくする／無視する。</li>
+  <li><b>(D) 初期位置へ自動で動かす（W2）</b>: 回答では「自動で動かす」を選ばれました。この場合に必要になる動きの範囲を決めさせてください（W2の下部の案）。</li>
 </ol>
 </body>
 </html>
