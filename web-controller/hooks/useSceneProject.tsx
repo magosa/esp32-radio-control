@@ -4,8 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { createHistoryClient } from "@/scene/historyClient";
 import type { SaveState, SceneHistoryMeta, SceneHistoryRecord } from "@/scene/historyTypes";
 import { defaultId } from "@/scene/ids";
+import { isRunActive } from "@/scene/runTypes";
 import { createSceneSession, type Commit, type SceneSession } from "@/scene/sceneSession";
 import type { SceneMap, SceneProject } from "@/scene/types";
+import { useFleetSocket } from "./useFleetSocket";
+
+const RUN_LOCKED = "シーンを実行中のため編集できません。";
 
 export type { Commit };
 
@@ -23,6 +27,8 @@ export interface SceneProjectApi {
   loadError: string | null;
   setActiveMap(id: string): void;
   commit: Commit;
+  // True while the Hub runs a scene: every edit is refused.
+  locked: boolean;
   undo(): string | null;
   redo(): string | null;
   canUndo: boolean;
@@ -95,8 +101,16 @@ export function useSceneProject(): SceneProjectApi {
 
   const activeMap = project?.maps.find((map) => map.id === activeMapId) ?? null;
 
+  // The scene is read-only while the Hub runs it.
+  const { runState } = useFleetSocket();
+  const run = runState?.state;
+  const locked = !!run && (isRunActive(run.phase) || run.positioning.active);
+  const commit = useCallback<Commit>((edit, label) => locked ? RUN_LOCKED : session.commit(edit, label), [locked, session]);
+  const undo = useCallback(() => locked ? RUN_LOCKED : session.undo(), [locked, session]);
+  const redo = useCallback(() => locked ? RUN_LOCKED : session.redo(), [locked, session]);
+
   return {
-    project, activeMap, activeMapId, loadError, setActiveMap: session.setActiveMap, commit: session.commit,
-    undo: session.undo, redo: session.redo, canUndo, canRedo, saveState, history, reload,
+    project, activeMap, activeMapId, loadError, setActiveMap: session.setActiveMap, commit, locked,
+    undo, redo, canUndo, canRedo, saveState, history, reload,
   };
 }

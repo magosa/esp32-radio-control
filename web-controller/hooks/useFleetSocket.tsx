@@ -12,10 +12,12 @@ import type {
   PoseStateMessage,
   RobotState,
   RouteStatusMessage,
+  SceneRunStateMessage,
   VehicleMode,
   VehicleState,
 } from "@/fleet/protocol";
 import type { ExhibitCommand, ExhibitSession } from "@/scene/exhibitSession";
+import type { RunCommand } from "@/scene/runTypes";
 
 export type FleetConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
@@ -60,6 +62,9 @@ function useFleetSocketConnection() {
   const [fieldSave, setFieldSave] = useState<PendingOperation | null>(null);
   const [exhibit, setExhibit] = useState<ExhibitView | null>(null);
   const [exhibitOp, setExhibitOp] = useState<PendingOperation | null>(null);
+  const [runState, setRunState] = useState<SceneRunStateMessage | null>(null);
+  const [runOp, setRunOp] = useState<PendingOperation | null>(null);
+  const [settingsOp, setSettingsOp] = useState<(PendingOperation & { robotId: string }) | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const assignmentSequence = useRef(0);
 
@@ -89,6 +94,7 @@ function useFleetSocketConnection() {
         setExhibitOp((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。状態を確認してください" } : previous);
         setExhibit(null);
         setPoseState(null);
+        setRunState(null);
         reconnectTimer = setTimeout(connect, 2000);
       };
       ws.onerror = () => { if (!disposed) setStatus("error"); };
@@ -111,8 +117,14 @@ function useFleetSocketConnection() {
           ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "保存に失敗しました" } : previous);
         setExhibitOp((previous) => previous?.requestId === msg.requestId
           ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "展示の操作に失敗しました" } : previous);
+        setRunOp((previous) => previous?.requestId === msg.requestId
+          ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "操作に失敗しました" } : previous);
+        setSettingsOp((previous) => previous?.requestId === msg.requestId
+          ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "保存に失敗しました" } : previous);
       } else if (msg.type === "exhibitState") {
         setExhibit({ session: msg.session, offsetMs: msg.serverNow - Date.now() });
+      } else if (msg.type === "sceneRunState") {
+        setRunState(msg);
       } else if (msg.type === "poseState") {
         setPoseState(msg);
       } else if (msg.type === "routeStatus") {
@@ -202,6 +214,18 @@ function useFleetSocketConnection() {
     setExhibitOp({ requestId, pending: sent, error: sent ? undefined : "ハブ未接続" });
   }, [send]);
 
+  const saveRobotSettings = useCallback((robotId: string, priority: number | null, footprintMm?: { w: number; d: number }) => {
+    const requestId = `${Date.now()}-${++assignmentSequence.current}`;
+    const sent = send({ type: "setRobotSettings", requestId, robotId, priority, footprintMm });
+    setSettingsOp({ requestId, robotId, pending: sent, error: sent ? undefined : "ハブ未接続" });
+  }, [send]);
+
+  const sendRun = useCallback((command: RunCommand) => {
+    const requestId = `${Date.now()}-${++assignmentSequence.current}`;
+    const sent = send({ type: "sceneRunCommand", requestId, command });
+    setRunOp({ requestId, pending: sent, error: sent ? undefined : "ハブ未接続" });
+  }, [send]);
+
   const sendCommand = useCallback(
     (targetDeviceIds: string[] | "all", cmd: DriveCommand, speedL: number, speedR: number) => {
       send({ type: "clientCommand", targetDeviceIds, cmd, speedL, speedR });
@@ -285,6 +309,11 @@ function useFleetSocketConnection() {
     exhibit,
     exhibitOp,
     sendExhibit,
+    runState,
+    runOp,
+    sendRun,
+    settingsOp,
+    saveRobotSettings,
     routeStatus,
     availableRoutes,
     images,

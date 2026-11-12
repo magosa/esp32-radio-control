@@ -46,6 +46,9 @@ test("the editor draws notices full width, and cues never intercept the pointer"
   const bar = cue(page, "notice").locator("rect");
   const svg = stage(page).locator("svg[role=img]");
   const [barBox, svgBox] = [(await bar.boundingBox())!, (await svg.boundingBox())!];
-  expect(barBox.width).toBeGreaterThan(svgBox.width * 0.9);
+  // The fit-sized map is letterboxed inside the svg, so compare with the width the map is actually drawn at.
+  const [, , vbW, vbH] = (await svg.getAttribute("viewBox"))!.split(/\s+/).map(Number);
+  const drawnWidth = Math.min(svgBox.width, svgBox.height * (vbW / vbH));
+  expect(barBox.width).toBeGreaterThan(drawnWidth * 0.9);
   await expect(cue(page, "zone")).toHaveAttribute("pointer-events", "none");
 });

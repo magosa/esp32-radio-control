@@ -2,6 +2,7 @@
 
 import { Bot, DoorOpen, Maximize2, Monitor, User } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import { compilePlan, samplePlan, type ActionState } from "@/scene/timedPlan";
 import {
   addProblem, addRequest, barStatus, moveOffset, previewDrop, rangeIds, resizeOffset, KEY_RESIZE_STEP_S, MAX_RUN_S, MIN_RESIZE_S,
@@ -22,6 +23,8 @@ import { TrackPalette } from "./TrackPalette";
 
 export interface TimelineCardProps extends EditorShared {
   playback: PlaybackControls;
+  // Where the row and action palette is drawn (the page's right column). Nothing is drawn until it exists.
+  paletteSlot: HTMLElement | null;
 }
 
 const LABEL_W = 232;
@@ -29,6 +32,7 @@ const LANE_TAIL_PX = 160;
 const TAP_MS = 400;
 const ICONS = { robot: Bot, human: User, room: DoorOpen, display: Monitor } as const;
 const LOCKED = "この行はロックされています。";
+const KEY_HINT = "バーはドラッグで移動、右端の取っ手で長さを変更。Shift で他のバーの端に吸着。Ctrl/⌘ で追加選択、Shift で行内を範囲選択。レーンのダブルクリック（タッチはダブルタップ）、または動作ボタンのドラッグで動作を追加。";
 
 interface DragView {
   kind: "move" | "resize";
@@ -395,7 +399,6 @@ export function TimelineCard(props: TimelineCardProps) {
   return <section className={`${consoleStyles.preferenceCard} ${styles.timelineCard} ${timeline.root}`} aria-label="時間軸">
     <div className={timeline.header}>
       <h2>時間軸</h2>
-      <span className={timeline.count}>{map.tracks.length} TRACKS</span>
       <div className={timeline.toolbar} role="toolbar" aria-label="時間軸の表示">
         <label className={timeline.zoom}>
           <span>ズーム <output>{px}px/秒</output></span>
@@ -409,14 +412,10 @@ export function TimelineCard(props: TimelineCardProps) {
         </div>
       </div>
     </div>
-    <TrackPalette track={selectedTrack} selectedBlocks={selection.blocks.length} onAddTrack={onAddTrack} onAddAction={onAddAction}
+    {props.paletteSlot && createPortal(<TrackPalette track={selectedTrack} selectedBlocks={selection.blocks.length} onAddTrack={onAddTrack} onAddAction={onAddAction}
       onMoveTrack={(direction) => { if (selectedTrack) run((m) => moveTrackBy(m, selectedTrack.id, direction), "行の並べ替え"); }}
       onDeleteTrack={askDeleteTrack} onDeleteActions={() => askDeleteActions()}
-      onDragType={(type) => { paletteType.current = type; if (!type) setDrop(null); }} />
-    <p className={timeline.hint}>
-      バーはドラッグで移動、右端の取っ手で長さを変更。Shift を押しながらで他のバーの端に吸着。Ctrl/⌘ で追加選択、Shift で行内を範囲選択。
-      レーンのダブルクリック（タッチはダブルタップ）、または動作ボタンのドラッグで動作を追加。
-    </p>
+      onDragType={(type) => { paletteType.current = type; if (!type) setDrop(null); }} />, props.paletteSlot)}
     {message && <p className={timeline.alert} role="alert">{message}</p>}
     <div ref={scroller} className={timeline.scroller} role="region" aria-label="時間軸のスクロール領域" tabIndex={0}>
       <div className={timeline.canvas} style={{ width: LABEL_W + laneWidth, ["--px" as string]: `${px}px` }}>
@@ -431,7 +430,7 @@ export function TimelineCard(props: TimelineCardProps) {
               aria-valuetext={`${playback.time.toFixed(1)}秒`} style={{ left: playheadLeft }} onKeyDown={onKnobKey} />
           </div>
         </div>
-        {map.tracks.length === 0 && <p className={timeline.empty}>行がありません。上の「＋ ロボット」などで追加してください。</p>}
+        {map.tracks.length === 0 && <p className={timeline.empty}>行がありません。右の「行と動作を追加」から追加してください。</p>}
         {map.tracks.map((track, index) => {
           const Icon = ICONS[track.kind];
           const isSelected = selection.trackId === track.id;
@@ -490,6 +489,7 @@ export function TimelineCard(props: TimelineCardProps) {
         </div>}
       </div>
     </div>
+    <p className={timeline.hint} data-part="keys" title={KEY_HINT}>{KEY_HINT}</p>
     {warnings > 0 && <details className={timeline.notes}>
       <summary>計画の確認 · 警告 {analysis.warnings.length} 件 / エラー {analysis.errors.length} 件</summary>
       <ul>

@@ -22,6 +22,10 @@ export interface RobotDefinition {
   markerId: number | null;
   // 走行面からマーカー印刷面までの高さ(mm)。高さ補正に使う。
   markerHeightMm: number;
+  // シーン実行で道を譲る順(小さいほど優先、null は後ろ)。
+  priority?: number | null;
+  // 上から見た外形(mm, 60〜80)。表示と記録だけに使い、安全判定の半径は全台60mm固定。
+  footprintMm?: { w: number; d: number };
 }
 
 // ロボット顔の表情ID (esp32_rc_car.ino の enum ExpressionId と同期させること)
@@ -236,9 +240,12 @@ export type ClientInboundMessage =
   | ClientDisplayLayoutRequestMessage
   | { type: "assignCamera"; requestId: string; robotId: string; cameraDeviceId: string | null }
   | { type: "assignMarker"; requestId: string; robotId: string; markerId: number | null; markerHeightMm?: number }
+  | { type: "setRobotSettings"; requestId: string; robotId: string; priority: number | null; footprintMm?: { w: number; d: number } }
   | { type: "setFieldConfig"; requestId: string; config: FieldConfig }
   // 展示画面へ配信するシーンと時刻の操作。command の検証は Hub が行う。
-  | { type: "exhibitCommand"; requestId: string; command: unknown };
+  | { type: "exhibitCommand"; requestId: string; command: unknown }
+  // シーン実行の操作。command の検証は Hub が行う。
+  | { type: "sceneRunCommand"; requestId: string; command: unknown };
 
 // ---- Server -> 操作UI ----
 
@@ -270,7 +277,14 @@ export interface OperationResultMessage {
 }
 
 export type ClientOutboundMessage = FleetStateMessage | RouteStatusMessage | ImageFrameBroadcastMessage | OperationResultMessage | PoseStateMessage
-  | ExhibitStateMessage;
+  | ExhibitStateMessage | SceneRunStateMessage;
+
+// 終了(完了・中止)したときだけ result が入る。
+export interface SceneRunStateMessage {
+  type: "sceneRunState";
+  state: import("../scene/runTypes").RunSnapshot;
+  result: import("../scene/runTypes").RunResultFile | null;
+}
 
 // serverNow は送信時の Hub の時計(ms)。別PCの展示画面が自分の時計との差を求めるのに使う。
 export interface ExhibitStateMessage {

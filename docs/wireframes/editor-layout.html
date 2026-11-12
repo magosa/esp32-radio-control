@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>エディター画面: 参照システムとの比較と整合案（確認用ワイヤーフレーム）</title>
+<style>
+  :root { --ink:#222; --mute:#666; --line:#9aa3a0; --fill:#eef1ef; --fill2:#dfe5e2; --warn:#c2410c; --ok:#15803d; --info:#1d4ed8; --bad:#b91c1c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; background: #fff; color: var(--ink); font: 14px/1.5 "Yu Gothic UI", "Meiryo", sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 32px 0 8px; }
+  .lead { color: var(--mute); max-width: 1100px; margin: 0 0 12px; }
+  .board { position: relative; border: 2px solid var(--ink); background: #fff; padding: 10px; margin-bottom: 8px; }
+  .w1280 { width: 1280px; } .w768 { width: 768px; }
+  .box { border: 1px dashed var(--line); background: var(--fill); padding: 6px 8px; position: relative; }
+  .box > h3 { margin: 0 0 4px; font-size: 12px; }
+  .bar { border: 1px dashed var(--line); background: var(--fill2); padding: 3px 8px; margin-bottom: 6px; font-size: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .bar b { flex: 0 0 auto; } .grow { flex: 1; }
+  .btn { display: inline-block; padding: 1px 8px; border: 1.5px solid var(--ink); background: #fff; font-weight: 700; font-size: 12px; }
+  .btn.off { color: #999; border-color: #bbb; border-style: dashed; font-weight: 400; } .btn.new { border-color: var(--ok); color: var(--ok); }
+  .small { font-size: 12px; color: var(--mute); }
+  .map { background: repeating-linear-gradient(0deg, transparent 0 19px, #d3dad7 19px 20px), repeating-linear-gradient(90deg, transparent 0 19px, #d3dad7 19px 20px), #f7f9f8; border: 1.5px solid var(--ink); display: flex; align-items: center; justify-content: center; color: var(--mute); }
+  .lane { height: 22px; border: 1px solid var(--line); background: #fff; margin: 3px 0; position: relative; }
+  .lane i { position: absolute; top: 2px; height: 16px; border: 1.5px solid #555; background: var(--fill2); font-size: 10px; font-style: normal; padding: 0 3px; }
+  .shell { display: grid; gap: 8px; }
+  .n { position: absolute; top: -10px; left: -10px; z-index: 5; width: 22px; height: 22px; border-radius: 50%; background: var(--bad); color: #fff; font: 700 12px/22px sans-serif; text-align: center; font-style: normal; }
+  table { border-collapse: collapse; width: 100%; background: #fff; }
+  th, td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--fill2); }
+  .ok { color: var(--ok); font-weight: 700; } .ng { color: var(--bad); font-weight: 700; } .wn { color: var(--warn); font-weight: 700; }
+  .note { border-left: 4px solid var(--warn); background: #fff7ed; padding: 6px 10px; margin: 8px 0; max-width: 1100px; }
+  .legend { max-width: 1280px; padding-left: 20px; } .legend li { margin: 3px 0; }
+  .cap { font-weight: 700; margin: 18px 0 4px; }
+</style>
+</head>
+<body>
+<h1>エディター画面（/scenes）: 参照システムとのズレと整合案</h1>
+<p class="lead">参照システム（minirobo-editor）を実際に起動して画面を比べた結果です（比較用の撮影は <code>docs/wireframes/ref/</code>、未追跡）。以下は低忠実度の図で、色・余白・文字は実装時に既存画面（ガラス調・ライト/ダーク・5配色）に合わせます。<b>実装はまだ行っていません。</b></p>
+<div class="note"><b>確認できた事実:</b> 参照システムは「1画面に収まる3カラムの作業台」（左=ライブラリ、中央=ステージ＋タイムライン、右=コントロール）です。現行のエディターは「縦に積んだ画面」で、1600px幅でも約2000pxの縦スクロールが必要です。S2 で決めたのは<b>見た目（ガラス調）と対応幅（768px以上）</b>だけで、<b>画面の構成は参照システムに合わせる指示</b>を明確にしないまま作ってしまいました。</div>
+
+<h2>E1　参照システムの構成（1600×1000 で撮影）</h2>
+<div class="board w1280" id="e1">
+  <div class="bar"><b>トップバー</b>ブランド　｜　Compose / Preview &amp; simulate　｜　SIMULATION ONLY　｜　デモ2つ・開く・プロジェクト保存</div>
+  <div class="bar"><b>プロジェクトバー</b>名前・保存状態　｜　元に戻す/やり直す・編集履歴・新規・<b>長さ(秒)</b></div>
+  <div class="bar"><b>マップバー</b>マップのタブ　＋シーケンス　テストシナリオ集　マップを編集　名前を変更　マップを削除</div>
+  <div style="display:grid;grid-template-columns:196px 1fr 300px;gap:8px;height:430px">
+    <div class="box"><h3>左: プロジェクト（ASSETS）</h3>
+      <div class="box" style="background:#fff">FLOOR PLAN<br>「マップを編集する」カード</div>
+      <div class="box" style="background:#fff;margin-top:4px">ROOMS &amp; ZONES　＋<br>・Entrance Hall<br>・Z Corridor<br>・Meeting Room 1<br>（クリックで該当の行へ）</div>
+      <div class="box" style="background:#fff;margin-top:4px">SCENE OBJECTS<br>・人間・会議参加者（5人）<br>・Security Robot · ID0<br>・Cleaning Robot · ID1</div></div>
+    <div class="shell" style="grid-template-rows: 1fr 190px">
+      <div class="box"><h3>ステージ　[パス] [グリッド] [全体表示] [倍率]</h3><div class="map" style="height:150px">マップ（座標表示・軸ラベル）</div>
+        <div class="bar" style="margin:4px 0 0">00:00.00　｜◀　‹　▶　›　⟳　　1×　展示モード　全画面</div></div>
+      <div class="box"><h3>シーケンス　[旋回を配置] [スナップ] [ズーム] [全体]　／　選択ツール（開始をずらす・長さ調整…）</h3>
+        <div style="display:grid;grid-template-columns:120px 1fr;gap:6px"><div class="small">トラック見出し<br>（除外/固定）</div><div><div class="lane"><i style="left:5%;width:12%">1.</i><i style="left:25%;width:10%">2.</i></div><div class="lane"><i style="left:20%;width:15%">1.</i></div></div></div></div>
+    </div>
+    <div class="box"><h3>右: コントロール（INSPECTOR）</h3>
+      <div class="box" style="background:#fff">ADD TO SEQUENCE<br>[ロボット][人間グループ][部屋][表示・イベント]</div>
+      <div class="box" style="background:#fff;margin-top:4px">動作のパレット（行・マップへドラッグ）<br>移動／表示／表示を消去／イベント発生／終了／ドア解錠／待機<br>＋選択中と同種の行を追加</div>
+      <div class="box" style="background:#fff;margin-top:4px">SELECTION（選択中の内容・警告）</div></div>
+  </div>
+  <div class="bar" style="margin-top:6px"><b>ステータスバー</b>通知　｜　履歴の接続状態　｜　保存先</div>
+  <div class="small">画面全体の高さに収まり、ページ自体はスクロールしません。幅1700px以上は左220/右320、1200px以下は左168/右256、960px以下は左を隠して右260。</div>
+</div>
+
+<h2>E2　現行（fleet 版）の構成（1600×1000 で撮影、縦に約2000px）</h2>
+<div class="board w1280" id="e2">
+  <div class="bar"><b>ヘッダー</b>フリートのナビ（制御・フロア・…・全台停止）</div>
+  <div class="bar"><b>プロジェクトバー</b>名前・保存状態・元に戻す/やり直す・履歴・JSON</div>
+  <div class="bar"><b>マップのタブ</b>タブ・追加・複製・名前変更・削除</div>
+  <div style="display:grid;grid-template-columns:1fr 340px;gap:8px">
+    <div class="box"><h3>マップ（大きい）</h3><div class="map" style="height:230px">マップ</div>
+      <div class="bar" style="margin:4px 0 0">再生バー（再生・先頭・ループ・速度・時刻）　グリッド　マップを編集</div>
+      <div class="bar" style="margin:4px 0 0">展示パネル（S4）</div></div>
+    <div class="box"><h3>設定（インスペクター。選択がなければ空）</h3><div class="small">行/動作を選ぶと内容を表示</div></div>
+  </div>
+  <div class="box" style="margin-top:8px"><h3>時間軸（画面の下。ここまで縦スクロール）</h3>
+    <div class="bar" style="margin:0 0 4px">ズーム・全体表示・スナップ0.1/0.5秒　｜　行の追加ボタン（ロボット/人/部屋/表示）・動作ボタン・行の上下/削除</div>
+    <div style="display:grid;grid-template-columns:200px 1fr;gap:6px"><div class="small">行見出し（除外/固定）</div><div><div class="lane"><i style="left:5%;width:12%">移動A</i></div><div class="lane"><i style="left:20%;width:15%">歩く</i></div></div></div></div>
+  <div class="small" style="margin-top:6px">左のライブラリ、ステータスバー、座標表示、前/次の編集点、パス表示の切替、「旋回を配置」は<b>ありません</b>。</div>
+</div>
+
+<h2>E3　整合案（参照システムの構成 ＋ fleet のガラス調の見た目）　1280px 以上</h2>
+<div class="board w1280" id="e3">
+  <div class="bar"><b>ヘッダー</b>フリートのナビ（共通）</div>
+  <div class="bar"><b>プロジェクトバー</b>名前・保存状態・元に戻す/やり直す・履歴・JSON　<span class="btn new">新規（任意）</span></div>
+  <div class="bar"><b>マップのタブ</b>タブ・＋・複製・名前変更・削除　<span class="btn">マップを編集</span></div>
+  <div style="display:grid;grid-template-columns:200px 1fr 300px;gap:8px;height:470px">
+    <div class="box"><i class="n">1</i><h3>左: ライブラリ（新規）</h3>
+      <div class="box" style="background:#fff">マップ<br>名前・グリッド・部屋数<br><span class="btn">マップを編集</span></div>
+      <div class="box" style="background:#fff;margin-top:4px">部屋と領域（一覧）<br>クリック＝その部屋の行を選択</div>
+      <div class="box" style="background:#fff;margin-top:4px">シーン内のオブジェクト<br>ロボット/人/…（クリック＝行を選択）</div></div>
+    <div class="shell" style="grid-template-rows: 1fr 200px">
+      <div class="box"><i class="n">2</i><h3>ステージ　<span class="btn new">パス</span> <span class="btn">グリッド</span> <span class="btn">全体表示</span> <span class="btn">展示 ▾</span> <span class="btn">実行画面を開く ▸</span></h3>
+        <div class="map" style="height:160px">マップ（カーソル座標・軸ラベル）</div>
+        <div class="bar" style="margin:4px 0 0">0:00.0　｜◀　<span class="btn new">‹ 前の編集点</span>　▶　<span class="btn new">次の編集点 ›</span>　⟳　速度　全画面プレビュー</div></div>
+      <div class="box"><i class="n">3</i><h3>時間軸　<span class="btn new">旋回を配置</span> <span class="btn">スナップ</span> <span class="btn">ズーム</span> <span class="btn">全体</span></h3>
+        <div style="display:grid;grid-template-columns:150px 1fr;gap:6px"><div class="small">行見出し＋行の＋</div><div><div class="lane"><i style="left:5%;width:12%">移動A</i></div><div class="lane"><i style="left:20%;width:15%">歩く</i></div></div></div></div>
+    </div>
+    <div class="box"><i class="n">4</i><h3>右: コントロール</h3>
+      <div class="box" style="background:#fff">行を追加　[ロボット][人間][部屋][表示]</div>
+      <div class="box" style="background:#fff;margin-top:4px">動作のパレット（ドラッグで配置）<br><span class="btn new">選択中と同種の行を追加</span></div>
+      <div class="box" style="background:#fff;margin-top:4px">選択中（現行のインスペクターを移す）</div></div>
+  </div>
+  <div class="bar" style="margin-top:6px"><i class="n" style="left:auto;right:-10px">5</i><b>ステータスバー（新規）</b>通知（直前の操作の結果）　｜　保存状態　｜　実行中の帯（S5）</div>
+  <div class="small">緑の枠＝現行にない追加。画面全体が1画面に収まり、ページはスクロールしません（時間軸は内側でスクロール）。展示（S4）と実行画面への導線は、ステージ見出しの「展示 ▾」「実行画面を開く」に集約します。</div>
+</div>
+<ol class="legend">
+  <li><b>1 左ライブラリ</b>: 参照システムの「プロジェクト」に相当。部屋・オブジェクトの一覧から行へ移動できる。</li>
+  <li><b>2 ステージ</b>: パス表示の切替、カーソル座標、前/次の編集点を追加。現行の展示パネルは「展示 ▾」に畳む。</li>
+  <li><b>3 時間軸</b>: 現行の時間軸の操作はそのまま。上流にある「旋回を配置」を追加。</li>
+  <li><b>4 右コントロール</b>: 現行は時間軸の上に並んでいる「行の追加・動作ボタン」を右カラムへ移す。選択中の内容も右カラムへ。</li>
+  <li><b>5 ステータスバー</b>: 操作の結果の通知（現行は時間軸内のメッセージ）と、S5 の「実行中」の帯。</li>
+</ol>
+
+<h2>E4　768px（タブレット）</h2>
+<div class="board w768" id="e4">
+  <div class="bar"><b>ヘッダー／プロジェクトバー／マップのタブ</b>（現行どおり。折り返し）</div>
+  <div style="display:grid;grid-template-columns:1fr 240px;gap:8px;height:360px">
+    <div class="shell" style="grid-template-rows: 1fr 150px">
+      <div class="box"><h3>ステージ　<span class="btn">ライブラリ ▾</span>（左カラムはドロワーへ）</h3><div class="map" style="height:120px">マップ</div><div class="bar" style="margin:4px 0 0">再生バー</div></div>
+      <div class="box"><h3>時間軸</h3><div class="lane"><i style="left:5%;width:20%">移動A</i></div></div></div>
+    <div class="box"><h3>右: コントロール</h3><div class="small">行の追加・パレット・選択中</div></div>
+  </div>
+  <div class="small">参照システムも 960px 以下で左カラムを隠します。ページ全体のスクロールは避け、時間軸と右カラムは内側でスクロール。</div>
+</div>
+
+<h2>E5　機能の洗い出し（参照システムの全操作と、現行との差）</h2>
+<div class="note"><b>読み方:</b> 参照システムの画面と、操作の定義（<code>app.js</code> のクリック・ドラッグ・キー操作の約130か所）を1つずつ確認し、現行にあるか調べました。「提案」の既定は、<b>設計書で対象外のものを除いてすべて取り込む</b>です。外したい項目があれば、番号（例: F16）だけ教えてください。何も言われない項目は、提案どおり進めます。<br>記号: <span class="ok">○</span>=現行にある　<span class="wn">△</span>=一部ある　<span class="ng">×</span>=ない</div>
+<div class="board w1280" id="e5">
+  <table>
+    <tr><th style="width:44px">番号</th><th style="width:300px">参照システムの機能</th><th style="width:60px">現行</th><th style="width:150px">提案</th><th>補足</th></tr>
+    <tr><th colspan="5">全体の構成</th></tr>
+    <tr><td>F1</td><td>3カラム（左ライブラリ／中央ステージ＋時間軸／右コントロール）で、1画面に収まる</td><td class="ng">×</td><td class="ok">合わせる</td><td>E3 のとおり</td></tr>
+    <tr><td>F2</td><td>ステータスバー（操作の結果の通知・履歴の状態・保存先）</td><td class="ng">×</td><td class="ok">追加</td><td>現行は結果を時間軸内の小さな欄に出している</td></tr>
+    <tr><td>F3</td><td>トップバー（ブランド、Compose / Preview 切替、「SIMULATION ONLY」バッジ、デモ呼び出し）</td><td class="ng">×</td><td>移植しない</td><td>fleet の共通ヘッダーを使う。実機を動かす機能が増えるので「シミュレーションのみ」の常時表示は誤解のもと</td></tr>
+    <tr><td>F4</td><td>プロジェクトバー: 新規プロジェクト（置き換えの確認つき）</td><td class="ng">×</td><td class="ok">追加</td><td>「長さ(秒)」の入力は追加しない（動作の終了時刻から自動で決まるため）</td></tr>
+    <tr><td>F5</td><td>キー操作: Space=再生/一時停止、Delete=選択を削除、Ctrl+D=動作の複製、Ctrl+S=保存（JSON）、Ctrl+Z/Shift+Z=取り消し/やり直し</td><td class="wn">△</td><td class="ok">不足分を追加</td><td>現行は取り消し/やり直しと、バー上の Delete だけ</td></tr>
+    <tr><td>F6</td><td>タブが隠れたら再生を一時停止</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><th colspan="5">左ライブラリ</th></tr>
+    <tr><td>F7</td><td>マップの情報カード（名前・グリッド・部屋数）と「マップを編集」</td><td class="wn">△</td><td class="ok">追加</td><td>現行は「マップを編集」ボタンだけ</td></tr>
+    <tr><td>F8</td><td>部屋と領域の一覧（クリックで選択）</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F9</td><td>シーン内のオブジェクトの一覧（クリックでその行を選択）</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F10</td><td>背景画像の濃度・取り除く</td><td class="ng">×</td><td>移植しない</td><td>現行のマップは背景画像を持たない（S1 で対象外）</td></tr>
+    <tr><th colspan="5">ステージ（地図）</th></tr>
+    <tr><td>F11</td><td>パス（予定の経路）の表示/非表示</td><td class="ng">×</td><td class="ok">追加</td><td>現行は常に表示</td></tr>
+    <tr><td>F12</td><td>カーソルの座標表示（X, Y）と軸ラベル</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F13</td><td>ロボット/人をクリック → その行を選択</td><td class="ng">×</td><td class="ok">追加</td><td>現行は部屋のクリックだけ</td></tr>
+    <tr><td>F14</td><td>ステージ上の動作の印（移動先の目印）をクリック → その動作の編集を開く</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F15</td><td>ステージ上の表示・イベントをクリック → 対応する動作を選択</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F16</td><td>ロボットをダブルクリック → シーケンス一括設定を開く</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F17</td><td>動作ボタンをステージへドラッグ → ドロップした位置で追加ダイアログ</td><td class="ng">×</td><td class="ok">追加</td><td>タッチはダブルタップ等の代替を用意</td></tr>
+    <tr><td>F18</td><td>選択中の人/ロボット/部屋を、ステージ上で枠でハイライト</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><th colspan="5">再生</th></tr>
+    <tr><td>F19</td><td>再生/一時停止/先頭/ループ/速度/シーク/全画面</td><td class="ok">○</td><td>そのまま</td><td></td></tr>
+    <tr><td>F20</td><td>前の編集点／次の編集点（バーの開始・終了時刻へ飛ぶ）</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F21</td><td>展示モード</td><td class="ok">○</td><td>そのまま</td><td>S4 の別画面（/exhibit）。ステージ見出しの「展示 ▾」から操作</td></tr>
+    <tr><th colspan="5">時間軸</th></tr>
+    <tr><td>F22</td><td>バーの移動・長さ変更・スナップ・複数選択・行の追加/並べ替え/除外/固定・動作ボタンのドラッグ追加・ルーラーでシーク・ズーム</td><td class="ok">○</td><td>そのまま</td><td>S2c で実装・ブラウザーテスト済み</td></tr>
+    <tr><td>F23</td><td>旋回を配置（全マップに向き変更バーを追加）</td><td class="ng">×</td><td class="ok">追加</td><td>計算の関数は実装済み。画面がない</td></tr>
+    <tr><td>F24</td><td>選択ツール（選んだバーをまとめて開始をずらす/長さ調整/解除）</td><td class="ok">○</td><td>そのまま</td><td>右カラムの「選択中」に表示</td></tr>
+    <tr><td>F25</td><td>選択中と同種の行を追加</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F26</td><td>ロボットの行を追加すると、続けてシーケンス一括設定が開く</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F27</td><td>時間軸の下のキー操作の案内</td><td class="ng">×</td><td class="ok">追加（小）</td><td></td></tr>
+    <tr><th colspan="5">右コントロール</th></tr>
+    <tr><td>F28</td><td>行の追加・動作のパレット・選択中の編集（部屋/行/動作）</td><td class="ok">○</td><td>右カラムへ集約</td><td>機能は現行のまま。置き場所だけ移す</td></tr>
+    <tr><td>F29</td><td>安全の警告の一覧</td><td class="wn">△</td><td class="ok">追加</td><td>現行は件数と計画エラーの1行</td></tr>
+    <tr><td>F30</td><td>扉の確認モード（ストーリー確認／連携確認）の切替</td><td class="ng">×</td><td class="ok">追加</td><td>モデルにはあるが画面がない</td></tr>
+    <tr><th colspan="5">移植しないもの・後続</th></tr>
+    <tr><td>F31</td><td>連携用JSON／フリート連携セットの保存／デモ追加／時間軸実行へ切替（順序実行）</td><td class="ng">×</td><td>移植しない</td><td>設計書で対象外（外部連携・旧互換）</td></tr>
+    <tr><td>F32</td><td>テストシナリオ集・最新テストマップ・オフィステスト</td><td class="ng">×</td><td>S3 で</td><td>16シナリオの移植と一緒に</td></tr>
+  </table>
+</div>
+
+<h2>お答えします: 「E5 の『追加』の過不足は何を指すか」</h2>
+<p class="lead">前回の表現が分かりにくく失礼しました。意味は「参照システムにあって、現行にない機能のうち、私が『足す』と書いたものが、多すぎたり足りなかったりしないか」です。今回、参照システムの操作を1つずつ調べて上の F1〜F32 に直したので、「過不足」を考えていただく必要はありません。<b>提案どおりでよければ返答は不要で、外したいものだけ番号で教えてください。</b></p>
+
+<h2>決まったこと</h2>
+<ol class="legend">
+  <li>画面の構成は、参照システムと同じ3カラム・1画面にする（E3）。縦積みは廃止する。見た目は fleet のガラス調のまま。</li>
+  <li>実施の順: エディターの整合を <b>S5 より先</b>に行う。</li>
+  <li>機能: 上の F1〜F32 の提案どおり（外したいものだけ番号で指定）。</li>
+</ol>
+<div class="note"><b>次に進める手順:</b> ① この図と機能の一覧の承認 → ② 実装計画（タスクの順序・テスト・検証）の提示と承認 → ③ 実装。③では、既存のブラウザーテスト（<code>scenes-*</code> 50本超）を新しい配置に合わせて保ちます。</div>
+</body>
+</html>

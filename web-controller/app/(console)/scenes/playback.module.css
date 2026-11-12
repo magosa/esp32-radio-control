@@ -1,12 +1,14 @@
-.bar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
-.bar button { min-height: 44px; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.bar button { min-height: 44px; padding-inline: 10px; }
+.bar .iconOnly svg { margin-right: 0; }
 .bar button svg { width: 18px; height: 18px; margin-right: 6px; vertical-align: -3px; }
 .bar button:focus-visible, .bar select:focus-visible, .bar input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .toggle[aria-pressed="true"] { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: -2px; font-weight: 600; }
-.speed { display: grid; gap: 4px; color: var(--muted); font-size: var(--text-meta); }
+.speed { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--text-meta); }
 .speed select { min-height: 44px; padding: 0 10px; color: var(--ink); background: var(--glass-input); border: 1px solid var(--line); border-radius: 6px; font-size: var(--text-body); }
-.seek { display: grid; flex: 1 1 260px; gap: 4px; color: var(--muted); font-size: var(--text-meta); }
-.seek input[type="range"] { width: 100%; min-height: 44px; margin: 0; background: transparent; border-radius: 4px; }
+.seek { display: flex; align-items: center; flex: 1 1 170px; gap: 8px; color: var(--muted); font-size: var(--text-meta); }
+.seek > span { white-space: nowrap; }
+.seek input[type="range"] { flex: 1 1 auto; min-width: 80px; min-height: 44px; margin: 0; background: transparent; border-radius: 4px; }
 .seek input[type="range"]::-webkit-slider-runnable-track { height: 6px; background: var(--track); border-radius: 4px; }
 .seek input[type="range"]::-webkit-slider-thumb { width: 24px; height: 24px; margin-top: -9px; background: var(--accent); box-shadow: none; border: 2px solid var(--thumb-border); }
 .seek input[type="range"]::-moz-range-track { height: 6px; background: var(--track); border-radius: 4px; }

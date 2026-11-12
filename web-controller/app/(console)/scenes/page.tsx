@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { roomContainsPoint } from "@/scene/floorPlan";
 import { EMPTY_SELECTION, pruneSelection, type SceneSelection } from "@/scene/sceneSelection";
 import { compilePlan } from "@/scene/timedPlan";
@@ -13,6 +14,7 @@ import { CoordinatePicker } from "./CoordinatePicker";
 import type { ActionEditRequest, EditMap, PickRequest } from "./editorTypes";
 import { ExhibitControls } from "./ExhibitControls";
 import { Inspector } from "./Inspector";
+import { LibraryPanel } from "./LibraryPanel";
 import { MapEditorDialog } from "./MapEditorDialog";
 import { MapStage } from "./MapStage";
 import { MapTabs } from "./MapTabs";
@@ -20,8 +22,11 @@ import { PlaybackBar } from "./PlaybackBar";
 import { PreviewDialog } from "./PreviewDialog";
 import { ProjectBar } from "./ProjectBar";
 import { SequenceDialog } from "./SequenceDialog";
+import { StatusBar } from "./StatusBar";
 import { TimelineCard } from "./TimelineCard";
 import { useConfirm } from "./useConfirm";
+import { useFillViewport } from "./useFillViewport";
+import timeline from "./timeline.module.css";
 import styles from "./scenes.module.css";
 
 const MIN_WIDTH_PX = 768;
@@ -74,6 +79,13 @@ function Editor({ scene, project, map, mapId }: {
   const [selection, setSelection] = useState<SceneSelection>(EMPTY_SELECTION);
   const [actionRequest, setActionRequest] = useState<ActionEditRequest | null>(null);
   const [pickRequest, setPickRequest] = useState<PickRequest | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [exhibitOpen, setExhibitOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [paletteSlot, setPaletteSlot] = useState<HTMLElement | null>(null);
+  const [zoomSlot, setZoomSlot] = useState<HTMLElement | null>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const pageHeight = useFillViewport(pageRef);
   const { confirm, dialog: confirmDialog } = useConfirm();
   const duration = useMemo(() => compilePlan(map).duration, [map]);
   const playback = usePlayback(duration);
@@ -83,11 +95,15 @@ function Editor({ scene, project, map, mapId }: {
   useEffect(() => { setSelection(EMPTY_SELECTION); setActionRequest(null); setPickRequest(null); }, [mapId]);
 
   const { commit } = scene;
-  const edit = useCallback<EditMap>((change, label) => commit((draft) => {
-    const index = draft.maps.findIndex((item) => item.id === mapId);
-    if (index < 0) throw new Error("編集中のマップが見つかりません。");
-    draft.maps[index] = change(draft.maps[index]);
-  }, label), [commit, mapId]);
+  const edit = useCallback<EditMap>((change, label) => {
+    const reason = commit((draft) => {
+      const index = draft.maps.findIndex((item) => item.id === mapId);
+      if (index < 0) throw new Error("編集中のマップが見つかりません。");
+      draft.maps[index] = change(draft.maps[index]);
+    }, label);
+    if (reason === null) setNotice(`${label}（元に戻せます）`);
+    return reason;
+  }, [commit, mapId]);
 
   const pickRegion = useCallback((point: { x: number; y: number }) => {
     const room = map.rooms.find((item) => roomContainsPoint(item, point.x, point.y));
@@ -99,27 +115,55 @@ function Editor({ scene, project, map, mapId }: {
     requestAction: setActionRequest, requestPick: setPickRequest,
   };
   const actionTrack = actionRequest ? map.tracks.find((track) => track.id === actionRequest.trackId) : undefined;
+  const editMap = () => { setLibraryOpen(false); setMapEditing(true); };
 
-  return <div className={styles.page}>
-    <ProjectBar project={project} commit={scene.commit} undo={scene.undo} redo={scene.redo} canUndo={scene.canUndo}
+  return <div ref={pageRef} className={styles.page} style={{ height: pageHeight, ...(scene.locked ? { gridTemplateRows: "auto auto auto minmax(0, 1fr) auto" } : {}) }}>
+    {scene.locked && <p className={styles.runBanner} role="status">
+      シーンを実行中です。編集するには実行を終了してください（<Link href="/run">実行画面を開く ▸</Link>）
+    </p>}    <ProjectBar project={project} commit={scene.commit} undo={scene.undo} redo={scene.redo} canUndo={scene.canUndo}
       canRedo={scene.canRedo} saveState={scene.saveState} history={scene.history} reload={scene.reload} />
     <MapTabs project={project} activeMapId={mapId} onSelect={scene.setActiveMap} commit={scene.commit} />
     <div className={styles.workspace}>
-      <section className={`${consoleStyles.preferenceCard} ${styles.stageCard}`} aria-label="マップ">
-        <MapStage map={map} time={playback.time} showGrid={showGrid} gridMm={map.editGridMm} onPick={pickRegion} />
-        <div className={styles.stageControls}>
-          <PlaybackBar playback={playback} onFullscreen={() => setPreviewOpen(true)} />
-          <label className={styles.gridToggle}>
-            <input type="checkbox" checked={showGrid} onChange={(event) => setShowGrid(event.target.checked)} />
-            グリッド {map.editGridMm}mm
-          </label>
-          <button type="button" className={consoleStyles.secondary} onClick={() => setMapEditing(true)}>マップを編集</button>
-          <ExhibitControls map={map} duration={duration} />
-        </div>
-      </section>
-      <Inspector {...shared} playback={playback} onEditMap={() => setMapEditing(true)} />
+      <LibraryPanel className={styles.library} open={libraryOpen} map={map} selection={selection} onSelect={(next) => { setSelection(next); setLibraryOpen(false); }}
+        onEditMap={editMap} />
+      <div className={styles.center}>
+        <section className={`${consoleStyles.preferenceCard} ${styles.stageCard}`} aria-label="マップ">
+          <div className={styles.stageHead}>
+            <h2>ステージ</h2>
+            <button type="button" className={`${consoleStyles.secondary} ${styles.libraryOnly}`} aria-expanded={libraryOpen}
+              onClick={() => setLibraryOpen((open) => !open)}>ライブラリ</button>
+            <button type="button" className={`${consoleStyles.secondary} ${styles.libraryOnly}`} onClick={editMap}>マップを編集</button>
+            <label className={styles.gridToggle}>
+              <input type="checkbox" checked={showGrid} onChange={(event) => setShowGrid(event.target.checked)} />
+              グリッド {map.editGridMm}mm
+            </label>
+            <div ref={setZoomSlot} />
+            <span className={styles.spacer} />
+            <div className={styles.anchor}>
+              <button type="button" className={consoleStyles.secondary} aria-expanded={exhibitOpen} aria-haspopup="dialog"
+                onClick={() => setExhibitOpen((open) => !open)}>展示 ▾</button>
+              {exhibitOpen && <div className={styles.exhibitPopover}><ExhibitControls map={map} duration={duration} />
+                <p><Link href="/run">実行画面を開く ▸</Link></p></div>}
+            </div>
+          </div>
+          <div className={styles.stageBody}>
+            <MapStage map={map} time={playback.time} showGrid={showGrid} gridMm={map.editGridMm} onPick={pickRegion} toolbarSlot={zoomSlot} />
+          </div>
+          <div className={styles.stageControls}>
+            <PlaybackBar playback={playback} onFullscreen={() => setPreviewOpen(true)} />
+          </div>
+        </section>
+        <TimelineCard {...shared} playback={playback} paletteSlot={paletteSlot} />
+      </div>
+      <div className={styles.controls}>
+        <section className={`${consoleStyles.preferenceCard}`} aria-label="行と動作の追加">
+          <h2>行と動作を追加</h2>
+          <div ref={setPaletteSlot} className={timeline.paletteColumn} />
+        </section>
+        <Inspector {...shared} playback={playback} onEditMap={editMap} />
+      </div>
     </div>
-    <TimelineCard {...shared} playback={playback} />
+    <StatusBar notice={notice} map={map} />
     <MapEditorDialog map={map} open={mapEditing} onClose={() => setMapEditing(false)}
       onApply={(next) => edit(() => next, "マップの編集")} />
     {actionRequest && actionTrack?.kind === "robot" && (

@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bluetooth, Bot, Clapperboard, Gamepad2, Map as MapIcon, Radar, Settings2, Square, Wifi, WifiOff } from "lucide-react";
+import { Bluetooth, Bot, Clapperboard, Gamepad2, Map as MapIcon, Play, Radar, Settings2, Square, Wifi, WifiOff } from "lucide-react";
 import { FleetSocketProvider, useFleetSocket } from "@/hooks/useFleetSocket";
 import { LocalizerRuntimeProvider, useLocalizerRuntime } from "@/hooks/useLocalizerRuntime";
 import { useFleetAppearance } from "@/hooks/useFleetAppearance";
@@ -14,6 +14,7 @@ const NAV = [
   { href: "/field", label: "フロア", title: "フロアマップ", Icon: MapIcon },
   { href: "/robots", label: "ロボット", title: "ロボット構成", Icon: Bot },
   { href: "/scenes", label: "シーン", title: "シーンエディター", Icon: Clapperboard },
+  { href: "/run", label: "実行", title: "実行", Icon: Play },
   { href: "/localizer", label: "測位", title: "測位（俯瞰カメラ）", Icon: Radar },
   { href: "/settings", label: "表示設定", title: "表示設定", Icon: Settings2 },
   { href: "/direct/bluetooth", label: "Bluetooth", title: "Bluetooth", Icon: Bluetooth },
@@ -29,7 +30,7 @@ function ConsoleFrame({ children }: { children: ReactNode }) {
     disconnected: "ハブ未接続", error: "ハブ接続エラー" }[status];
   const current = NAV.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
 
-  return <main className={styles.fleet} data-theme={theme} data-motion={appearance.motion ? "on" : "off"} style={style}>
+  return <main className={styles.fleet} data-theme={theme} data-wide={pathname.startsWith("/scenes")} data-motion={appearance.motion ? "on" : "off"} style={style}>
     <header className={styles.header}>
       <div className={styles.brand}><h1>{current?.title ?? "フリート管理"}</h1>
         <span className={styles.connection} role="status">

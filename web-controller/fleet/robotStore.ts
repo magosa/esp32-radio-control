@@ -84,6 +84,17 @@ export class RobotStore {
     this.save(next);
   }
 
+  // priority は null で未設定に戻す。footprintMm 省略時は現在の外形を維持する。
+  setSettings(robotId: string, priority: number | null, footprintMm?: { w: number; d: number }): void {
+    const next = structuredClone(this.data);
+    const robot = next.robots.find((candidate) => candidate.robotId === robotId);
+    if (!robot) throw new Error("Robot not found");
+    robot.priority = priority;
+    if (footprintMm !== undefined) robot.footprintMm = footprintMm;
+    this.validateRobots(next);
+    this.save(next);
+  }
+
   private validateRobots(data: StoredFleet): void {
     const robotIds = new Set<string>();
     const driveIds = new Set<string>();
@@ -104,6 +115,11 @@ export class RobotStore {
       }
       if (robot.markerHeightMm !== undefined && !(Number.isFinite(robot.markerHeightMm)
         && robot.markerHeightMm > 0 && robot.markerHeightMm <= MAX_MARKER_HEIGHT_MM)) throw new Error("Invalid marker height");
+      if (robot.priority !== undefined && robot.priority !== null
+        && !(Number.isInteger(robot.priority) && robot.priority >= 1 && robot.priority <= 99)) throw new Error("Invalid priority");
+      if (robot.footprintMm !== undefined && !([robot.footprintMm.w, robot.footprintMm.d].every((v) => Number.isFinite(v) && v >= 60 && v <= 80))) {
+        throw new Error("Invalid footprint");
+      }
       if (robot.cameraDeviceId !== null) {
         if (typeof robot.cameraDeviceId !== "string" || cameraIds.has(robot.cameraDeviceId)
           || !data.devices.some((device) => device.deviceId === robot.cameraDeviceId && device.capabilities.includes("camera"))) {
