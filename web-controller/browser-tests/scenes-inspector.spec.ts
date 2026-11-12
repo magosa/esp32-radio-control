@@ -23,9 +23,15 @@ const readout = (bar: ReturnType<typeof pageBar>) => bar.locator("output");
 
 // Clicks a point of the page's map (mm, y up); the region under it becomes the selection.
 async function clickMap(page: Page, x: number, y: number) {
-  const box = await page.getByRole("region", { name: "マップ" }).locator("svg[role=img]").boundingBox();
+  const svg = page.getByRole("region", { name: "マップ" }).locator("svg[role=img]");
+  const box = await svg.boundingBox();
   if (!box) throw new Error("map svg is not visible");
-  await page.mouse.click(box.x + (x / 1100) * box.width, box.y + ((620 - y) / 620) * box.height);
+  // The fit-sized map is letterboxed (centred) inside the svg box.
+  const [, , vbW, vbH] = (await svg.getAttribute("viewBox"))!.split(/\s+/).map(Number);
+  const scale = Math.min(box.width / vbW, box.height / vbH);
+  const left = box.x + (box.width - vbW * scale) / 2;
+  const top = box.y + (box.height - vbH * scale) / 2;
+  await page.mouse.click(left + (x / 1100) * vbW * scale, top + ((620 - y) / 620) * vbH * scale);
 }
 const pickConference = (page: Page) => clickMap(page, 300, 300);
 

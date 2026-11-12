@@ -10,11 +10,18 @@ const lane = (page: Page, name: string) => page.getByRole("group", { name: `${na
 const bar = (page: Page, id: string) => page.locator(`[role="button"][data-action-id="${id}"]`);
 const handle = (page: Page, id: string) => page.locator(`[role="slider"][data-action-id="${id}"]`);
 const timelineCard = (page: Page) => page.getByRole("region", { name: "時間軸" });
+// Row and action tools live in the right-hand column, next to the palette.
+const toolsCard = (page: Page) => page.getByRole("region", { name: "行と動作の追加" });
 const knob = (page: Page) => page.getByRole("slider", { name: "再生ヘッド" });
 
 async function open(page: Page) {
-  await openSeeded(page, [timelineMap()], 1280);
+  // The centre column is about half the page now; 1600 px keeps every fixture bar (up to 20 s) in view.
+  await openSeeded(page, [timelineMap()], 1600);
   await page.locator('[data-part="ruler"]').scrollIntoViewIfNeeded();
+  // Revealing the wide ruler can scroll the lanes sideways, which would park the bars under the sticky row labels.
+  await page.locator('[data-part="ruler"]').evaluate((ruler) => {
+    for (let node = ruler.parentElement; node; node = node.parentElement) node.scrollLeft = 0;
+  });
 }
 
 async function center(target: Locator, fromX = 0.5) {
@@ -23,6 +30,8 @@ async function center(target: Locator, fromX = 0.5) {
 }
 
 async function drag(page: Page, target: Locator, dx: number, options: { modifiers?: string[]; at?: number; hold?: () => Promise<void> } = {}) {
+  // The lanes scroll inside a short card now, so bring the target into view like a user would.
+  await target.scrollIntoViewIfNeeded();
   const start = await center(target, options.at);
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
@@ -59,31 +68,50 @@ test("the resize handle changes the length, one revision", async ({ page }) => {
   expect(m3.position).toBe(16);
 });
 
-test("Escape during a drag discards it", async ({ page }) => {
+// Gestures that must not save anything share one page load; the revision is checked once at the end.
+test("refusals, cancelled gestures and dialog openers leave the project untouched", async ({ page }) => {
   await open(page);
   const before = await latestRevision(page);
+  const noDialog = () => expect(page.getByRole("dialog")).toHaveCount(0);
+
   await drag(page, bar(page, "m1"), PX * 2, { hold: async () => { await page.keyboard.press("Escape"); } });
-  await settled(page, before);
-  expect((await savedAction(page, "m1")).position).toBe(1);
   await expect(bar(page, "m1")).toHaveAttribute("aria-label", /1\.0〜7\.0秒/);
-});
-
-test("a bar cannot be dropped onto its neighbour", async ({ page }) => {
-  await open(page);
-  const before = await latestRevision(page);
-  await drag(page, bar(page, "m1"), PX * 9);
-  await settled(page, before);
-  expect((await savedAction(page, "m1")).position).toBe(1);
+  await drag(page, bar(page, "m1"), PX * 9); // onto its neighbour
   await expect(bar(page, "m1")).toHaveAttribute("aria-label", /1\.0〜7\.0秒/);
-});
 
-test("a locked row refuses to move and says so", async ({ page }) => {
-  await open(page);
-  const before = await latestRevision(page);
+  await timelineCard(page).getByRole("button", { name: /^表示/ }).first().click();
+  await toolsCard(page).getByRole("button", { name: "行を削除" }).click();
+  await expect(appAlert(page)).toContainText("ロックされています");
+  await noDialog();
   await drag(page, bar(page, "s1"), PX);
   await expect(appAlert(page)).toContainText("ロックされています");
+
+  const ruler = page.locator('[data-part="ruler"]');
+  const box = (await ruler.boundingBox())!;
+  await page.mouse.click(box.x + LANE_PAD + 5 * PX, box.y + box.height / 2);
+  await expect.poll(async () => Number(await knob(page).getAttribute("aria-valuenow"))).toBeCloseTo(5, 0);
+  await knob(page).focus();
+  await page.keyboard.press("Home");
+  await expect(knob(page)).toHaveAttribute("aria-valuenow", "0");
+
+  const humanLane = lane(page, "人 1");
+  const humanBox = (await humanLane.boundingBox())!;
+  await humanLane.dblclick({ position: { x: 24 * PX, y: humanBox.height / 2 } });
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "キャンセル" }).click();
+  await noDialog();
+
+  await timelineCard(page).getByRole("button", { name: /^人 1/ }).first().click();
+  const source = page.getByRole("group", { name: "動作を追加" }).getByRole("button").first();
+  await source.dragTo(humanLane, { targetPosition: { x: 22 * PX, y: humanBox.height / 2 } });
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "キャンセル" }).click();
+  await noDialog();
+
   await settled(page, before);
+  expect((await savedAction(page, "m1")).position).toBe(1);
   expect((await savedAction(page, "s1")).position).toBe(3);
+  expect((await savedTracks(page)).length).toBe(4);
 });
 
 test("Ctrl+click selects several bars and they move together", async ({ page }) => {
@@ -122,17 +150,6 @@ test("arrow keys on the handle resize in 0.5 s steps, and stop at the minimum", 
   await expect.poll(async () => (await savedAction(page, "m3")).runSeconds).toBeCloseTo(0.5, 5);
 });
 
-test("clicking the ruler moves the playhead; arrow keys nudge it", async ({ page }) => {
-  await open(page);
-  const ruler = page.locator('[data-part="ruler"]');
-  const box = (await ruler.boundingBox())!;
-  await page.mouse.click(box.x + LANE_PAD + 5 * PX, box.y + box.height / 2);
-  await expect.poll(async () => Number(await knob(page).getAttribute("aria-valuenow"))).toBeCloseTo(5, 0);
-  await knob(page).focus();
-  await page.keyboard.press("Home");
-  await expect(knob(page)).toHaveAttribute("aria-valuenow", "0");
-});
-
 test("rows: add, mute, lock, delete (with confirmation) and the row count limit message", async ({ page }) => {
   await open(page);
   const rev = await latestRevision(page);
@@ -145,50 +162,23 @@ test("rows: add, mute, lock, delete (with confirmation) and the row count limit 
   await page.getByRole("button", { name: "人 1 固定" }).click();
   await expect.poll(async () => (await savedTracks(page)).find((t) => t.id === "hm")?.locked).toBe(false);
 
-  await page.getByRole("button", { name: /^会議室/ }).first().click();
-  await timelineCard(page).getByRole("button", { name: "行を削除" }).click();
+  await timelineCard(page).getByRole("button", { name: /^会議室/ }).first().click();
+  await toolsCard(page).getByRole("button", { name: "行を削除" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "キャンセル" }).click();
   expect((await savedTracks(page)).length).toBe(5);
-  await timelineCard(page).getByRole("button", { name: "行を削除" }).click();
+  await toolsCard(page).getByRole("button", { name: "行を削除" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "削除" }).click();
   await expect.poll(async () => (await savedTracks(page)).length).toBe(4);
   expect(await latestRevision(page)).toBeGreaterThan(rev);
 });
 
-test("a locked row cannot be deleted", async ({ page }) => {
-  await open(page);
-  const before = await latestRevision(page);
-  await page.getByRole("button", { name: /^表示/ }).first().click();
-  await timelineCard(page).getByRole("button", { name: "行を削除" }).click();
-  await expect(appAlert(page)).toContainText("ロックされています");
-  await settled(page, before);
-});
-
 test("rows can be reordered with the up/down buttons", async ({ page }) => {
   await open(page);
-  await page.getByRole("button", { name: /^人 1/ }).first().click();
-  await timelineCard(page).getByRole("button", { name: "上へ" }).click();
+  await timelineCard(page).getByRole("button", { name: /^人 1/ }).first().click();
+  await toolsCard(page).getByRole("button", { name: "上へ" }).click();
   await expect.poll(async () => (await savedTracks(page)).map((t) => t.id)).toEqual(["hm", "rb", "rm", "ds"]);
-});
-
-test("dragging an action button from the palette onto a lane opens the add dialog", async ({ page }) => {
-  await open(page);
-  await page.getByRole("button", { name: /^ロボット 1/ }).first().click();
-  const source = page.getByRole("group", { name: "動作を追加" }).getByRole("button").first();
-  const target = lane(page, "ロボット 1");
-  const box = (await target.boundingBox())!;
-  await source.dragTo(target, { targetPosition: { x: 22 * PX, y: box.height / 2 } });
-  await expect(page.getByRole("dialog")).toBeVisible();
-});
-
-test("double-clicking an empty part of a lane opens the add dialog", async ({ page }) => {
-  await open(page);
-  const target = lane(page, "ロボット 1");
-  const box = (await target.boundingBox())!;
-  await target.dblclick({ position: { x: 24 * PX, y: box.height / 2 } });
-  await expect(page.getByRole("dialog")).toBeVisible();
 });
 
 const dialogs = (page: Page) => page.locator("dialog[open]");
@@ -202,23 +192,13 @@ async function addHumanMove(page: Page, apply: boolean) {
   if (apply) await dialogs(page).first().getByRole("button", { name: "適用" }).click();
 }
 
-test("adding an action through the dialog saves one revision; cancelling saves nothing", async ({ page }) => {
+test("adding an action saves one revision (cancel saves nothing); the coordinate picker sets the destination", async ({ page }) => {
   await openSeeded(page, [timelineMap({ locked: false })], 1280);
   const before = await latestRevision(page);
   await addHumanMove(page, false);
   await dialogs(page).first().getByRole("button", { name: "キャンセル" }).click();
   await expect(dialogs(page)).toHaveCount(0);
   await settled(page, before);
-  await addHumanMove(page, true);
-  await expect(dialogs(page)).toHaveCount(0);
-  await settled(page, before + 1);
-  const human = (await savedTracks(page)).find((t) => t.id === "hm")!;
-  expect(human.actions.length).toBe(2);
-});
-
-test("the coordinate picker sets the destination, and cancelling it changes nothing", async ({ page }) => {
-  await openSeeded(page, [timelineMap({ locked: false })], 1280);
-  const before = await latestRevision(page);
   await addHumanMove(page, false);
   const main = dialogs(page).first();
   await main.getByRole("button", { name: "マップで指定" }).click();

@@ -48,8 +48,13 @@ test.afterAll(() => { robot?.close(); });
 test.beforeEach(async () => { await exhibitCommand({ type: "close" }); });
 test.afterEach(() => { camera?.close(); camera = null; });
 
-async function showOnExhibit(page: Page) {
+async function openExhibitControls(page: Page) {
   await openSeeded(page, [exhibitMap()], 1280);
+  await page.getByRole("button", { name: "展示 ▾" }).click();
+}
+
+async function showOnExhibit(page: Page) {
+  await openExhibitControls(page);
   await page.getByRole("button", { name: "この地図を展示に出す" }).click();
   await expect(page.getByRole("group", { name: "展示" }).getByRole("status")).toContainText("展示中: 展示用マップ");
 }
@@ -178,7 +183,7 @@ test("a 1920 x 1080 screen draws at the same scale on both axes", async ({ page,
 });
 
 test("an operator's mistakes are reported, not silent", async ({ page }) => {
-  await openSeeded(page, [exhibitMap()], 1280);
+  await openExhibitControls(page);
   const controls = page.getByRole("group", { name: "展示" });
   await expect(controls.getByRole("button", { name: "展示を再生" })).toBeDisabled();
   await expect(controls.getByRole("button", { name: "展示を終了" })).toBeDisabled();

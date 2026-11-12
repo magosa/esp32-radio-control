@@ -29,7 +29,7 @@ function ConsoleFrame({ children }: { children: ReactNode }) {
     disconnected: "ハブ未接続", error: "ハブ接続エラー" }[status];
   const current = NAV.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
 
-  return <main className={styles.fleet} data-theme={theme} data-motion={appearance.motion ? "on" : "off"} style={style}>
+  return <main className={styles.fleet} data-theme={theme} data-wide={pathname.startsWith("/scenes")} data-motion={appearance.motion ? "on" : "off"} style={style}>
     <header className={styles.header}>
       <div className={styles.brand}><h1>{current?.title ?? "フリート管理"}</h1>
         <span className={styles.connection} role="status">

@@ -72,6 +72,8 @@
   padding: 0 max(20px, calc((100vw - 1200px) / 2)) 32px;
   color-scheme: light;
 }
+/* The scene editor is a one-screen workbench and uses the full width. */
+.fleet[data-wide="true"] { padding-inline: max(16px, calc((100vw - 1800px) / 2)); }
 .fleet::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: url("/appearance/glass-folds.png") center / cover no-repeat; opacity: var(--backdrop-opacity); }
 .fleet[data-theme="dark"] {
   --ink: #f1f5f9;

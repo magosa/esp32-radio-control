@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { MapBody } from "@/components/mapLayers";
 import { snapToEditGrid } from "@/scene/grid";
 import {
@@ -21,6 +22,8 @@ export interface MapStageProps {
   overlay?: ReactNode;
   // Single-finger touches draw instead of scrolling; only pinch gestures stay with the browser.
   drawing?: boolean;
+  // Where the zoom buttons are drawn. Undefined keeps them above the map; null waits for the slot to exist.
+  toolbarSlot?: HTMLElement | null;
 }
 
 // Compiled once per map reference so tabs showing the same map share one plan.
@@ -50,7 +53,7 @@ function useScale(): [RefObject<SVGSVGElement>, number] {
   return [ref, scale];
 }
 
-export function MapStage({ map, time, showGrid, gridMm, onPick, overlay, drawing }: MapStageProps) {
+export function MapStage({ map, time, showGrid, gridMm, onPick, overlay, drawing, toolbarSlot }: MapStageProps) {
   const [zoom, setZoom] = useState<ZoomId>("fit");
   const [svgRef, scale] = useScale();
   const down = useRef<{ x: number; y: number } | null>(null);
@@ -67,17 +70,21 @@ export function MapStage({ map, time, showGrid, gridMm, onPick, overlay, drawing
     onPick(clampToArea(snapToEditGrid(mm.x, mm.y, gridMm)));
   };
 
+  const toolbar = (
+    <div className={styles.toolbar} role="toolbar" aria-label="表示倍率">
+      {ZOOMS.map((item) => (
+        <button key={item.id} type="button" className={styles.zoomButton} aria-pressed={zoom === item.id} onClick={() => setZoom(item.id)}>
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div className={styles.stage}>
-      <div className={styles.toolbar} role="toolbar" aria-label="表示倍率">
-        {ZOOMS.map((item) => (
-          <button key={item.id} type="button" className={styles.zoomButton} aria-pressed={zoom === item.id} onClick={() => setZoom(item.id)}>
-            {item.label}
-          </button>
-        ))}
-      </div>
+      {toolbarSlot === undefined ? toolbar : toolbarSlot && createPortal(toolbar, toolbarSlot)}
       <div className={drawing ? `${styles.scroll} ${styles.drawing}` : styles.scroll} tabIndex={onPick ? 0 : undefined}>
-        <svg ref={svgRef} className={styles.map} viewBox={VIEW_BOX} style={{ width: zoomWidth(zoom) }} role="img"
+        <svg ref={svgRef} className={styles.map} viewBox={VIEW_BOX} style={{ width: zoomWidth(zoom), height: zoom === "fit" ? "100%" : "auto" }} role="img"
           aria-label={mapSummary(map, { time, actors: state.actors })}
           onPointerDown={onPick ? (e) => { down.current = { x: e.clientX, y: e.clientY }; } : undefined}
           onPointerUp={onPick ? pick : undefined} onPointerCancel={() => { down.current = null; }}>

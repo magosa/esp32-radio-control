@@ -1,0 +1,12 @@
+.section { display: grid; gap: 6px; }
+.section h3 { margin: 0; font-size: var(--text-meta); font-weight: 700; color: var(--muted); letter-spacing: 0.04em; }
+.name { margin: 0; font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
+.meta { margin: 0; font-size: var(--text-meta); color: var(--muted); overflow-wrap: anywhere; }
+.section ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.item { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); text-align: left; cursor: pointer; }
+.item[aria-pressed="true"] { background: var(--selected); border-color: var(--accent); font-weight: 600; }
+.item:focus-visible, .section button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.item svg { width: 18px; height: 18px; flex-shrink: 0; }
+.item span { display: grid; min-width: 0; overflow-wrap: anywhere; }
+.item small { color: var(--muted); font-size: var(--text-meta); font-weight: 400; }
+.swatch { width: 14px; height: 14px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 3px; }

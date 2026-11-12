@@ -15,7 +15,8 @@ export default defineConfig({
   use: { baseURL: `http://localhost:${PORT}`, channel: "msedge", trace: "retain-on-failure" },
   webServer: {
     command: "npx tsx server.ts",
-    url: `http://localhost:${PORT}/api/scenes/history`,
+    // Waiting on the page itself (not only the API) makes the dev server compile it before the first test.
+    url: `http://localhost:${PORT}/scenes`,
     reuseExistingServer: false,
     timeout: 180_000,
     env: {

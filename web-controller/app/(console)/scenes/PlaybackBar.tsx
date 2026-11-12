@@ -31,8 +31,9 @@ export function PlaybackBar({ playback, onFullscreen }: { playback: PlaybackCont
       <input type="range" min={0} max={duration} step={0.1} value={Math.min(time, duration)} disabled={duration === 0}
         aria-label="再生位置" onChange={(event) => playback.seek(Number(event.target.value))} />
     </label>
-    {onFullscreen && <button type="button" className={consoleStyles.secondary} onClick={onFullscreen}>
-      <Maximize2 aria-hidden="true" />全画面プレビュー
+    {onFullscreen && <button type="button" className={`${consoleStyles.secondary} ${styles.iconOnly}`} onClick={onFullscreen}
+      aria-label="全画面プレビュー" title="全画面プレビュー">
+      <Maximize2 aria-hidden="true" />
     </button>}
   </div>;
 }

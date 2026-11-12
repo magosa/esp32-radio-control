@@ -1,11 +1,11 @@
-.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--card-gap); padding-top: var(--layout-gap); }
+.page { --card-padding: 12px; --card-gap: 10px; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; gap: var(--card-gap); padding-top: 12px; min-height: 720px; }
 .state { padding: var(--layout-gap) 0; color: var(--muted); font-size: var(--text-body); }
 .narrow { max-width: 560px; margin: var(--layout-gap) auto 0; display: grid; gap: 12px; }
 .narrow h2 { font-size: var(--text-section); }
 
-.projectBar { display: grid; grid-template-columns: minmax(180px, 280px) minmax(0, 1fr) auto; gap: var(--card-gap); align-items: end; }
-.nameField { display: grid; gap: 6px; color: var(--muted); font-size: var(--text-meta); }
-.nameField input { min-height: 44px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--glass-input); color: var(--ink); font-size: var(--text-body); }
+.projectBar { display: grid; grid-template-columns: minmax(220px, 360px) minmax(0, 1fr) auto; gap: var(--card-gap); align-items: center; }
+.nameField { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--text-meta); white-space: nowrap; }
+.nameField input { flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--glass-input); color: var(--ink); font-size: var(--text-body); }
 .barActions { display: flex; flex-wrap: wrap; gap: 8px; }
 .saveArea { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 .saveState { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-meta); font-weight: 600; color: var(--muted); }
@@ -17,10 +17,24 @@
 .tab { min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font-weight: 600; }
 .tab[aria-selected="true"] { background: var(--selected); border-color: var(--accent); }
 
-.workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--card-gap); align-items: start; }
-.stageCard { min-width: 0; display: grid; gap: var(--card-gap); }
-.stageControls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--card-gap); }
+.workspace { position: relative; display: grid; grid-template-columns: 196px minmax(0, 1fr) 300px; gap: var(--card-gap); min-height: 0; }
+.center { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: var(--card-gap); min-width: 0; min-height: 0; }
+.stageCard { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.stageHead { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.stageHead h2 { margin: 0; font-size: var(--text-section); }
+.stageHead .spacer { flex: 1; }
+.stageBody { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.stageControls { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--card-gap); }
 .stageControls > :first-child { flex: 1 1 100%; }
+.exhibitPopover { position: absolute; z-index: 30; margin-top: 4px; width: min(680px, calc(100vw - 48px)); padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28); }
+.anchor { position: relative; }
+.controls { display: grid; align-content: start; gap: var(--card-gap); min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.library { display: grid; align-content: start; gap: 12px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.library h2, .controls h2 { margin: 0; font-size: var(--text-section); }
+.libraryOnly { display: none; }
+.statusBar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; min-height: 32px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: var(--text-meta); }
+.statusBar p { margin: 0; }
+.statusBar .grow { flex: 1 1 200px; overflow-wrap: anywhere; }
 .timeField { display: grid; flex: 1 1 280px; gap: 4px; color: var(--muted); font-size: var(--text-meta); }
 .timeField input { width: 100%; min-height: 44px; }
 /* 既存の速度スライダー(.speed input)と同じ見た目。既定のままだと濃い紺の太い帯になる。 */
@@ -34,10 +48,14 @@
 .sideCard h2, .timelineCard h2 { font-size: var(--text-section); margin: 0 0 8px; }
 .sideCard p, .timelineCard p { margin: 0; color: var(--muted); font-size: var(--text-body); }
 
-@media (min-width: 1280px) {
-  .workspace { grid-template-columns: minmax(0, 1fr) 320px; }
+@media (max-width: 1279px) {
+  .workspace { grid-template-columns: 168px minmax(0, 1fr) 256px; }
 }
 @media (max-width: 1023px) {
+  .workspace { grid-template-columns: minmax(0, 1fr) 260px; }
+  .library { display: none; position: absolute; z-index: 20; top: 0; bottom: 0; left: 0; width: 260px; background: var(--surface-strong); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28); }
+  .library[data-open="true"] { display: grid; }
+  .libraryOnly { display: inline-flex; }
   .projectBar { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
   .saveArea { justify-content: flex-start; }
 }
