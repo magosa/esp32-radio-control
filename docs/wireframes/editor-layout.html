@@ -124,33 +124,62 @@
   <div class="small">参照システムも 960px 以下で左カラムを隠します。ページ全体のスクロールは避け、時間軸と右カラムは内側でスクロール。</div>
 </div>
 
-<h2>E5　機能の差（参照システムにあって、現行にないもの）</h2>
+<h2>E5　機能の洗い出し（参照システムの全操作と、現行との差）</h2>
+<div class="note"><b>読み方:</b> 参照システムの画面と、操作の定義（<code>app.js</code> のクリック・ドラッグ・キー操作の約130か所）を1つずつ確認し、現行にあるか調べました。「提案」の既定は、<b>設計書で対象外のものを除いてすべて取り込む</b>です。外したい項目があれば、番号（例: F16）だけ教えてください。何も言われない項目は、提案どおり進めます。<br>記号: <span class="ok">○</span>=現行にある　<span class="wn">△</span>=一部ある　<span class="ng">×</span>=ない</div>
 <div class="board w1280" id="e5">
   <table>
-    <tr><th style="width:230px">参照システムの機能</th><th style="width:120px">現行</th><th style="width:140px">提案</th><th>備考</th></tr>
-    <tr><td>3カラムの作業台・1画面に収まる</td><td class="ng">なし（縦積み）</td><td class="ok">合わせる</td><td>E3 のとおり</td></tr>
-    <tr><td>左ライブラリ（部屋・オブジェクトの一覧、行へ移動）</td><td class="ng">なし</td><td class="ok">追加</td><td></td></tr>
-    <tr><td>ステータスバー（通知・履歴・保存先）</td><td class="ng">なし</td><td class="ok">追加</td><td>S5 の実行中の帯もここ</td></tr>
-    <tr><td>右コントロール（行を追加・動作パレット・選択中）</td><td class="wn">あるが時間軸の上と右の小さな欄に分散</td><td class="ok">右カラムに集約</td><td>機能は現行のまま移すだけ</td></tr>
-    <tr><td>ステージのパス表示の切替・カーソル座標・軸ラベル</td><td class="ng">なし</td><td class="ok">追加</td><td></td></tr>
-    <tr><td>再生: 前/次の編集点</td><td class="ng">なし</td><td class="ok">追加</td><td>再生・先頭・ループ・速度は現行にあり</td></tr>
-    <tr><td>旋回を配置（全マップに向き変更バーを追加）</td><td class="ng">UIなし（関数はある）</td><td class="ok">追加</td><td></td></tr>
-    <tr><td>選択中と同種の行を追加</td><td class="ng">なし</td><td class="ok">追加</td><td></td></tr>
-    <tr><td>タイムラインの選択ツール（開始をずらす・長さ調整）</td><td class="wn">一部（複数選択の移動・Ctrl）</td><td class="wn">要確認</td><td>上流の機能を洗い出してから決める</td></tr>
-    <tr><td>プロジェクトの「長さ(秒)」入力</td><td class="wn">なし（計画から自動）</td><td>追加しない</td><td>表示範囲は動作の終了時刻から自動で決まる</td></tr>
-    <tr><td>連携用JSON／フリート連携セットの保存／デモ追加／時間軸実行モード</td><td>なし</td><td>移植しない</td><td>設計書で対象外（外部連携・旧互換）</td></tr>
-    <tr><td>テストシナリオ集・最新テストマップ・オフィステスト</td><td>なし</td><td>S3 で</td><td>16シナリオの移植と一緒に</td></tr>
-    <tr><td>展示モード</td><td>S4 の別画面（/exhibit）</td><td>そのまま</td><td>ステージ見出しの「展示 ▾」から操作</td></tr>
-    <tr><td>見た目（黒基調）</td><td>fleet のガラス調</td><td>S2 の決定どおり</td><td>構成だけを参照システムに合わせる</td></tr>
+    <tr><th style="width:44px">番号</th><th style="width:300px">参照システムの機能</th><th style="width:60px">現行</th><th style="width:150px">提案</th><th>補足</th></tr>
+    <tr><th colspan="5">全体の構成</th></tr>
+    <tr><td>F1</td><td>3カラム（左ライブラリ／中央ステージ＋時間軸／右コントロール）で、1画面に収まる</td><td class="ng">×</td><td class="ok">合わせる</td><td>E3 のとおり</td></tr>
+    <tr><td>F2</td><td>ステータスバー（操作の結果の通知・履歴の状態・保存先）</td><td class="ng">×</td><td class="ok">追加</td><td>現行は結果を時間軸内の小さな欄に出している</td></tr>
+    <tr><td>F3</td><td>トップバー（ブランド、Compose / Preview 切替、「SIMULATION ONLY」バッジ、デモ呼び出し）</td><td class="ng">×</td><td>移植しない</td><td>fleet の共通ヘッダーを使う。実機を動かす機能が増えるので「シミュレーションのみ」の常時表示は誤解のもと</td></tr>
+    <tr><td>F4</td><td>プロジェクトバー: 新規プロジェクト（置き換えの確認つき）</td><td class="ng">×</td><td class="ok">追加</td><td>「長さ(秒)」の入力は追加しない（動作の終了時刻から自動で決まるため）</td></tr>
+    <tr><td>F5</td><td>キー操作: Space=再生/一時停止、Delete=選択を削除、Ctrl+D=動作の複製、Ctrl+S=保存（JSON）、Ctrl+Z/Shift+Z=取り消し/やり直し</td><td class="wn">△</td><td class="ok">不足分を追加</td><td>現行は取り消し/やり直しと、バー上の Delete だけ</td></tr>
+    <tr><td>F6</td><td>タブが隠れたら再生を一時停止</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><th colspan="5">左ライブラリ</th></tr>
+    <tr><td>F7</td><td>マップの情報カード（名前・グリッド・部屋数）と「マップを編集」</td><td class="wn">△</td><td class="ok">追加</td><td>現行は「マップを編集」ボタンだけ</td></tr>
+    <tr><td>F8</td><td>部屋と領域の一覧（クリックで選択）</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F9</td><td>シーン内のオブジェクトの一覧（クリックでその行を選択）</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F10</td><td>背景画像の濃度・取り除く</td><td class="ng">×</td><td>移植しない</td><td>現行のマップは背景画像を持たない（S1 で対象外）</td></tr>
+    <tr><th colspan="5">ステージ（地図）</th></tr>
+    <tr><td>F11</td><td>パス（予定の経路）の表示/非表示</td><td class="ng">×</td><td class="ok">追加</td><td>現行は常に表示</td></tr>
+    <tr><td>F12</td><td>カーソルの座標表示（X, Y）と軸ラベル</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F13</td><td>ロボット/人をクリック → その行を選択</td><td class="ng">×</td><td class="ok">追加</td><td>現行は部屋のクリックだけ</td></tr>
+    <tr><td>F14</td><td>ステージ上の動作の印（移動先の目印）をクリック → その動作の編集を開く</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F15</td><td>ステージ上の表示・イベントをクリック → 対応する動作を選択</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F16</td><td>ロボットをダブルクリック → シーケンス一括設定を開く</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F17</td><td>動作ボタンをステージへドラッグ → ドロップした位置で追加ダイアログ</td><td class="ng">×</td><td class="ok">追加</td><td>タッチはダブルタップ等の代替を用意</td></tr>
+    <tr><td>F18</td><td>選択中の人/ロボット/部屋を、ステージ上で枠でハイライト</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><th colspan="5">再生</th></tr>
+    <tr><td>F19</td><td>再生/一時停止/先頭/ループ/速度/シーク/全画面</td><td class="ok">○</td><td>そのまま</td><td></td></tr>
+    <tr><td>F20</td><td>前の編集点／次の編集点（バーの開始・終了時刻へ飛ぶ）</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F21</td><td>展示モード</td><td class="ok">○</td><td>そのまま</td><td>S4 の別画面（/exhibit）。ステージ見出しの「展示 ▾」から操作</td></tr>
+    <tr><th colspan="5">時間軸</th></tr>
+    <tr><td>F22</td><td>バーの移動・長さ変更・スナップ・複数選択・行の追加/並べ替え/除外/固定・動作ボタンのドラッグ追加・ルーラーでシーク・ズーム</td><td class="ok">○</td><td>そのまま</td><td>S2c で実装・ブラウザーテスト済み</td></tr>
+    <tr><td>F23</td><td>旋回を配置（全マップに向き変更バーを追加）</td><td class="ng">×</td><td class="ok">追加</td><td>計算の関数は実装済み。画面がない</td></tr>
+    <tr><td>F24</td><td>選択ツール（選んだバーをまとめて開始をずらす/長さ調整/解除）</td><td class="ok">○</td><td>そのまま</td><td>右カラムの「選択中」に表示</td></tr>
+    <tr><td>F25</td><td>選択中と同種の行を追加</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F26</td><td>ロボットの行を追加すると、続けてシーケンス一括設定が開く</td><td class="ng">×</td><td class="ok">追加</td><td></td></tr>
+    <tr><td>F27</td><td>時間軸の下のキー操作の案内</td><td class="ng">×</td><td class="ok">追加（小）</td><td></td></tr>
+    <tr><th colspan="5">右コントロール</th></tr>
+    <tr><td>F28</td><td>行の追加・動作のパレット・選択中の編集（部屋/行/動作）</td><td class="ok">○</td><td>右カラムへ集約</td><td>機能は現行のまま。置き場所だけ移す</td></tr>
+    <tr><td>F29</td><td>安全の警告の一覧</td><td class="wn">△</td><td class="ok">追加</td><td>現行は件数と計画エラーの1行</td></tr>
+    <tr><td>F30</td><td>扉の確認モード（ストーリー確認／連携確認）の切替</td><td class="ng">×</td><td class="ok">追加</td><td>モデルにはあるが画面がない</td></tr>
+    <tr><th colspan="5">移植しないもの・後続</th></tr>
+    <tr><td>F31</td><td>連携用JSON／フリート連携セットの保存／デモ追加／時間軸実行へ切替（順序実行）</td><td class="ng">×</td><td>移植しない</td><td>設計書で対象外（外部連携・旧互換）</td></tr>
+    <tr><td>F32</td><td>テストシナリオ集・最新テストマップ・オフィステスト</td><td class="ng">×</td><td>S3 で</td><td>16シナリオの移植と一緒に</td></tr>
   </table>
 </div>
 
-<h2>確認したい点</h2>
+<h2>お答えします: 「E5 の『追加』の過不足は何を指すか」</h2>
+<p class="lead">前回の表現が分かりにくく失礼しました。意味は「参照システムにあって、現行にない機能のうち、私が『足す』と書いたものが、多すぎたり足りなかったりしないか」です。今回、参照システムの操作を1つずつ調べて上の F1〜F32 に直したので、「過不足」を考えていただく必要はありません。<b>提案どおりでよければ返答は不要で、外したいものだけ番号で教えてください。</b></p>
+
+<h2>決まったこと</h2>
 <ol class="legend">
-  <li><b>(1) 構成の合わせ方</b>: E3（参照システムと同じ3カラム・1画面）に作り直す／現行の縦積みを残し、E5 の不足機能だけ足す。</li>
-  <li><b>(2) 追加する機能</b>: E5 の「追加」のうち、不要なもの・足りないものはありますか（例: 「新規」ボタン、「長さ」入力）。</li>
-  <li><b>(3) 実施の順</b>: エディターの整合を S5 より先に行う（推奨: S5 の変更がエディターに2回入らない）／S5 のあとに行う。</li>
-  <li><b>(4) 機能の洗い出し</b>: 私は上流の画面と HTML までしか確認していません。承認後、上流の全操作（<code>app.js</code> 約2400行）を洗い出した<b>機能差の一覧</b>を先に示し、そこで追加の過不足を確認します（実装前）。</li>
+  <li>画面の構成は、参照システムと同じ3カラム・1画面にする（E3）。縦積みは廃止する。見た目は fleet のガラス調のまま。</li>
+  <li>実施の順: エディターの整合を <b>S5 より先</b>に行う。</li>
+  <li>機能: 上の F1〜F32 の提案どおり（外したいものだけ番号で指定）。</li>
 </ol>
+<div class="note"><b>次に進める手順:</b> ① この図と機能の一覧の承認 → ② 実装計画（タスクの順序・テスト・検証）の提示と承認 → ③ 実装。③では、既存のブラウザーテスト（<code>scenes-*</code> 50本超）を新しい配置に合わせて保ちます。</div>
 </body>
 </html>
