@@ -238,7 +238,9 @@ export type ClientInboundMessage =
   | { type: "assignMarker"; requestId: string; robotId: string; markerId: number | null; markerHeightMm?: number }
   | { type: "setFieldConfig"; requestId: string; config: FieldConfig }
   // 展示画面へ配信するシーンと時刻の操作。command の検証は Hub が行う。
-  | { type: "exhibitCommand"; requestId: string; command: unknown };
+  | { type: "exhibitCommand"; requestId: string; command: unknown }
+  // シーン実行の操作。command の検証は Hub が行う。
+  | { type: "sceneRunCommand"; requestId: string; command: unknown };
 
 // ---- Server -> 操作UI ----
 
@@ -270,7 +272,14 @@ export interface OperationResultMessage {
 }
 
 export type ClientOutboundMessage = FleetStateMessage | RouteStatusMessage | ImageFrameBroadcastMessage | OperationResultMessage | PoseStateMessage
-  | ExhibitStateMessage;
+  | ExhibitStateMessage | SceneRunStateMessage;
+
+// 終了(完了・中止)したときだけ result が入る。
+export interface SceneRunStateMessage {
+  type: "sceneRunState";
+  state: import("../scene/runTypes").RunSnapshot;
+  result: import("../scene/runTypes").RunResultFile | null;
+}
 
 // serverNow は送信時の Hub の時計(ms)。別PCの展示画面が自分の時計との差を求めるのに使う。
 export interface ExhibitStateMessage {

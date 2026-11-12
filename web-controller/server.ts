@@ -31,7 +31,7 @@ app.prepare().then(() => {
   });
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: 600000 });
-  const hub = new FleetHub();
+  const hub = new FleetHub(undefined, undefined, (id) => sceneStore.latest()?.project.maps.find((map) => map.id === id) ?? null);
   hub.attach(wss);
 
   server.on("upgrade", (req, socket, head) => {

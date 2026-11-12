@@ -7,6 +7,9 @@ import { isDeviceDescription, RobotStore } from "./robotStore";
 import { FieldConfigStore, isFieldConfig } from "./fieldConfigStore";
 import { parseLocalizerHello, parsePoseFrame, PoseStore } from "./poseStore";
 import { applyExhibit, initialExhibit, parseExhibitCommand, type ExhibitSession } from "../scene/exhibitSession";
+import { parseRunCommand } from "../scene/runTypes";
+import type { SceneMap } from "../scene/types";
+import { SceneRunner } from "./sceneRunner";
 import type {
   ClientInboundMessage,
   ClientOutboundMessage,
@@ -17,9 +20,12 @@ import type {
   ExpressionId,
   FleetStateMessage,
   PoseStateMessage,
+  SceneRunStateMessage,
 } from "./protocol";
 
 const SWEEP_INTERVAL_MS = 1000;
+// シーン実行の制御周期。poseFrame(約10Hz)より短く、命令の再送(800ms以内)に十分な間隔。
+const RUN_TICK_MS = 100;
 // poseFrameは約10Hzで届くため、UIへのposeState配信はこの間隔に間引く。
 const POSE_BROADCAST_INTERVAL_MS = 100;
 // この時間何も届かない測位接続は無効とみなし、新しい接続を受け付ける。
@@ -44,12 +50,24 @@ export class FleetHub {
   private poseBroadcastTimer: NodeJS.Timeout | null = null;
   // 展示画面のシーンと時刻。保存せず、Hub を再起動すると未選択に戻る。
   private exhibit: ExhibitSession = initialExhibit(Date.now());
+  private runner: SceneRunner;
+  private runTimer: NodeJS.Timeout | null = null;
+  private runMapId: string | null = null;
+  // シーン実行が駆動を引き継いでいる機体。終了で手動へ戻す。
+  private runDevices: string[] = [];
+  private lastRunPayload = "";
 
   constructor(store = new RobotStore(path.join(defaultDataDir(), "fleet.json")),
-    fieldStore = new FieldConfigStore(path.join(defaultDataDir(), "field.json"))) {
+    fieldStore = new FieldConfigStore(path.join(defaultDataDir(), "field.json")),
+    private loadMap: (mapId: string) => SceneMap | null = () => null) {
     this.store = store;
     this.fieldStore = fieldStore;
     this.registry = new VehicleRegistry(store.getDevices());
+    this.runner = new SceneRunner({
+      now: () => Date.now(),
+      sendDrive: (deviceId, drive) => this.sendDriveToDevice(deviceId, drive.cmd, drive.speedL, drive.speedR),
+      onClock: (position, running) => this.followRunClock(position, running),
+    });
     this.routeEngine = new RouteEngine({
       sendDrive: (deviceId, cmd, speedL, speedR) => this.sendDriveToDevice(deviceId, cmd, speedL, speedR),
       onStatus: (status) => this.broadcastToClients({ type: "routeStatus", ...status }),
@@ -77,6 +95,7 @@ export class FleetHub {
   dispose(): void {
     clearInterval(this.sweepTimer);
     if (this.poseBroadcastTimer) clearTimeout(this.poseBroadcastTimer);
+    if (this.runTimer) clearInterval(this.runTimer);
     this.routeEngine.stop();
     Array.from(this.streamingDeviceIds).forEach((deviceId) => this.stopStream(deviceId));
   }
@@ -160,6 +179,7 @@ export class FleetHub {
     this.sendToClient(ws, this.getFleetState());
     this.sendToClient(ws, this.getPoseState());
     this.sendToClient(ws, this.getExhibitState());
+    this.sendToClient(ws, this.getRunState());
 
     ws.on("message", (raw) => {
       const msg = this.parseJson<ClientInboundMessage>(raw.toString());
@@ -229,6 +249,7 @@ export class FleetHub {
     switch (msg.type) {
       case "exhibitCommand": {
         if (typeof msg.requestId !== "string") throw new Error("Invalid exhibit command");
+        if (this.runner.active) throw new Error("シーン実行中は展示を操作できません。");
         const command = parseExhibitCommand(msg.command);
         if (!command) throw new Error("Invalid exhibit command");
         const next = applyExhibit(this.exhibit, command, Date.now());
@@ -237,6 +258,15 @@ export class FleetHub {
           this.exhibit = next;
           this.broadcastToClients(this.getExhibitState());
         }
+        this.sendToClient(client, { type: "operationResult", requestId: msg.requestId, ok: true });
+        break;
+      }
+      case "sceneRunCommand": {
+        if (typeof msg.requestId !== "string") throw new Error("Invalid run command");
+        const command = parseRunCommand(msg.command);
+        if (!command) throw new Error("Invalid run command");
+        const failure = this.runCommand(command);
+        if (failure) throw new Error(failure);
         this.sendToClient(client, { type: "operationResult", requestId: msg.requestId, ok: true });
         break;
       }
@@ -278,6 +308,10 @@ export class FleetHub {
         if (msg.cmd === "e" && (msg.targetDeviceIds === "all" || requested.some((id) => this.registry.getMode(id) === "auto"))) {
           this.routeEngine.stop();
         }
+        // 非常停止: シーン実行中の機体への停止は、実行も「停止中」にする。
+        if (msg.cmd === "e" && (msg.targetDeviceIds === "all" || requested.some((id) => this.runDevices.includes(id)))) {
+          if (this.runner.pause() === null) this.runTick();
+        }
         // autoモード中の車両はルートエンジンが制御しているため、手動コマンドは無視する
         const targets = requested.filter((id) => msg.cmd === "e" || this.registry.getMode(id) !== "auto");
         targets.forEach((deviceId) => this.sendDriveToDevice(deviceId, msg.cmd, msg.speedL, msg.speedR));
@@ -286,6 +320,7 @@ export class FleetHub {
       case "setMode": {
         if (msg.mode !== "manual" && msg.mode !== "auto") throw new Error("Invalid mode");
         if (!this.registry.hasCapability(msg.deviceId, "drive")) return;
+        if (this.runDevices.includes(msg.deviceId)) throw new Error("シーン実行中の機体は手動に戻せません。");
         if (msg.mode === "manual" && this.routeEngine.isRunning()) this.routeEngine.stop();
         this.registry.setMode(msg.deviceId, msg.mode);
         if (msg.mode === "manual") {
@@ -305,6 +340,7 @@ export class FleetHub {
       }
       case "routeStart": {
         if (typeof msg.routeId !== "string" || !/^[a-zA-Z0-9_-]+$/.test(msg.routeId)) throw new Error("Invalid route ID");
+        if (this.runner.active) throw new Error("シーン実行中は簡易ルートを開始できません。");
         const autoDeviceIds = this.registry
           .getAllStates()
           .filter((v) => v.status === "online" && v.mode === "auto")
@@ -406,6 +442,84 @@ export class FleetHub {
 
   private getPoseState(): PoseStateMessage {
     return this.poses.snapshot(this.store.getRobots(), this.fieldStore.get());
+  }
+
+  private getRunState(): SceneRunStateMessage {
+    const state = this.runner.snapshot();
+    return { type: "sceneRunState", state, result: state.phase === "finished" || state.phase === "aborted" ? this.runner.result() : null };
+  }
+
+  // Returns the reason a command was refused, or null.
+  private runCommand(command: NonNullable<ReturnType<typeof parseRunCommand>>): string | null {
+    let failure: string | null = null;
+    switch (command.type) {
+      case "prepare": {
+        if (this.routeEngine.isRunning()) return "簡易ルートの実行中は、シーン実行を始められません。";
+        const map = this.loadMap(command.mapId);
+        if (!map) return "シーンが見つかりません。シーン画面で保存されているか確認してください。";
+        failure = this.runner.prepare(map);
+        if (!failure) this.runMapId = map.id;
+        break;
+      }
+      case "position": failure = this.runner.position(); break;
+      case "start": failure = this.runner.start(); break;
+      case "pause": failure = this.runner.pause(); break;
+      case "resume": failure = this.runner.resume(); break;
+      case "abort": failure = this.runner.abort(); break;
+      case "reset": failure = this.runner.reset(); break;
+    }
+    if (failure) return failure;
+    if (this.runner.prepared && !this.runTimer) this.runTimer = setInterval(() => this.runTick(), RUN_TICK_MS);
+    this.runTick();
+    return null;
+  }
+
+  private runTick(): void {
+    this.runner.tick({ poses: this.getPoseState(), online: (id) => this.registry.getDeviceState(id)?.status === "online" });
+    this.syncRunHandover();
+    if (!this.runner.prepared && this.runTimer) {
+      clearInterval(this.runTimer);
+      this.runTimer = null;
+    }
+    const message = this.getRunState();
+    const payload = JSON.stringify(message);
+    if (payload !== this.lastRunPayload) {
+      this.lastRunPayload = payload;
+      this.broadcastToClients(message);
+    }
+  }
+
+  // シーン実行(確認中の初期位置への移動を含む)の間だけ、対象の機体を自動モードにして駆動を引き継ぐ。
+  private syncRunHandover(): void {
+    const active = this.runner.active;
+    if (active && this.runDevices.length === 0) {
+      this.runDevices = this.runner.controlledDeviceIds().filter((id) => this.registry.hasCapability(id, "drive"));
+      this.runDevices.forEach((id) => this.registry.setMode(id, "auto"));
+      this.broadcastFleetState();
+    } else if (!active && this.runDevices.length > 0) {
+      this.runDevices.forEach((id) => {
+        this.registry.setMode(id, "manual");
+        this.sendDriveToDevice(id, "e", 0, 0);
+      });
+      this.runDevices = [];
+      this.broadcastFleetState();
+    }
+  }
+
+  // 実行中は展示画面の時刻を進行時計に合わせる(完了待ちでは止まる)。
+  private followRunClock(position: number, running: boolean): void {
+    if (this.runMapId === null) return;
+    const now = Date.now();
+    let session = this.exhibit;
+    const apply = (command: Parameters<typeof applyExhibit>[1]) => {
+      const next = applyExhibit(session, command, now);
+      if (typeof next !== "string") session = next;
+    };
+    if (session.mapId !== this.runMapId) apply({ type: "open", mapId: this.runMapId });
+    apply({ type: "seek", time: position });
+    apply({ type: running ? "play" : "pause" });
+    this.exhibit = session;
+    this.broadcastToClients(this.getExhibitState());
   }
 
   private broadcastPoseState(): void {
