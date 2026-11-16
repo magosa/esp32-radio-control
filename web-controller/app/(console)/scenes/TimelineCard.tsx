@@ -25,6 +25,7 @@ export interface TimelineCardProps extends EditorShared {
   playback: PlaybackControls;
   // Where the row and action palette is drawn (the page's right column). Nothing is drawn until it exists.
   paletteSlot: HTMLElement | null;
+  dragActionType?: ActionType | null;
   onDragActionType?: (type: ActionType | null) => void;
 }
 
@@ -341,7 +342,7 @@ export function TimelineCard(props: TimelineCardProps) {
     quantize(pxToTime(event.clientX - event.currentTarget.getBoundingClientRect().left, px), fine);
 
   const onLaneDragOver = (event: DragEvent<HTMLDivElement>, track: Track) => {
-    const type = paletteType.current;
+    const type = paletteType.current ?? props.dragActionType ?? null;
     if (!type) return;
     event.preventDefault();
     const next = dropPreviewFor(track, type, dropPosition(event));
@@ -349,12 +350,13 @@ export function TimelineCard(props: TimelineCardProps) {
     setDrop((current) => (current?.key === next.key ? current : next));
   };
   const onLaneDrop = (event: DragEvent<HTMLDivElement>, track: Track) => {
-    const type = paletteType.current;
+    const type = paletteType.current ?? props.dragActionType ?? null;
     if (!type) return;
     event.preventDefault();
     const next = dropPreviewFor(track, type, dropPosition(event));
     setDrop(null);
     paletteType.current = null;
+    props.onDragActionType?.(null);
     if (!next.preview.ok) { setMessage(next.preview.reason); return; }
     selectTrack(track.id);
     setMessage(null);

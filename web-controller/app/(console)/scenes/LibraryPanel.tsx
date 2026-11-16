@@ -31,29 +31,35 @@ export function LibraryPanel({ map, selection, open, className, onSelect, onEdit
       <button type="button" className={consoleStyles.secondary} onClick={onEditMap}>マップを編集</button>
     </section>
     <section className={styles.section} aria-label="部屋と領域">
-      <h3>部屋と領域</h3>
+      <h3>部屋と領域（{rooms.length}）</h3>
       {rooms.length === 0 && <p className={styles.meta}>領域がありません。「マップを編集」で作成します。</p>}
       <ul>
         {rooms.map((room) => <li key={room.id}>
           <button type="button" className={styles.item} aria-pressed={selection.roomId === room.id}
             onClick={() => onSelect({ trackId: null, actionId: null, blocks: [], roomId: room.id })}>
             <i className={styles.swatch} style={{ background: room.color }} aria-hidden="true" />
-            <span>{room.name}</span>
+            <span>{room.name}<small>{room.kind === "corridor" ? "廊下" : "部屋"} · {room.cells.length}マス</small></span>
           </button>
         </li>)}
       </ul>
     </section>
     <section className={styles.section} aria-label="シーン内のオブジェクト">
-      <h3>シーン内のオブジェクト</h3>
+      <h3>シーン内のオブジェクト（{map.tracks.length}）</h3>
       {map.tracks.length === 0 && <p className={styles.meta}>行がありません。右の「行と動作を追加」から追加します。</p>}
       <ul>
         {map.tracks.map((track) => {
           const Icon = ICONS[track.kind];
+          const detail = track.kind === "robot"
+            ? `${trackKindLabel(track.kind)}${track.robotId ? ` (${track.robotId})` : ""} · 動作 ${track.actions.length}件`
+            : track.kind === "human"
+              ? `${track.count ?? 1}人 · 動作 ${track.actions.length}件`
+              : `${trackKindLabel(track.kind)} · 動作 ${track.actions.length}件`;
           return <li key={track.id}>
             <button type="button" className={styles.item} aria-pressed={selection.trackId === track.id && !selection.actionId && !selection.roomId}
+              style={{ ["--item-color" as string]: track.color }}
               onClick={() => onSelect({ trackId: track.id, actionId: null, blocks: [], roomId: null })}>
               <Icon aria-hidden="true" />
-              <span>{track.name}<small>{trackKindLabel(track.kind)}</small></span>
+              <span>{track.name}<small>{detail}</small></span>
             </button>
           </li>;
         })}

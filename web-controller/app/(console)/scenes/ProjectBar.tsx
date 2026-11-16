@@ -79,6 +79,7 @@ export function ProjectBar({ project, commit, undo, redo, canUndo, canRedo, save
       <button type="button" className={consoleStyles.secondary} disabled={!project} onClick={() => setHistoryOpen(true)}>
         <History aria-hidden="true" />編集履歴
       </button>
+      <span className={styles.barDivider} aria-hidden="true" />
       {project && <FileActions project={project} commit={commit} confirm={confirm} saveSignal={saveSignal} />}
     </div>
     <div className={styles.saveArea}>

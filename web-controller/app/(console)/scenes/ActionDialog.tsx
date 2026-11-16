@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type R
 import {
   actionFields, applyUnlockTarget, endTargets, openActionDraft, setMotion, unlockTargets, validateAction, type FieldSpec,
 } from "@/scene/actionEdit";
+import { pickPoint as resolvePickPoint, pickRoom as resolvePickRoom } from "@/scene/coordinatePick";
 import { shortcutAction } from "@/scene/editorShortcuts";
 import { roomAnchor } from "@/scene/floorPlan";
 import { ROBOT_SIDE_MM, cellPath, headingArrow, svgAngle, svgY } from "@/scene/mapView";
@@ -216,10 +217,16 @@ function useLayout(layout: SceneMap): SceneMap {
   return useMemo(() => ({ ...layout, tracks: [], rooms: layout.rooms.filter((room) => room.cells.length > 0) }), [layout]);
 }
 
-export function PreviewPane({ layout, overlay, note, problem }: { layout: SceneMap; overlay: ReactNode; note?: string; problem?: string }) {
+export function PreviewPane({ layout, overlay, note, problem, onPick }: {
+  layout: SceneMap;
+  overlay: ReactNode;
+  note?: string;
+  problem?: string;
+  onPick?: (p: { x: number; y: number }) => void;
+}) {
   const stageMap = useLayout(layout);
   return <div className={styles.preview}>
-    <MapStage map={stageMap} time={0} showGrid={false} gridMm={layout.editGridMm} overlay={overlay} />
+    <MapStage map={stageMap} time={0} showGrid={true} gridMm={layout.editGridMm} overlay={overlay} onPick={onPick} />
     {note && <p className={styles.note} data-testid="preview-note">{note}</p>}
     {problem && <p className={styles.problem} data-testid="geometry-problem">経路の問題: {problem}</p>}
   </div>;
@@ -331,6 +338,24 @@ export function ActionForm({ map, layout, track, action, update, requestPick }: 
 
   const rotating = action.type === "move" && action.motion === "rotate";
   const roomName = map.rooms.find((room) => room.id === roomOfAction(map, track, action))?.name;
+  const canDirectPickPoint = (action.type === "move" && !rotating) || (action.type === "show" && track.kind === "display");
+  const canDirectPickRoom = action.type === "event-start";
+  const onDirectMapPick = (canDirectPickPoint || canDirectPickRoom)
+    ? (p: { x: number; y: number }) => {
+      const checked = { ...layout, rooms: layout.rooms.filter((room) => room.cells.length > 0) };
+      if (canDirectPickPoint) {
+        const spot = resolvePickPoint(checked, p, action.coordinateMode ?? "grid");
+        setFieldError(null);
+        update((current) => withPoint(current, { x: spot.x, y: spot.y, roomId: spot.roomId, coordinateMode: current.coordinateMode }));
+      } else if (canDirectPickRoom) {
+        const hit = resolvePickRoom(checked, p);
+        if (hit) {
+          setFieldError(null);
+          update((current) => ({ ...current, roomId: hit.roomId }));
+        }
+      }
+    }
+    : undefined;
   return <div className={styles.formGrid}>
     <div className={styles.fields}>
       {fields.slice(0, 1).map(renderField)}
@@ -358,7 +383,7 @@ export function ActionForm({ map, layout, track, action, update, requestPick }: 
       {fieldError && <p className={styles.error} data-testid="field-error">{fieldError}</p>}
     </div>
     <PreviewPane layout={layout} overlay={<ActionOverlay map={map} track={track} action={action} preview={preview} />}
-      note={previewNote(map, track, action, preview)} problem={preview?.geometryProblem} />
+      note={previewNote(map, track, action, preview)} problem={preview?.geometryProblem} onPick={onDirectMapPick} />
   </div>;
 }
 

@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { availableTypes } from "@/scene/actionEdit";
 import { setRoomProps } from "@/scene/mapEditRegions";
 import { compilePlan, samplePlan, type ActionState } from "@/scene/timedPlan";
 import { adjustTimeline } from "@/scene/timelineEdit";
 import { formatTime } from "@/scene/timelineView";
 import {
-  actionTypeLabel, addTrack, deleteActions, deleteTrack, duplicateAction, moveTrackBy, setInitialPose, trackKindLabel, updateTrack,
+  actionTypeLabel, addTrack, deleteActions, duplicateAction, replaceAction, setInitialPose, trackKindLabel, updateTrack,
 } from "@/scene/trackEdit";
-import type { Action, Material, Room, RoomKind, RobotRole, SceneMap, Track } from "@/scene/types";
+import type { Action, ActionType, Material, Room, RoomKind, RobotRole, SceneMap, Track } from "@/scene/types";
 import consoleStyles from "../console.module.css";
 import { EMPTY_SELECTION, type EditorShared, type PlaybackControls } from "./editorTypes";
 import { ColorField, Group, SelectField, TextCommit, ToggleButton } from "./MapEditorFields";
@@ -20,6 +20,7 @@ export interface InspectorProps extends EditorShared {
   playback: PlaybackControls;
   // Opens the S2b map editor dialog (region shape, floor material, furniture).
   onEditMap(): void;
+  onDragActionType?: (type: ActionType | null) => void;
 }
 
 const LOCK_REASON = "この行は編集ロック中のため、変更できません。時間軸でロックを解除すると編集できます。";
@@ -84,7 +85,7 @@ export function Inspector(props: InspectorProps) {
 }
 
 function MapSafetySection({ ctx }: { ctx: Ctx }) {
-  const { map, run } = ctx;
+  const { map, playback, run } = ctx;
   const analysis = useMemo(() => {
     const plan = compilePlan(map);
     const done = samplePlan(plan, plan.duration);
@@ -104,7 +105,16 @@ function MapSafetySection({ ctx }: { ctx: Ctx }) {
       ? <p className={own.help}>安全上の警告や計画エラーはありません。</p>
       : <ul className={own.fields} data-part="safety-warnings">
         {analysis.errors.map((text, index) => <li key={`err-${index}`} className={own.help}>{text}</li>)}
-        {analysis.warnings.map((warning, index) => <li key={`warn-${index}`} className={own.help}>{warning.message}</li>)}
+        {analysis.warnings.map((warning, index) => (
+          <li key={`warn-${index}`} className={own.help}>
+            <span>{warning.message}</span>
+            {warning.at !== undefined && (
+              <button type="button" className={consoleStyles.secondary} onClick={() => playback.seek(warning.at!)}>
+                {formatTime(warning.at)} へ
+              </button>
+            )}
+          </li>
+        ))}
       </ul>}
   </section>;
 }
@@ -198,7 +208,7 @@ function MultiPanel({ ctx }: { ctx: Ctx }) {
 }
 
 function TrackPanel({ ctx, track }: { ctx: Ctx; track: Track }) {
-  const { map, rev, run, fail, confirm, onSelect, requestAction } = ctx;
+  const { map, rev, run, fail, requestAction } = ctx;
   const locked = track.locked;
   const patch = (change: Parameters<typeof updateTrack>[2], label: string) => run((current) => updateTrack(current, track.id, change), label);
   const index = map.tracks.findIndex((item) => item.id === track.id);
@@ -206,10 +216,6 @@ function TrackPanel({ ctx, track }: { ctx: Ctx; track: Track }) {
     const count = Number(text.trim());
     if (!text.trim() || !Number.isInteger(count)) { fail("人数は1〜1000の整数で入力してください。"); return; }
     patch({ count }, "人数の変更");
-  };
-  const remove = async () => {
-    const ok = await confirm("行の削除", `「${track.name}」と、その動作 ${track.actions.length} 件を削除します。元に戻せます。`, { danger: true, confirmLabel: "削除する" });
-    if (ok && run((current) => deleteTrack(current, track.id), "行の削除")) onSelect(EMPTY_SELECTION);
   };
   const initial = initialText(track);
   return <>
@@ -234,38 +240,66 @@ function TrackPanel({ ctx, track }: { ctx: Ctx; track: Track }) {
         </ToggleButton>
       ))}
     </Group>}
-    {initial && <section className={own.section}>
-      <p className={own.summary}>{initial}</p>
+    {(initial || track.kind === "robot") && <section className={own.section}>
+      {initial && <p className={own.summary}>{initial}</p>}
       <div className={own.actions}>
-        <button type="button" className={consoleStyles.secondary} disabled={locked} onClick={() => pickInitial(ctx, track)}>初期位置を設定</button>
+        {initial && <button type="button" className={consoleStyles.secondary} disabled={locked} onClick={() => pickInitial(ctx, track)}>初期位置を設定</button>}
+        {track.kind === "robot" && <button type="button" className={consoleStyles.primary} disabled={locked}
+          onClick={() => requestAction({ trackId: track.id, actionId: null })}>シーケンスを一括設定</button>}
       </div>
     </section>}
-    <section className={own.section} aria-label="動作の追加">
-      <h4 className={own.sectionTitle}>動作の追加</h4>
+    <section className={own.section} role="group" aria-label="動作を追加">
+      <h4 className={own.sectionTitle}>動作を追加（クリックまたは時間軸・地図へドラッグ）</h4>
       <div className={own.actions}>
         {availableTypes(track).map((type) => (
           <button key={type} type="button" className={consoleStyles.secondary} disabled={locked}
+            draggable={!locked}
+            onDragStart={(event: DragEvent<HTMLButtonElement>) => {
+              event.dataTransfer.setData("application/x-scene-action", type);
+              event.dataTransfer.effectAllowed = "copy";
+              ctx.onDragActionType?.(type);
+            }}
+            onDragEnd={() => ctx.onDragActionType?.(null)}
             onClick={() => requestAction({ trackId: track.id, actionId: null, type })}>＋ {actionTypeLabel(type)}</button>
         ))}
-      </div>
-    </section>
-    <section className={own.section} aria-label="行の操作">
-      <div className={own.actions}>
-        <button type="button" className={consoleStyles.secondary} disabled={locked} onClick={() => run((current) => moveTrackBy(current, track.id, -1), "行を上へ")}>↑ 上へ</button>
-        <button type="button" className={consoleStyles.secondary} disabled={locked} onClick={() => run((current) => moveTrackBy(current, track.id, 1), "行を下へ")}>↓ 下へ</button>
-        <button type="button" className={`${consoleStyles.secondary} ${own.danger}`} disabled={locked} onClick={remove}>行を削除</button>
       </div>
     </section>
   </>;
 }
 
 function ActionPanel({ ctx, track, action }: { ctx: Ctx; track: Track; action: Action }) {
-  const { map, playback, run, confirm, onSelect, requestAction } = ctx;
+  const { map, rev, playback, run, fail, confirm, onSelect, requestAction, requestPick } = ctx;
   const locked = track.locked;
   const plan = useMemo(() => compilePlan(map), [map]);
   const state = samplePlan(plan, playback.time).actionStates[action.id];
   const robot = track.kind === "robot";
+  const rotating = action.type === "move" && action.motion === "rotate";
   const initial = initialText(track);
+
+  const patchAction = (change: Partial<Action>, label: string) => {
+    const next: Action = {
+      ...action,
+      ...change,
+      ...(change.runSeconds !== undefined && rotating ? { rotationSeconds: change.runSeconds } : {}),
+    };
+    run((current) => replaceAction(current, track.id, next), label);
+  };
+  const commitNumber = (text: string, label: string, applyValue: (n: number) => Partial<Action>) => {
+    const n = Number(text.trim());
+    if (!text.trim() || !Number.isFinite(n)) { fail(`${label}は数値で入力してください。`); return; }
+    patchAction(applyValue(n), `${label}の変更`);
+  };
+  const pickMoveTarget = () => {
+    requestPick({
+      mode: "move", kind: track.kind, title: `${action.name} の位置を指定`, color: track.color,
+      help: "マップをクリックして位置を決めます。「適用」するまで保存されません。",
+      value: { x: action.x, y: action.y, roomId: action.roomId, ...(action.coordinateMode ? { coordinateMode: action.coordinateMode } : {}) },
+      onSelect: (value) => ctx.edit((current) => replaceAction(current, track.id, {
+        ...action, x: value.x, y: value.y, roomId: value.roomId ?? action.roomId,
+        ...(value.coordinateMode ? { coordinateMode: value.coordinateMode } : {}),
+      }), "位置の変更"),
+    });
+  };
   const duplicate = () => {
     let id = "";
     const ok = run((current) => { const result = duplicateAction(current, action.id); id = result.actionId; return result.map; }, "動作の複製");
@@ -285,7 +319,32 @@ function ActionPanel({ ctx, track, action }: { ctx: Ctx; track: Track; action: A
         : <p className={own.help}>模擬開始 {formatTime(state.start)} / 完了 {formatTime(state.end)}{state.reason ? ` · ${state.reason}` : ""}</p>}
     </section>}
     {locked && <p className={own.lock}>{LOCK_REASON}</p>}
+    <div className={own.fields}>
+      <TextCommit label="動作名" value={action.name} syncKey={rev} disabled={locked}
+        onCommit={(name) => patchAction({ name }, "動作名の変更")} />
+      <TextCommit label="開始（秒）" value={String(Math.round(action.position * 10) / 10)} syncKey={rev} disabled={locked}
+        onCommit={(t) => commitNumber(t, "開始時刻", (position) => ({ position }))} />
+      <TextCommit label="実行時間（秒）" value={String(Math.round(action.runSeconds * 10) / 10)} syncKey={rev} disabled={locked}
+        onCommit={(t) => commitNumber(t, "実行時間", (runSeconds) => ({ runSeconds }))} />
+      {((action.type === "move" && !rotating) || (action.type === "show" && track.kind === "display")) && <>
+        <TextCommit label="X座標 (mm)" value={String(Math.round(action.x))} syncKey={rev} disabled={locked}
+          onCommit={(t) => commitNumber(t, "X座標", (x) => ({ x }))} />
+        <TextCommit label="Y座標 (mm)" value={String(Math.round(action.y))} syncKey={rev} disabled={locked}
+          onCommit={(t) => commitNumber(t, "Y座標", (y) => ({ y }))} />
+      </>}
+      {action.type === "move" && rotating && (
+        <TextCommit label="回転後の角度 (°)" value={String(Math.round(action.yaw))} syncKey={rev} disabled={locked}
+          onCommit={(t) => commitNumber(t, "回転角度", (yaw) => ({ yaw }))} />
+      )}
+      {(action.type === "show" || action.type === "event-start") && (
+        <TextCommit label="表示する言葉" value={action.text} syncKey={rev} disabled={locked}
+          onCommit={(text) => patchAction({ text }, "表示テキストの変更")} />
+      )}
+    </div>
     <div className={own.actions}>
+      {((action.type === "move" && !rotating) || (action.type === "show" && track.kind === "display")) && (
+        <button type="button" className={consoleStyles.secondary} disabled={locked} onClick={pickMoveTarget}>マップで位置を指定</button>
+      )}
       <button type="button" className={consoleStyles.primary} disabled={locked} onClick={() => requestAction({ trackId: track.id, actionId: action.id })}>
         {robot ? "シーケンスを一括設定" : "アクションを編集"}
       </button>

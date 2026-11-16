@@ -239,14 +239,14 @@ function Editor({ scene, project, map, mapId }: {
             <PlaybackBar playback={playback} onFullscreen={() => setPreviewOpen(true)} />
           </div>
         </section>
-        <TimelineCard {...shared} playback={playback} paletteSlot={paletteSlot} onDragActionType={setDragActionType} />
+        <TimelineCard {...shared} playback={playback} paletteSlot={paletteSlot} dragActionType={dragActionType} onDragActionType={setDragActionType} />
       </div>
       <div className={styles.controls}>
         <section className={`${consoleStyles.preferenceCard}`} aria-label="行と動作の追加">
-          <h2>行と動作を追加</h2>
+          <h2>行の管理</h2>
           <div ref={setPaletteSlot} className={timeline.paletteColumn} />
         </section>
-        <Inspector {...shared} playback={playback} onEditMap={editMap} />
+        <Inspector {...shared} playback={playback} onEditMap={editMap} onDragActionType={setDragActionType} />
       </div>
     </div>
     <StatusBar notice={notice} map={map} saveState={scene.saveState} locked={scene.locked} />

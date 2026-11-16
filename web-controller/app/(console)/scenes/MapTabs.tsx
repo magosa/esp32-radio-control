@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { BookOpen, Pencil, Plus, X } from "lucide-react";
 import { copyMapLayout, createProject } from "@/scene/model";
 import { MAX_MAPS, afterDelete, canAddMap, canDeleteMap, neighbourTab, nextMapName, validateMapName } from "@/scene/mapTabsLogic";
 import { SCENARIO_CATALOG, buildScenarioMap } from "@/scene/scenarioLibrary";
@@ -157,17 +158,22 @@ export function MapTabs({ project, activeMapId, onSelect, commit }: MapTabsProps
               ref={(node) => { if (node) tabRefs.current.set(map.id, node); else tabRefs.current.delete(map.id); }}
               onClick={() => onSelect(map.id)} onDoubleClick={() => startRename(map)}
               onKeyDown={(event) => onTabKeyDown(event, map)}>{map.name}</button>}
-          <button type="button" className={styles.iconButton} aria-label={`マップ「${map.name}」の名前を変更`}
-            onMouseDown={(event) => event.preventDefault()} onClick={() => startRename(map)}>名前変更</button>
+          <button type="button" className={styles.iconButton} aria-label={`マップ「${map.name}」の名前を変更`} title="名前変更（ダブルクリックまたはF2）"
+            onMouseDown={(event) => event.preventDefault()} onClick={() => startRename(map)}>
+            <Pencil aria-hidden="true" />
+          </button>
           <button type="button" className={styles.iconButton} aria-label={`マップ「${map.name}」を削除`}
-            disabled={!deletable} title={deletable ? undefined : "最後のマップは削除できません"}
-            onClick={() => openDialog({ kind: "delete", id: map.id })}>削除</button>
+            disabled={!deletable} title={deletable ? "このマップを削除" : "最後のマップは削除できません"}
+            onClick={() => openDialog({ kind: "delete", id: map.id })}>
+            <X aria-hidden="true" />
+          </button>
         </div>;
       })}
+      <span className={styles.divider} aria-hidden="true" />
       <button type="button" className={`${consoleStyles.secondary} ${styles.add}`} disabled={!addable}
-        onClick={() => openDialog({ kind: "add" })}>マップを追加</button>
+        onClick={() => openDialog({ kind: "add" })}><Plus aria-hidden="true" />マップを追加</button>
       <button type="button" className={`${consoleStyles.secondary} ${styles.add}`} disabled={!addable}
-        onClick={() => openDialog({ kind: "scenarios" })}>テストシナリオ集</button>
+        onClick={() => openDialog({ kind: "scenarios" })}><BookOpen aria-hidden="true" />テストシナリオ集</button>
       {!addable && <span className={styles.limit}>マップは最大{MAX_MAPS}枚です</span>}
     </div>
     {message && <p className={styles.error} role="alert">{message}</p>}
