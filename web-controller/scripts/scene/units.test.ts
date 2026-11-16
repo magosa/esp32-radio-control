@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { defaultId, ensureRuntimePolyfills } from "../../scene/ids";
 import {
   AREA_HEIGHT_MM,
   AREA_WIDTH_MM,
@@ -44,4 +45,21 @@ test("shortestTurn crosses ±180 and prefers clockwise at exactly 180", () => {
 test("cell grid exactly covers the drawable area", () => {
   assert.equal(COLUMNS * CELL_MM, AREA_WIDTH_MM);
   assert.equal(ROWS * CELL_MM, AREA_HEIGHT_MM);
+});
+
+test("ensureRuntimePolyfills provides structuredClone and defaultId on older runtimes", () => {
+  const g = globalThis as Record<string, unknown>;
+  const orig = g.structuredClone;
+  try {
+    delete g.structuredClone;
+    ensureRuntimePolyfills();
+    assert.equal(typeof g.structuredClone, "function");
+    const sample = { a: 1, nested: [{ b: "x" }] };
+    const copy = structuredClone(sample);
+    assert.deepEqual(copy, sample);
+    assert.notEqual(copy.nested, sample.nested);
+    assert.match(defaultId(), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  } finally {
+    g.structuredClone = orig;
+  }
 });

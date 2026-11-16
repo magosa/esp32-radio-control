@@ -1,3 +1,5 @@
+import "./ids";
+
 export const AREA_WIDTH_MM = 1100;
 export const AREA_HEIGHT_MM = 620;
 export const CELL_MM = 20;

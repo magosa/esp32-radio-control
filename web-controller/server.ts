@@ -1,3 +1,4 @@
+import "./scene/ids";
 import { createServer } from "http";
 import path from "path";
 import next from "next";

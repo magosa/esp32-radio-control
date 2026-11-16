@@ -1,3 +1,4 @@
+import "./ids";
 import type { SceneProject } from "./types";
 import type { SaveState, SceneHistoryMeta, SceneHistoryRecord } from "./historyTypes";
 

@@ -1,3 +1,4 @@
+import "../scene/ids";
 import fs from "node:fs";
 import path from "node:path";
 import { MAX_ROBOT_MARKER_ID } from "../localization/geometry";
