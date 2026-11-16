@@ -9,7 +9,7 @@ import { LocalizerRuntimeProvider, useLocalizerRuntime } from "@/hooks/useLocali
 import { useFleetAppearance } from "@/hooks/useFleetAppearance";
 import styles from "./console.module.css";
 
-const NAV = [
+export const CONSOLE_NAV = [
   { href: "/control", label: "制御", title: "フリート管理", Icon: Gamepad2 },
   { href: "/field", label: "フロア", title: "フロアマップ", Icon: MapIcon },
   { href: "/robots", label: "ロボット", title: "ロボット構成", Icon: Bot },
@@ -28,7 +28,7 @@ function ConsoleFrame({ children }: { children: ReactNode }) {
   const connected = status === "connected";
   const connectionLabel = { connected: "ハブ接続中", connecting: "ハブ接続中…",
     disconnected: "ハブ未接続", error: "ハブ接続エラー" }[status];
-  const current = NAV.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+  const current = CONSOLE_NAV.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
 
   return <main className={styles.fleet} data-theme={theme} data-wide={pathname.startsWith("/scenes")} data-motion={appearance.motion ? "on" : "off"} style={style}>
     <header className={styles.header}>
@@ -41,7 +41,7 @@ function ConsoleFrame({ children }: { children: ReactNode }) {
         </span>}
       </div>
       <nav className={styles.headerActions} aria-label="フリートナビゲーション">
-        {NAV.map(({ href, label, Icon }) => <Link key={href} href={href} className={styles.secondary}
+        {CONSOLE_NAV.map(({ href, label, Icon }) => <Link key={href} href={href} className={styles.secondary}
           aria-label={label} title={label} aria-current={current?.href === href ? "page" : undefined}>
           <Icon aria-hidden="true" /><span>{label}</span>
         </Link>)}

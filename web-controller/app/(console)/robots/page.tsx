@@ -57,7 +57,7 @@ export default function RobotsPage() {
   const connected = status === "connected";
   const cameras = devices.filter((device) => device.capabilities.includes("camera"));
 
-  return <div className={styles.preferences}>
+  return <div className={styles.robotsGrid}>
     {!robots.length && <p className={styles.empty}>{connected ? "登録済みのロボットはありません" : "ロボット一覧を取得できません"}</p>}
     {robots.map((robot) => {
       const camera = devices.find((device) => device.deviceId === robot.cameraDeviceId);

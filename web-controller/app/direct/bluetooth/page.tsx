@@ -20,6 +20,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useFleetAppearance } from "@/hooks/useFleetAppearance";
+import { CONSOLE_NAV } from "../../(console)/ConsoleShell";
 import fleetStyles from "../../(console)/console.module.css";
 import styles from "./bluetooth.module.css";
 
@@ -160,53 +161,62 @@ export default function ControllerPage() {
 
   return (
     <main className={`${fleetStyles.fleet} ${styles.bluetooth}`} data-theme={theme} data-motion={appearance.motion ? "on" : "off"} style={style}>
-      <header className={styles.header}>
-        <div className={styles.headerRow}>
-          <div className={styles.brand}>
-            <div>
-              <h1>Bluetoothコントローラー</h1>
-              <p>{status === "connected" ? deviceName || "ESP32_RC_Car" : "Web Bluetooth SPP"}</p>
-            </div>
-            <span className={fleetStyles.connection} role="status">
-              <Radio aria-hidden="true" data-connected={status === "connected"} />{connectionLabel}
-            </span>
-          </div>
+      <header className={fleetStyles.header}>
+        <div className={fleetStyles.brand}>
+          <h1>Bluetooth</h1>
+          <span className={fleetStyles.connection} role="status">
+            <Radio aria-hidden="true" data-connected={status === "connected"} />
+            {connectionLabel}（{status === "connected" ? deviceName || "ESP32_RC_Car" : "Web Bluetooth SPP"}）
+          </span>
+        </div>
 
-          <nav className={fleetStyles.headerActions} aria-label="コントローラーナビゲーション">
+        <nav className={fleetStyles.headerActions} aria-label="フリートナビゲーション">
+          {CONSOLE_NAV.map(({ href, label, Icon }) => (
             <Link
-              href="/control"
+              key={href}
+              href={href}
+              className={fleetStyles.secondary}
+              aria-label={label}
+              title={label}
+              aria-current={href === "/direct/bluetooth" ? "page" : undefined}
+            >
+              <Icon aria-hidden="true" />
+              <span>{label}</span>
+            </Link>
+          ))}
+          {status === "connected" ? (
+            <button
+              onClick={disconnect}
               className={fleetStyles.secondary}
             >
-              <Users aria-hidden="true" />
-              フリート
-            </Link>
-            {status === "connected" ? (
-              <button
-                onClick={disconnect}
-                className={fleetStyles.secondary}
-              >
-                <BluetoothOff aria-hidden="true" />
-                切断
-              </button>
-            ) : (
-              <button
-                onClick={connect}
-                disabled={status === "connecting" || !isSupported}
-                className={fleetStyles.primary}
-              >
-                <Bluetooth aria-hidden="true" />
-                {status === "connecting" ? "検索中…" : "Bluetooth接続"}
-              </button>
-            )}
-          </nav>
-        </div>
-        {errorMessage && (
-          <div className={`${fleetStyles.notice} ${styles.errorNotice}`} role="alert">
-            <AlertTriangle aria-hidden="true" />
-            <span>{errorMessage}</span>
-          </div>
-        )}
+              <BluetoothOff aria-hidden="true" />
+              <span>切断</span>
+            </button>
+          ) : (
+            <button
+              onClick={connect}
+              disabled={status === "connecting" || !isSupported}
+              className={fleetStyles.primary}
+            >
+              <Bluetooth aria-hidden="true" />
+              <span>{status === "connecting" ? "検索中…" : "接続"}</span>
+            </button>
+          )}
+          <button
+            onClick={handleEmergencyStop}
+            className={fleetStyles.emergency}
+          >
+            <Square aria-hidden="true" />
+            <span>停止</span>
+          </button>
+        </nav>
       </header>
+      {errorMessage && (
+        <div className={`${fleetStyles.notice} ${styles.errorNotice}`} role="alert">
+          <AlertTriangle aria-hidden="true" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
 
       <div className={styles.content}>
       <section className={styles.metrics} aria-label="接続テレメトリ">

@@ -4,6 +4,7 @@ import { useRef, useState, type KeyboardEvent } from "react";
 import { SceneRunPanel } from "./SceneRunPanel";
 import { SimpleRoutes } from "./SimpleRoutes";
 import styles from "../console.module.css";
+import runStyles from "./run.module.css";
 
 const TABS = [
   { id: "scene", label: "シーン実行" },
@@ -24,7 +25,7 @@ export default function RunPage() {
   };
 
   return <>
-    <div className={styles.segmented} role="tablist" aria-label="実行の種類">
+    <div className={`${styles.segmented} ${runStyles.tabs}`} role="tablist" aria-label="実行の種類">
       {TABS.map((item, index) => <button key={item.id} ref={(el) => { buttons.current[index] = el; }} role="tab" id={`run-tab-${item.id}`}
         aria-selected={tab === item.id} aria-controls={`run-panel-${item.id}`} tabIndex={tab === item.id ? 0 : -1}
         onClick={() => setTab(item.id)} onKeyDown={(event) => onKeyDown(event, index)}>{item.label}</button>)}
