@@ -78,8 +78,35 @@ export function Inspector(props: InspectorProps) {
     <div className={own.body}>
       {error && <p role="alert" className={own.alert}>{error}</p>}
       {body}
+      <MapSafetySection ctx={ctx} />
     </div>
   </aside>;
+}
+
+function MapSafetySection({ ctx }: { ctx: Ctx }) {
+  const { map, run } = ctx;
+  const analysis = useMemo(() => {
+    const plan = compilePlan(map);
+    const done = samplePlan(plan, plan.duration);
+    return { errors: done.errors, warnings: done.warnings };
+  }, [map]);
+  const setDoorMode = (mode: "story" | "strict") => {
+    if (map.doorMode === mode) return;
+    run((current) => ({ ...structuredClone(current), doorMode: mode }), "扉の確認モードの変更");
+  };
+  return <section className={own.section} aria-label="安全と扉の確認">
+    <Group label="扉の確認モード">
+      <ToggleButton pressed={map.doorMode === "story"} onClick={() => setDoorMode("story")}>ストーリー確認</ToggleButton>
+      <ToggleButton pressed={map.doorMode === "strict"} onClick={() => setDoorMode("strict")}>連携確認</ToggleButton>
+    </Group>
+    <h4 className={own.sectionTitle}>安全の警告（{analysis.warnings.length + analysis.errors.length}件）</h4>
+    {analysis.errors.length === 0 && analysis.warnings.length === 0
+      ? <p className={own.help}>安全上の警告や計画エラーはありません。</p>
+      : <ul className={own.fields} data-part="safety-warnings">
+        {analysis.errors.map((text, index) => <li key={`err-${index}`} className={own.help}>{text}</li>)}
+        {analysis.warnings.map((warning, index) => <li key={`warn-${index}`} className={own.help}>{warning.message}</li>)}
+      </ul>}
+  </section>;
 }
 
 function Guidance() {

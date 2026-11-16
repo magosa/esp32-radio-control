@@ -15,7 +15,7 @@ const KIND_BUTTONS: { kind: TrackKind; label: string }[] = [
 export interface TrackPaletteProps {
   track: Track | null;
   selectedBlocks: number;
-  onAddTrack(kind: TrackKind): void;
+  onAddTrack(kind: TrackKind, roomId?: string): void;
   onAddAction(type: ActionType): void;
   onMoveTrack(direction: -1 | 1): void;
   onDeleteTrack(): void;
@@ -40,6 +40,10 @@ export function TrackPalette(props: TrackPaletteProps) {
       <span id="tl-add-track" className={styles.groupTitle}>行を追加</span>
       {KIND_BUTTONS.map(({ kind, label }) => <button key={kind} type="button" className={consoleStyles.secondary}
         onClick={() => props.onAddTrack(kind)}>＋ {label}</button>)}
+      <button type="button" className={consoleStyles.secondary} disabled={!track}
+        onClick={() => { if (track) props.onAddTrack(track.kind, track.roomId); }}>
+        ＋ 選択中と同種の行を追加
+      </button>
     </div>
     <div className={styles.group} role="group" aria-labelledby="tl-add-action">
       <span id="tl-add-action" className={styles.groupTitle}>{track ? `動作を追加（${track.name}）` : "動作を追加"}</span>

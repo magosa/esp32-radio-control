@@ -1,24 +1,28 @@
 "use client";
 
-import { useRef, useState, type ChangeEvent } from "react";
-import { Download, Upload } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { Download, FilePlus2, Upload } from "lucide-react";
 import { MAX_FILE_BYTES, TOO_LARGE_MESSAGE, fileNameFor, parseSceneFile, replaceProject } from "@/scene/sceneFile";
-import { projectForSave } from "@/scene/model";
+import { createProject, projectForSave } from "@/scene/model";
 import type { Commit } from "@/scene/sceneSession";
 import type { SceneProject } from "@/scene/types";
 import consoleStyles from "../console.module.css";
+import type { Confirm } from "./editorTypes";
 import styles from "./dialog.module.css";
 
 export interface FileActionsProps {
   project: SceneProject;
   commit: Commit;
+  confirm?: Confirm;
+  saveSignal?: number;
 }
 
-export function FileActions({ project, commit }: FileActionsProps) {
+export function FileActions({ project, commit, confirm, saveSignal = 0 }: FileActionsProps) {
   const input = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const lastSignal = useRef(saveSignal);
 
-  const save = () => {
+  const save = useCallback(() => {
     try {
       const blob = new Blob([JSON.stringify(projectForSave(project), null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -33,6 +37,24 @@ export function FileActions({ project, commit }: FileActionsProps) {
     } catch (cause) {
       setError(`保存できません: ${cause instanceof Error ? cause.message : String(cause)}`);
     }
+  }, [project]);
+
+  useEffect(() => {
+    if (saveSignal !== lastSignal.current) {
+      lastSignal.current = saveSignal;
+      save();
+    }
+  }, [saveSignal, save]);
+
+  const resetProject = async () => {
+    if (confirm) {
+      const ok = await confirm("新規プロジェクト", "現在のプロジェクトを空の新規プロジェクトで置き換えます。元に戻せます。", {
+        danger: true,
+        confirmLabel: "新規作成",
+      });
+      if (!ok) return;
+    }
+    setError(commit((draft) => replaceProject(draft, createProject("新規プロジェクト")), "新規プロジェクト"));
   };
 
   const open = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -54,6 +76,9 @@ export function FileActions({ project, commit }: FileActionsProps) {
   };
 
   return <>
+    <button type="button" className={consoleStyles.secondary} onClick={() => { void resetProject(); }}>
+      <FilePlus2 aria-hidden="true" />新規
+    </button>
     <button type="button" className={consoleStyles.secondary} onClick={save}>
       <Download aria-hidden="true" />JSON保存
     </button>

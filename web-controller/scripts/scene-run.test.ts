@@ -253,3 +253,24 @@ test("robot settings: priority and footprint are saved, checked, and reported on
   r.step();
   assert.equal(r.state().robots[0].priority, 2);
 });
+
+test("positioning sorts by priority before markerId, reports initial mismatches and excluded robots, and updates waitTimeout", (context) => {
+  const scene = sceneOf([
+    robot("A", "robot-d0", 110, [move("a1", 1, 6, 410, 110)]),
+    robot("B", "robot-d1", 310, [move("b1", 1, 6, 410, 310)]),
+  ]);
+  // 3 robots on field, only 2 in scene; both A and B start away from initial poses.
+  const r = rig(context, scene, [{ x: 180, y: 110 }, { x: 180, y: 310 }, { x: 500, y: 500 }]);
+  r.operator.receive({ type: "setRobotSettings", requestId: "p1", robotId: "robot-d1", priority: 1 });
+  r.command({ type: "prepare", mapId: "m1" });
+  r.step();
+  const s = r.state();
+  assert.equal(s.initialMismatches?.length, 2);
+  assert.equal(s.excludedRobots?.length, 1);
+  assert.equal(s.excludedRobots?.[0].robotId, "robot-d2");
+  assert.equal(s.excludedRobots?.[0].status, "excluded");
+  assert.deepEqual(s.positioning.items.map((item) => item.name), ["B", "A"], "priority 1 robot B comes before unset robot A");
+
+  assert.equal(r.command({ type: "setWaitTimeout", seconds: 45 }).ok, true);
+  assert.equal(r.state().waitTimeoutSec, 45);
+});

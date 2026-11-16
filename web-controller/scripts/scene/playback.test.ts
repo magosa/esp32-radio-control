@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  SPEEDS, clampTo, home, initialPlayback, seek, setSpeed, step, toggle, toggleLoop,
+  SPEEDS, clampTo, editPoints, home, initialPlayback, nextEditPoint, pause, prevEditPoint, seek, setSpeed, step, toggle, toggleLoop,
   type PlaybackState,
 } from "../../scene/playback";
+import type { SceneMap } from "../../scene/types";
 
 const state = (over: Partial<PlaybackState> = {}): PlaybackState => ({
   time: 0, running: false, looping: false, speed: 1, ...over,
@@ -133,4 +134,29 @@ test("clampTo pulls the time into a shrunken duration", () => {
 
 test("clampTo keeps a running state running while it still has time", () => {
   assert.equal(clampTo(state({ time: 5, running: true }), 10).running, true);
+});
+
+test("pause stops a running playback without changing time", () => {
+  assert.deepEqual(pause(state({ time: 4.2, running: true })), state({ time: 4.2, running: false }));
+  assert.deepEqual(pause(state({ time: 4.2, running: false })), state({ time: 4.2, running: false }));
+});
+
+test("editPoints collects sorted unique bar boundaries and prev/next jump across them", () => {
+  const map = {
+    tracks: [
+      { muted: false, actions: [{ position: 1, runSeconds: 4 }, { position: 5, runSeconds: 3 }] },
+      { muted: true, actions: [{ position: 2, runSeconds: 2 }] },
+      { muted: false, actions: [{ position: 1, runSeconds: 2 }] },
+    ],
+  } as unknown as Pick<SceneMap, "tracks">;
+  const pts = editPoints(map, 10);
+  assert.deepEqual(pts, [0, 1, 3, 5, 8, 10]);
+  assert.equal(nextEditPoint(pts, 0), 1);
+  assert.equal(nextEditPoint(pts, 1), 3);
+  assert.equal(nextEditPoint(pts, 2.5), 3);
+  assert.equal(nextEditPoint(pts, 10), 10);
+  assert.equal(prevEditPoint(pts, 10), 8);
+  assert.equal(prevEditPoint(pts, 3), 1);
+  assert.equal(prevEditPoint(pts, 2.5), 1);
+  assert.equal(prevEditPoint(pts, 0), 0);
 });

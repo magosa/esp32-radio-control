@@ -13,10 +13,20 @@ test("Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo (Cmd on macOS too)", () => {
   assert.equal(shortcutAction(key({ key: "z", metaKey: true })), "undo");
 });
 
+test("Ctrl+D duplicates, Ctrl+S saves, Space toggles play, Delete deletes", () => {
+  assert.equal(shortcutAction(key({ key: "d", ctrlKey: true })), "duplicate");
+  assert.equal(shortcutAction(key({ key: "D", metaKey: true })), "duplicate");
+  assert.equal(shortcutAction(key({ key: "s", ctrlKey: true })), "save");
+  assert.equal(shortcutAction(key({ key: "s", metaKey: true })), "save");
+  assert.equal(shortcutAction(key({ key: " " })), "togglePlay");
+  assert.equal(shortcutAction(key({ key: " " }, el("BUTTON"))), null);
+  assert.equal(shortcutAction(key({ key: "Delete" })), "delete");
+});
+
 test("plain keys, Alt combinations and other shortcuts are ignored", () => {
   assert.equal(shortcutAction(key({ key: "z" })), null);
   assert.equal(shortcutAction(key({ key: "z", ctrlKey: true, altKey: true })), null);
-  assert.equal(shortcutAction(key({ key: "s", ctrlKey: true })), null);
+  assert.equal(shortcutAction(key({ key: "x", ctrlKey: true })), null);
 });
 
 test("text fields keep their own undo", () => {

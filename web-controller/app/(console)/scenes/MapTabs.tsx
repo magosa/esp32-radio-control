@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { copyMapLayout, createProject } from "@/scene/model";
 import { MAX_MAPS, afterDelete, canAddMap, canDeleteMap, neighbourTab, nextMapName, validateMapName } from "@/scene/mapTabsLogic";
+import { SCENARIO_CATALOG, buildScenarioMap } from "@/scene/scenarioLibrary";
 import type { Commit } from "@/scene/sceneSession";
 import type { SceneMap, SceneProject } from "@/scene/types";
 import consoleStyles from "../console.module.css";
@@ -15,7 +16,7 @@ export interface MapTabsProps {
   commit: Commit;
 }
 
-type DialogState = { kind: "add" } | { kind: "delete"; id: string } | null;
+type DialogState = { kind: "add" } | { kind: "delete"; id: string } | { kind: "scenarios" } | null;
 
 function Modal({ title, onClose, children }: { title: string; onClose(): void; children: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -37,6 +38,7 @@ export function MapTabs({ project, activeMapId, onSelect, commit }: MapTabsProps
   const [dialog, setDialog] = useState<DialogState>(null);
   const [source, setSource] = useState("new");
   const [addName, setAddName] = useState("");
+  const [scenarioId, setScenarioId] = useState(SCENARIO_CATALOG[0].id);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const finished = useRef(false);
@@ -164,9 +166,42 @@ export function MapTabs({ project, activeMapId, onSelect, commit }: MapTabsProps
       })}
       <button type="button" className={`${consoleStyles.secondary} ${styles.add}`} disabled={!addable}
         onClick={() => openDialog({ kind: "add" })}>マップを追加</button>
+      <button type="button" className={`${consoleStyles.secondary} ${styles.add}`} disabled={!addable}
+        onClick={() => openDialog({ kind: "scenarios" })}>テストシナリオ集</button>
       {!addable && <span className={styles.limit}>マップは最大{MAX_MAPS}枚です</span>}
     </div>
     {message && <p className={styles.error} role="alert">{message}</p>}
+    {dialog?.kind === "scenarios" && <Modal title="テストシナリオ集" onClose={closeDialog}>
+      <form onSubmit={(event) => {
+        event.preventDefault();
+        if (!canAddMap(maps.length)) { setDialogError(`マップは最大${MAX_MAPS}枚です`); return; }
+        let created: SceneMap;
+        try {
+          created = buildScenarioMap(scenarioId);
+        } catch (err) {
+          setDialogError(err instanceof Error ? err.message : String(err));
+          return;
+        }
+        const error = commit((draft) => { draft.maps.push(created); }, "テストシナリオの追加");
+        if (error) { setDialogError(error); return; }
+        setDialog(null);
+        onSelect(created.id);
+        focusTab(created.id);
+      }}>
+        <label className={styles.field}>
+          <span>シナリオを選択</span>
+          <select value={scenarioId} onChange={(event) => setScenarioId(event.target.value)}>
+            {SCENARIO_CATALOG.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+          </select>
+        </label>
+        <p>{SCENARIO_CATALOG.find((item) => item.id === scenarioId)?.summary}</p>
+        {dialogError && <p className={styles.error} role="alert">{dialogError}</p>}
+        <div className={styles.actions}>
+          <button type="button" className={consoleStyles.secondary} onClick={closeDialog}>キャンセル</button>
+          <button type="submit" className={consoleStyles.primary}>マップとして追加</button>
+        </div>
+      </form>
+    </Modal>}
     {dialog?.kind === "add" && <Modal title="マップを追加" onClose={closeDialog}>
       <form onSubmit={(event) => { event.preventDefault(); applyAdd(); }}>
         <fieldset className={styles.choices}>

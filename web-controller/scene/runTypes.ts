@@ -11,7 +11,8 @@ export type RunCommand =
   | { type: "pause" }
   | { type: "resume" }
   | { type: "abort" }
-  | { type: "reset" };
+  | { type: "reset" }
+  | { type: "setWaitTimeout"; seconds: number };
 
 export interface RunCheck {
   id: string;
@@ -80,8 +81,17 @@ export interface RunResultRow {
   posErrMm: number | null;
   yawErrDeg: number | null;
   waitedSec: number;
-  status: "arrived" | "failed" | "pending";
+  status: "arrived" | "failed" | "pending" | "running" | "waiting";
   note: string;
+}
+
+export interface InitialMismatch {
+  trackId: string;
+  name: string;
+  posErrMm: number | null;
+  yawErrDeg: number | null;
+  posOk: boolean;
+  yawOk: boolean;
 }
 
 export interface RunSnapshot {
@@ -91,6 +101,11 @@ export interface RunSnapshot {
   mapName: string;
   // One line: why the clock is stopped, or the state.
   reason: string;
+  // Additional concurrent anomaly banners (e.g. a lost robot while waiting at a bar end, W1-4).
+  alerts?: string[];
+  waitTimeoutSec?: number;
+  initialMismatches?: InitialMismatch[];
+  excludedRobots?: RunRobot[];
   halt: { kind: HaltKind; since: number } | null;
   resume: RunCondition[];
   clock: number;
@@ -127,13 +142,17 @@ export function parseRunCommand(value: unknown): RunCommand | null {
       return typeof item.mapId === "string" && item.mapId.length > 0 && item.mapId.length <= 100 ? { type: "prepare", mapId: item.mapId } : null;
     case "position": case "start": case "pause": case "resume": case "abort": case "reset":
       return { type: item.type };
+    case "setWaitTimeout":
+      return typeof item.seconds === "number" && Number.isFinite(item.seconds) && item.seconds >= 5 && item.seconds <= 300
+        ? { type: "setWaitTimeout", seconds: Math.round(item.seconds) } : null;
     default:
       return null;
   }
 }
 
 export const idleSnapshot = (): RunSnapshot => ({
-  phase: "idle", mapId: null, mapName: "", reason: "シーンを選んでください。", halt: null, resume: [], clock: 0, duration: 0,
+  phase: "idle", mapId: null, mapName: "", reason: "シーンを選んでください。", alerts: [], waitTimeoutSec: 30,
+  initialMismatches: [], excludedRobots: [], halt: null, resume: [], clock: 0, duration: 0,
   realMs: 0, waitedMs: 0, checks: [], canStart: false, positioning: { active: false, items: [] }, robots: [], evasions: [], log: [], rows: [],
 });
 

@@ -155,6 +155,10 @@ test("rows: add, mute, lock, delete (with confirmation) and the row count limit 
   const rev = await latestRevision(page);
   await page.getByRole("group", { name: "行を追加" }).getByRole("button", { name: /ロボット/ }).click();
   await expect.poll(async () => (await savedTracks(page)).length).toBe(5);
+  const seqDialog = page.getByRole("dialog", { name: "シーケンスを一括設定" });
+  await expect(seqDialog).toBeVisible();
+  await seqDialog.getByRole("button", { name: "キャンセル" }).click();
+  await expect(seqDialog).toHaveCount(0);
   await page.getByRole("button", { name: "人 1 除外" }).click();
   await expect.poll(async () => (await savedTracks(page)).find((t) => t.id === "hm")?.muted).toBe(true);
   await page.getByRole("button", { name: "人 1 固定" }).click();
@@ -256,4 +260,35 @@ test("Delete on a bar asks first; cancelling keeps it, confirming removes it in 
   await page.getByRole("dialog").filter({ hasText: "削除します" }).getByRole("button", { name: "削除" }).click();
   await settled(page, before + 1);
   expect((await savedTracks(page)).find((t) => t.id === "rb")!.actions.map((a) => a.id)).toEqual(["m1", "m2"]);
+});
+
+test("wireframe UI features: edit points, facing turns, same-kind row, path toggle, door mode, and stage interactions", async ({ page }) => {
+  await openSeeded(page, [timelineMap({ locked: false })], 1280);
+  const playBar = page.getByRole("region", { name: "マップ" }).getByRole("toolbar", { name: "再生" });
+  await playBar.getByRole("button", { name: "次の編集点" }).click();
+  await expect(playBar.locator("output")).toContainText("0:01.0");
+  await playBar.getByRole("button", { name: "前の編集点" }).click();
+  await expect(playBar.locator("output")).toContainText("0:00.0");
+
+  // Path toggle (F11)
+  const stageSvg = page.getByRole("region", { name: "マップ" }).locator("svg[role=img]");
+  await expect(stageSvg.locator('[data-part="planned-paths"]')).toHaveCount(1);
+  await page.getByLabel("パス").uncheck();
+  await expect(stageSvg.locator('[data-part="planned-paths"]')).toHaveCount(0);
+  await page.getByLabel("パス").check();
+  await expect(stageSvg.locator('[data-part="planned-paths"]')).toHaveCount(1);
+
+  // Add same kind of row (F25)
+  await timelineCard(page).getByRole("button", { name: /^人 1/ }).first().click();
+  const beforeSame = await latestRevision(page);
+  await page.getByRole("button", { name: "＋ 選択中と同種の行を追加" }).click();
+  await settled(page, beforeSame + 1);
+  expect((await savedTracks(page)).length).toBe(5);
+
+  // Door mode toggle in inspector (F30)
+  const inspector = page.getByRole("complementary", { name: "設定" });
+  const beforeDoor = await latestRevision(page);
+  await inspector.getByRole("button", { name: "連携確認" }).click();
+  await settled(page, beforeDoor + 1);
+  await expect(inspector.getByRole("button", { name: "連携確認" })).toHaveAttribute("aria-pressed", "true");
 });

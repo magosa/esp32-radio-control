@@ -4,6 +4,7 @@ import { Crosshair, ExternalLink, Monitor, Pause, Play, SkipBack, Square } from 
 import { useEffect, useState } from "react";
 import { useFleetSocket } from "@/hooks/useFleetSocket";
 import { exhibitTime } from "@/scene/exhibitSession";
+import { isRunActive } from "@/scene/runTypes";
 import { formatTime } from "@/scene/timelineView";
 import type { SceneMap } from "@/scene/types";
 import consoleStyles from "../console.module.css";
@@ -12,7 +13,7 @@ import styles from "./exhibitControls.module.css";
 const TICK_MS = 250;
 
 export function ExhibitControls({ map, duration }: { map: SceneMap; duration: number }) {
-  const { status, exhibit, exhibitOp, sendExhibit } = useFleetSocket();
+  const { status, exhibit, exhibitOp, runState, sendExhibit } = useFleetSocket();
   const [now, setNow] = useState(() => Date.now());
   const session = exhibit?.session ?? null;
   const running = session?.running ?? false;
@@ -23,6 +24,7 @@ export function ExhibitControls({ map, duration }: { map: SceneMap; duration: nu
   }, [running]);
 
   const connected = status === "connected";
+  const runBusy = !!runState && (isRunActive(runState.state.phase) || runState.state.positioning.active);
   const showing = session !== null && session.mapId === map.id;
   const elsewhere = session !== null && session.mapId !== null && !showing;
   const time = showing && exhibit ? exhibitTime(session, (running ? now : Date.now()) + exhibit.offsetMs, duration) : 0;
@@ -33,15 +35,15 @@ export function ExhibitControls({ map, duration }: { map: SceneMap; duration: nu
   return <div className={styles.group} role="group" aria-label="展示">
     <p className={styles.status} role="status"><Monitor aria-hidden="true" />{summary}</p>
     <div className={styles.buttons}>
-      <button type="button" className={consoleStyles.secondary} disabled={!connected}
+      <button type="button" className={consoleStyles.secondary} disabled={!connected || runBusy}
         onClick={() => sendExhibit({ type: "open", mapId: map.id })}>この地図を展示に出す</button>
-      <button type="button" className={consoleStyles.secondary} disabled={!connected || !showing || duration === 0}
+      <button type="button" className={consoleStyles.secondary} disabled={!connected || !showing || duration === 0 || runBusy}
         onClick={() => sendExhibit({ type: running ? "pause" : "play" })}>
         {running ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}{running ? "展示を一時停止" : "展示を再生"}
       </button>
-      <button type="button" className={consoleStyles.secondary} disabled={!connected || !showing}
+      <button type="button" className={consoleStyles.secondary} disabled={!connected || !showing || runBusy}
         onClick={() => sendExhibit({ type: "seek", time: 0 })}><SkipBack aria-hidden="true" />展示を先頭へ</button>
-      <button type="button" className={consoleStyles.secondary} disabled={!connected || session?.mapId == null}
+      <button type="button" className={consoleStyles.secondary} disabled={!connected || session?.mapId == null || runBusy}
         onClick={() => sendExhibit({ type: "close" })}><Square aria-hidden="true" />展示を終了</button>
       <a className={consoleStyles.secondary} href="/exhibit" target="_blank" rel="noopener noreferrer">
         <ExternalLink aria-hidden="true" />展示画面を開く
@@ -50,6 +52,7 @@ export function ExhibitControls({ map, duration }: { map: SceneMap; duration: nu
         <Crosshair aria-hidden="true" />位置合わせ表示を開く
       </a>
     </div>
+    <p className={styles.status}>実行中は、展示画面の時刻が進行時計になります（手動の展示再生は、実行していないときだけ使えます）。</p>
     {exhibitOp?.error && <p className={styles.error} role="alert">{exhibitOp.error}</p>}
   </div>;
 }

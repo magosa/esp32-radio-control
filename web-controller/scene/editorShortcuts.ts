@@ -1,6 +1,6 @@
 import type { SaveState } from "./historyTypes";
 
-export type ShortcutAction = "undo" | "redo";
+export type ShortcutAction = "undo" | "redo" | "togglePlay" | "delete" | "duplicate" | "save";
 
 interface KeyLike {
   key: string;
@@ -12,17 +12,35 @@ interface KeyLike {
 }
 
 const TEXT_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
+const INTERACTIVE_TAGS = new Set(["BUTTON", "A", "SUMMARY"]);
 
 export function isTextTarget(target: unknown): boolean {
   const el = target as { tagName?: string; isContentEditable?: boolean } | null;
   return !!el && (TEXT_TAGS.has(el.tagName ?? "") || el.isContentEditable === true);
 }
 
+function isInteractiveTarget(target: unknown): boolean {
+  const el = target as { tagName?: string; getAttribute?: (name: string) => string | null } | null;
+  if (!el) return false;
+  if (INTERACTIVE_TAGS.has(el.tagName ?? "")) return true;
+  const role = typeof el.getAttribute === "function" ? el.getAttribute("role") : null;
+  return role === "button" || role === "slider" || role === "tab";
+}
+
 export function shortcutAction(event: KeyLike): ShortcutAction | null {
-  if (!(event.ctrlKey || event.metaKey) || event.altKey || isTextTarget(event.target)) return null;
+  if (event.altKey || isTextTarget(event.target)) return null;
+  const mod = event.ctrlKey || event.metaKey;
   const key = event.key.toLowerCase();
-  if (key === "z") return event.shiftKey ? "redo" : "undo";
-  if (key === "y" && !event.shiftKey) return "redo";
+  if (mod) {
+    if (key === "z") return event.shiftKey ? "redo" : "undo";
+    if (key === "y" && !event.shiftKey) return "redo";
+    if (key === "d" && !event.shiftKey) return "duplicate";
+    if (key === "s" && !event.shiftKey) return "save";
+    return null;
+  }
+  if (event.shiftKey) return null;
+  if (event.key === " " && !isInteractiveTarget(event.target)) return "togglePlay";
+  if (event.key === "Delete") return "delete";
   return null;
 }
 

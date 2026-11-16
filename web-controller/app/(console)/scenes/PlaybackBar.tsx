@@ -1,6 +1,6 @@
 "use client";
 
-import { Maximize2, Pause, Play, Repeat, SkipBack } from "lucide-react";
+import { ChevronLeft, ChevronRight, Maximize2, Pause, Play, Repeat, SkipBack } from "lucide-react";
 import { SPEEDS } from "@/scene/playback";
 import { formatTime } from "@/scene/timelineView";
 import consoleStyles from "../console.module.css";
@@ -16,6 +16,14 @@ export function PlaybackBar({ playback, onFullscreen }: { playback: PlaybackCont
     </button>
     <button type="button" className={consoleStyles.secondary} onClick={playback.home} aria-label="先頭へ">
       <SkipBack aria-hidden="true" />先頭へ
+    </button>
+    <button type="button" className={consoleStyles.secondary} onClick={playback.prevPoint} disabled={duration === 0}
+      aria-label="前の編集点" title="前の編集点へ移動">
+      <ChevronLeft aria-hidden="true" />前
+    </button>
+    <button type="button" className={consoleStyles.secondary} onClick={playback.nextPoint} disabled={duration === 0}
+      aria-label="次の編集点" title="次の編集点へ移動">
+      次<ChevronRight aria-hidden="true" />
     </button>
     <button type="button" className={`${consoleStyles.secondary} ${styles.toggle}`} aria-pressed={looping} onClick={playback.toggleLoop}>
       <Repeat aria-hidden="true" />ループ

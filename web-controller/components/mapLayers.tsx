@@ -4,8 +4,10 @@ import { mergedDoors } from "@/scene/equipment";
 import { roomAnchor } from "@/scene/floorPlan";
 import { MAP_COLORS } from "@/scene/mapColors";
 import {
-  ROBOT_SIDE_MM, VIEW_HEIGHT, VIEW_WIDTH, cellPath, displayLayout, doorLayout, furnitureLayout, gridLines, headingArrow, svgAngle, svgY, textMm,
+  ROBOT_SIDE_MM, VIEW_HEIGHT, VIEW_WIDTH, WAYPOINT_RADIUS_MM, axisTicks, cellPath, displayLayout, doorLayout, furnitureLayout, gridLines,
+  headingArrow, moveMarkers, svgAngle, svgY, textMm,
 } from "@/scene/mapView";
+import type { SceneSelection } from "@/scene/sceneSelection";
 import type { RoomActivity, SceneActor, SceneDisplay, SceneEvent, ScenePlan } from "@/scene/timedPlan";
 import type { Material, SceneMap } from "@/scene/types";
 import { HUMAN_RADIUS_MM, SAFETY_RADIUS_MM } from "@/scene/units";
@@ -79,17 +81,51 @@ function Grid({ gridMm }: { gridMm: number }) {
   return <path d={d} stroke={MAP_COLORS.grid} strokeWidth={0.5} fill="none" opacity={0.7} />;
 }
 
-function Paths({ plan }: { plan: ScenePlan }) {
+function Paths({ plan, scale, selectedActionId }: { plan: ScenePlan; scale: number; selectedActionId?: string | null }) {
   const lines = plan.entries.flatMap((entry) => entry.segments.filter((s) => s.from.x !== s.to.x || s.from.y !== s.to.y).map((s) =>
     `M${s.from.x} ${svgY(s.from.y)}L${s.to.x} ${svgY(s.to.y)}`));
-  return <path d={lines.join("")} fill="none" stroke={MAP_COLORS.path} strokeWidth={2} strokeDasharray="6 4" strokeLinecap="round" opacity={0.75} />;
+  const markers = moveMarkers(plan);
+  const font = textMm(10, scale);
+  return (
+    <g data-part="planned-paths">
+      <path d={lines.join("")} fill="none" stroke={MAP_COLORS.path} strokeWidth={2} strokeDasharray="6 4" strokeLinecap="round" opacity={0.75} />
+      {markers.map((m) => {
+        const picked = selectedActionId === m.actionId;
+        return (
+          <g key={m.actionId} data-part="waypoint-marker" data-action-id={m.actionId} transform={`translate(${m.x} ${svgY(m.y)})`}>
+            {picked && <circle r={WAYPOINT_RADIUS_MM + 5} fill="none" stroke="#ffd166" strokeWidth={3} />}
+            <circle r={WAYPOINT_RADIUS_MM} fill={m.color} stroke={MAP_COLORS.robotOutline} strokeWidth={1.5} opacity={0.92} />
+            <text y={font * 0.35} textAnchor="middle" fontSize={font} fontWeight={700} fill={MAP_COLORS.robotOutline}>{m.label}</text>
+          </g>
+        );
+      })}
+    </g>
+  );
 }
 
-function Actor({ actor, scale }: { actor: SceneActor; scale: number }) {
+function AxisOverlay({ scale }: { scale: number }) {
+  const { xs, ys } = axisTicks();
+  const font = textMm(10, scale);
+  return (
+    <g data-part="axis-labels" pointerEvents="none" opacity={0.75}>
+      {xs.map((x) => (
+        <text key={`ax-${x}`} x={Math.min(VIEW_WIDTH - 18, Math.max(18, x))} y={VIEW_HEIGHT - 6}
+          textAnchor="middle" fontSize={font} fill={MAP_COLORS.wall}>{x}</text>
+      ))}
+      {ys.filter((y) => y > 0).map((y) => (
+        <text key={`ay-${y}`} x={8} y={Math.max(font + 4, svgY(y) + font * 0.35)}
+          textAnchor="start" fontSize={font} fill={MAP_COLORS.wall}>{y}</text>
+      ))}
+    </g>
+  );
+}
+
+function Actor({ actor, scale, selected }: { actor: SceneActor; scale: number; selected?: boolean }) {
   const at = `translate(${actor.x} ${svgY(actor.y)})`;
   if (actor.kind === "human") {
     return (
-      <g transform={at}>
+      <g transform={at} data-actor-id={actor.id} data-selected={selected || undefined}>
+        {selected && <circle r={HUMAN_RADIUS_MM + 8} fill="none" stroke="#ffd166" strokeWidth={3} data-part="selected-actor" />}
         <circle r={HUMAN_RADIUS_MM} fill={MAP_COLORS.human} stroke={MAP_COLORS.robotOutline} strokeWidth={1.5} />
         {actor.count > 1 && (
           <text y={textMm(8, scale) * 0.35} textAnchor="middle" fontSize={textMm(8, scale)} fill={MAP_COLORS.robotOutline}>{actor.count}</text>
@@ -100,7 +136,8 @@ function Actor({ actor, scale }: { actor: SceneActor; scale: number }) {
   const arrow = headingArrow(actor.yaw, ARROW_TIP_MM, ARROW_HEAD_MM);
   const half = ROBOT_SIDE_MM / 2;
   return (
-    <g transform={at}>
+    <g transform={at} data-actor-id={actor.id} data-selected={selected || undefined}>
+      {selected && <circle r={SAFETY_RADIUS_MM + 8} fill="none" stroke="#ffd166" strokeWidth={3.5} data-part="selected-actor" />}
       <circle r={SAFETY_RADIUS_MM} fill="none" stroke={MAP_COLORS.safetyCircle} strokeWidth={1.5} strokeDasharray="5 4" />
       <rect x={-half} y={-half} width={ROBOT_SIDE_MM} height={ROBOT_SIDE_MM} rx={4} transform={`rotate(${svgAngle(actor.yaw)})`}
         fill={MAP_COLORS.robotBody} stroke={MAP_COLORS.robotOutline} strokeWidth={2} />
@@ -183,6 +220,9 @@ export interface MapBodyProps {
   time: number;
   scale: number;
   showGrid?: boolean;
+  showPaths?: boolean;
+  showAxis?: boolean;
+  selection?: SceneSelection;
   gridMm?: number;
   // The editor shows the planned routes and the robot bodies; the exhibit shows neither (the robots are physically there).
   plan?: ScenePlan;
@@ -193,14 +233,21 @@ export interface MapBodyProps {
   overlay?: ReactNode;
 }
 
-export function MapBody({ map, scene, time, scale, showGrid = false, gridMm = 20, plan, drawRobots = true, roomActivities = [], noticeInset = 0, overlay }: MapBodyProps) {
+export function MapBody({
+  map, scene, time, scale, showGrid = false, showPaths = true, showAxis = false, selection,
+  gridMm = 20, plan, drawRobots = true, roomActivities = [], noticeInset = 0, overlay,
+}: MapBodyProps) {
   const openness = new Map(scene.doors.map((door) => [door.id, door.openness]));
   const floorPlan = map.floorPlan;
   const cues = layoutCues(map.presentation, time, scale, noticeInset);
+  const selectedRoom = selection?.roomId ? map.rooms.find((r) => r.id === selection.roomId) : undefined;
   return (
     <>
       <rect width={VIEW_WIDTH} height={VIEW_HEIGHT} fill={MAP_COLORS.roomKind.corridor} />
       <Floor map={map} />
+      {selectedRoom && selectedRoom.cells.length > 0 && (
+        <path d={cellPath(selectedRoom.cells)} fill="none" stroke="#ffd166" strokeWidth={5} data-part="selected-room" />
+      )}
       {scene.events.map((event) => {
         const room = map.rooms.find((r) => r.id === event.roomId);
         return room ? <path key={event.actionId} d={cellPath(room.cells)} fill={event.color} opacity={0.3} /> : null;
@@ -220,8 +267,10 @@ export function MapBody({ map, scene, time, scale, showGrid = false, gridMm = 20
       <Doors map={map} openness={openness} />
       {showGrid && <Grid gridMm={gridMm} />}
       <rect width={VIEW_WIDTH} height={VIEW_HEIGHT} fill="none" stroke={MAP_COLORS.wall} strokeWidth={WALL_MM} />
-      {plan && <Paths plan={plan} />}
-      {scene.actors.filter((actor) => drawRobots || actor.kind !== "robot").map((actor) => <Actor key={actor.id} actor={actor} scale={scale} />)}
+      {plan && showPaths && <Paths plan={plan} scale={scale} selectedActionId={selection?.actionId} />}
+      {scene.actors.filter((actor) => drawRobots || actor.kind !== "robot").map((actor) => (
+        <Actor key={actor.id} actor={actor} scale={scale} selected={selection?.trackId === actor.id} />
+      ))}
       {floorPlan?.showRoomLabels && map.rooms.filter((room) => room.cells.length).map((room) => {
         const at = roomAnchor(room);
         return <text key={room.id} x={at.x} y={svgY(at.y)} textAnchor="middle" fontSize={textMm(12, scale)} fill={MAP_COLORS.wall}>{room.name}</text>;
@@ -240,6 +289,7 @@ export function MapBody({ map, scene, time, scale, showGrid = false, gridMm = 20
         return at ? <Label key={event.actionId} text={event.text} x={at.x} y={at.y} scale={scale} color={event.color} /> : null;
       })}
       {cues.map((shape, i) => <Cue key={i} shape={shape} />)}
+      {showAxis && <AxisOverlay scale={scale} />}
       {overlay}
     </>
   );

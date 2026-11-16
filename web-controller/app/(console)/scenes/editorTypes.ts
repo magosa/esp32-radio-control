@@ -45,6 +45,8 @@ export interface PlaybackControls {
   toggle(): void;
   home(): void;
   seek(time: number): void;
+  prevPoint(): void;
+  nextPoint(): void;
   setSpeed(speed: number): void;
   toggleLoop(): void;
 }

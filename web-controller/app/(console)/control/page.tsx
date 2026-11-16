@@ -214,7 +214,8 @@ export default function ControlPage() {
               <span className={styles.deviceId}>{vehicle.deviceId}</span>
               <span className={styles.vehicleStatus}><i data-online={connected && vehicle.status === "online"} />
                 {connected && vehicle.status === "online" ? "接続中" : "未接続"}<span>{modeLabel(vehicle)}</span>
-              </span></>;
+              </span>
+              {vehicle.mode !== "manual" && <span className={styles.muted}>操作できません（実行中）</span>}</>;
             return selectionMode === "single" ? <button key={vehicle.deviceId} className={styles.vehicle}
               aria-pressed={selected} onClick={() => setFocusedId(vehicle.deviceId)}>{contents}</button>
               : <label key={vehicle.deviceId} className={styles.groupVehicle} data-selected={selected}>

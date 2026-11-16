@@ -240,24 +240,24 @@
 
 | # | 上流テスト | 区分 | 移植先のテスト | 備考 |
 |---:|---|---|---|---|
-| 171 | the library contains sixteen distinct, independently generated scenarios | 対象外: S2以降 |  | 16 本のシナリオ（S3） |
-| 172 | daily-security: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 173 | daily-cleaning: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 174 | daily-delivery: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 175 | tutorial-passage: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 176 | tutorial-door: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 177 | tutorial-fire: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 178 | tutorial-crowd: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 179 | tutorial-dirt: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 180 | tutorial-vip: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 181 | bcp: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 182 | garbage: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 183 | occupancy: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 184 | learning: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 185 | hospitality: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 186 | environment: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 187 | remote: schema roundtrip, complete playback, facing and collision safety | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 188 | daily scenarios share building geometry and show three roles without moving standby robots | 対象外: S2以降 |  | シナリオライブラリ（S3） |
+| 171 | the library contains sixteen distinct, independently generated scenarios | 移植済み | the library contains sixteen distinct, independently generated scenarios | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 172 | daily-security: schema roundtrip, complete playback, facing and collision safety | 移植済み | daily-security: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 173 | daily-cleaning: schema roundtrip, complete playback, facing and collision safety | 移植済み | daily-cleaning: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 174 | daily-delivery: schema roundtrip, complete playback, facing and collision safety | 移植済み | daily-delivery: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 175 | tutorial-passage: schema roundtrip, complete playback, facing and collision safety | 移植済み | tutorial-passage: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 176 | tutorial-door: schema roundtrip, complete playback, facing and collision safety | 移植済み | tutorial-door: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 177 | tutorial-fire: schema roundtrip, complete playback, facing and collision safety | 移植済み | tutorial-fire: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 178 | tutorial-crowd: schema roundtrip, complete playback, facing and collision safety | 移植済み | tutorial-crowd: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 179 | tutorial-dirt: schema roundtrip, complete playback, facing and collision safety | 移植済み | tutorial-dirt: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 180 | tutorial-vip: schema roundtrip, complete playback, facing and collision safety | 移植済み | tutorial-vip: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 181 | bcp: schema roundtrip, complete playback, facing and collision safety | 移植済み | bcp: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 182 | garbage: schema roundtrip, complete playback, facing and collision safety | 移植済み | garbage: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 183 | occupancy: schema roundtrip, complete playback, facing and collision safety | 移植済み | occupancy: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 184 | learning: schema roundtrip, complete playback, facing and collision safety | 移植済み | learning: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 185 | hospitality: schema roundtrip, complete playback, facing and collision safety | 移植済み | hospitality: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 186 | environment: schema roundtrip, complete playback, facing and collision safety | 移植済み | environment: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 187 | remote: schema roundtrip, complete playback, facing and collision safety | 移植済み | remote: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 188 | daily scenarios share building geometry and show three roles without moving standby robots | 移植済み | daily scenarios share building geometry and show three roles without moving standby robots | `scripts/scene/scenarioLibrary.test.ts`（F32） |
 | 189 | door priority demonstrates actual intermediate closure before the other robot crosses | 対象外: S2以降 |  | シナリオライブラリ（S3） |
 | 190 | dirty regions are partial, visible before cleaning and removed when cleaning completes | 対象外: S2以降 |  | シナリオライブラリ（S3） |
 | 191 | building-side crowd information precedes clockwise detour and stays outside local sensor view | 対象外: S2以降 |  | シナリオライブラリ（S3） |

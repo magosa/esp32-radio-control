@@ -16,6 +16,9 @@ test("a scene runs from /run to the end with a simulated robot; the editor is lo
     await page.goto("/run");
     await page.getByLabel("実行するシーン").selectOption("run-map");
     await expect(page.getByRole("region", { name: "実行前の確認" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "初期位置とのずれ" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "初期位置への移動" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "いまの全体の状態" })).toBeVisible();
     await expect(page.getByRole("button", { name: "開始" })).toBeEnabled({ timeout: 20_000 });
     await page.getByRole("button", { name: "開始" }).click();
     await expect(page.getByText("実行中", { exact: true })).toBeVisible();

@@ -1,9 +1,9 @@
 "use client";
 
-import { Bot, DoorOpen, Maximize2, Monitor, User } from "lucide-react";
+import { Bot, DoorOpen, Maximize2, Monitor, RotateCw, User } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { compilePlan, samplePlan, type ActionState } from "@/scene/timedPlan";
+import { addFacingTurns, compilePlan, samplePlan, type ActionState } from "@/scene/timedPlan";
 import {
   addProblem, addRequest, barStatus, moveOffset, previewDrop, rangeIds, resizeOffset, KEY_RESIZE_STEP_S, MAX_RUN_S, MIN_RESIZE_S,
   type Dragged, type DropPreview,
@@ -25,9 +25,10 @@ export interface TimelineCardProps extends EditorShared {
   playback: PlaybackControls;
   // Where the row and action palette is drawn (the page's right column). Nothing is drawn until it exists.
   paletteSlot: HTMLElement | null;
+  onDragActionType?: (type: ActionType | null) => void;
 }
 
-const LABEL_W = 232;
+const LABEL_W = 192;
 const LANE_TAIL_PX = 160;
 const TAP_MS = 400;
 const ICONS = { robot: Bot, human: User, room: DoorOpen, display: Monitor } as const;
@@ -109,8 +110,8 @@ export function TimelineCard(props: TimelineCardProps) {
   }, []);
 
   const selectTrack = useCallback((trackId: string) => {
-    const { selection: current, onSelect } = latest.current;
-    onSelect({ trackId, actionId: null, blocks: [], roomId: current.roomId });
+    const { onSelect } = latest.current;
+    onSelect({ trackId, actionId: null, blocks: [], roomId: null });
   }, []);
 
   const pause = useCallback(() => { if (latest.current.playback.running) latest.current.playback.toggle(); }, []);
@@ -123,7 +124,7 @@ export function TimelineCard(props: TimelineCardProps) {
     if (now - lastOpen.current < TAP_MS) return;
     lastOpen.current = now;
     const { selection: current, onSelect, requestAction } = latest.current;
-    onSelect({ trackId, actionId, blocks: current.blocks.includes(actionId) ? current.blocks : [actionId], roomId: current.roomId });
+    onSelect({ trackId, actionId, blocks: current.blocks.includes(actionId) ? current.blocks : [actionId], roomId: null });
     setMessage(null);
     requestAction({ trackId, actionId });
   }, []);
@@ -221,7 +222,7 @@ export function TimelineCard(props: TimelineCardProps) {
     const anchor = track?.actions.find((action) => action.id === actionId);
     if (!track || !anchor) return null;
     const blocks = picked.blocks.includes(actionId) ? picked.blocks : [actionId];
-    onSelect({ trackId, actionId, blocks, roomId: picked.roomId });
+    onSelect({ trackId, actionId, blocks, roomId: null });
     pause();
     setMessage(null);
     if (track.locked) { setMessage(LOCKED); return null; }
@@ -240,13 +241,13 @@ export function TimelineCard(props: TimelineCardProps) {
       const blocks = picked.blocks.includes(actionId) ? picked.blocks.filter((id) => id !== actionId) : [...picked.blocks, actionId];
       const focus = blocks.includes(actionId) ? actionId : blocks.at(-1) ?? null;
       const owner = focus ? current.tracks.find((item) => item.actions.some((action) => action.id === focus)) : undefined;
-      onSelect({ trackId: owner?.id ?? trackId, actionId: focus, blocks, roomId: picked.roomId });
+      onSelect({ trackId: owner?.id ?? trackId, actionId: focus, blocks, roomId: null });
       return;
     }
     if (event.shiftKey && picked.trackId === trackId && picked.actionId && !picked.blocks.includes(actionId)) {
       pause();
       const blocks = Array.from(new Set([...picked.blocks, ...rangeIds(track, picked.actionId, actionId)]));
-      onSelect({ trackId, actionId, blocks, roomId: picked.roomId });
+      onSelect({ trackId, actionId, blocks, roomId: null });
       return;
     }
     const target = pickForDrag(trackId, actionId);
@@ -281,11 +282,24 @@ export function TimelineCard(props: TimelineCardProps) {
     if (await props.confirm("行の削除", text, { danger: true, confirmLabel: "削除" })) run((m) => deleteTrack(m, track.id), "行の削除");
   };
 
-  const onAddTrack = (kind: TrackKind) => {
+  const onAddTrack = (kind: TrackKind, overrideRoomId?: string) => {
     let created = "";
-    const roomId = kind === "room" && selection.roomId ? selection.roomId : undefined;
+    const roomId = kind === "room" ? (overrideRoomId ?? (selection.roomId || undefined)) : undefined;
     const ok = run((m) => { const result = addTrack(m, kind, { roomId }); created = result.trackId; return result.map; }, `${trackKindLabel(kind)}の行を追加`);
-    if (ok && created) props.onSelect({ trackId: created, actionId: null, blocks: [], roomId: selection.roomId });
+    if (ok && created) {
+      props.onSelect({ trackId: created, actionId: null, blocks: [], roomId: null });
+      if (kind === "robot") props.requestAction({ trackId: created, actionId: null });
+    }
+  };
+
+  const onAddFacingTurns = () => {
+    const reason = latest.current.edit((m) => {
+      const next = structuredClone(m);
+      const added = addFacingTurns(next);
+      if (added === 0) throw new Error("追加する旋回はありません。");
+      return next;
+    }, "旋回を配置");
+    setMessage(reason);
   };
 
   const onAddAction = (type: ActionType) => {
@@ -400,6 +414,7 @@ export function TimelineCard(props: TimelineCardProps) {
     <div className={timeline.header}>
       <h2>時間軸</h2>
       <div className={timeline.toolbar} role="toolbar" aria-label="時間軸の表示">
+        <button type="button" className={consoleStyles.secondary} onClick={onAddFacingTurns}><RotateCw aria-hidden="true" />旋回を配置</button>
         <label className={timeline.zoom}>
           <span>ズーム <output>{px}px/秒</output></span>
           <input type="range" min={PX_MIN} max={PX_MAX} step={1} value={px} aria-label="ズーム"
@@ -415,7 +430,7 @@ export function TimelineCard(props: TimelineCardProps) {
     {props.paletteSlot && createPortal(<TrackPalette track={selectedTrack} selectedBlocks={selection.blocks.length} onAddTrack={onAddTrack} onAddAction={onAddAction}
       onMoveTrack={(direction) => { if (selectedTrack) run((m) => moveTrackBy(m, selectedTrack.id, direction), "行の並べ替え"); }}
       onDeleteTrack={askDeleteTrack} onDeleteActions={() => askDeleteActions()}
-      onDragType={(type) => { paletteType.current = type; if (!type) setDrop(null); }} />, props.paletteSlot)}
+      onDragType={(type) => { paletteType.current = type; props.onDragActionType?.(type); if (!type) setDrop(null); }} />, props.paletteSlot)}
     {message && <p className={timeline.alert} role="alert">{message}</p>}
     <div ref={scroller} className={timeline.scroller} role="region" aria-label="時間軸のスクロール領域" tabIndex={0}>
       <div className={timeline.canvas} style={{ width: LABEL_W + laneWidth, ["--px" as string]: `${px}px` }}>

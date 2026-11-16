@@ -3,28 +3,43 @@
 import { useEffect, useRef, useState } from "react";
 import { History, Redo2, TriangleAlert, Undo2 } from "lucide-react";
 import type { SceneProjectApi } from "@/hooks/useSceneProject";
-import { saveStateLabel, shortcutAction } from "@/scene/editorShortcuts";
+import { saveStateLabel, shortcutAction, type ShortcutAction } from "@/scene/editorShortcuts";
 import consoleStyles from "../console.module.css";
+import type { Confirm } from "./editorTypes";
 import { FileActions } from "./FileActions";
 import { HistoryDialog } from "./HistoryDialog";
 import styles from "./scenes.module.css";
 
-type Props = Pick<SceneProjectApi, "project" | "commit" | "undo" | "redo" | "canUndo" | "canRedo" | "saveState" | "history" | "reload">;
+type Props = Pick<SceneProjectApi, "project" | "commit" | "undo" | "redo" | "canUndo" | "canRedo" | "saveState" | "history" | "reload"> & {
+  confirm?: Confirm;
+  onShortcut?: (action: Exclude<ShortcutAction, "undo" | "redo" | "save">) => void;
+};
 
-export function ProjectBar({ project, commit, undo, redo, canUndo, canRedo, saveState, history, reload }: Props) {
+export function ProjectBar({ project, commit, undo, redo, canUndo, canRedo, saveState, history, reload, confirm, onShortcut }: Props) {
   const [draft, setDraft] = useState(project?.name ?? "");
   const [message, setMessage] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [saveSignal, setSaveSignal] = useState(0);
   const editing = useRef(false);
+  const shortcutRef = useRef(onShortcut);
+  shortcutRef.current = onShortcut;
 
   useEffect(() => { if (!editing.current) setDraft(project?.name ?? ""); }, [project?.name]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (document.querySelector("dialog[open]")) return;
       const action = shortcutAction(event);
       if (!action) return;
+      if (action === "delete" && (event.target as HTMLElement | null)?.hasAttribute?.("data-action-id")) return;
       event.preventDefault();
-      setMessage((action === "undo" ? undo : redo)());
+      if (action === "undo" || action === "redo") {
+        setMessage((action === "undo" ? undo : redo)());
+      } else if (action === "save") {
+        setSaveSignal((n) => n + 1);
+      } else {
+        shortcutRef.current?.(action);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -64,7 +79,7 @@ export function ProjectBar({ project, commit, undo, redo, canUndo, canRedo, save
       <button type="button" className={consoleStyles.secondary} disabled={!project} onClick={() => setHistoryOpen(true)}>
         <History aria-hidden="true" />編集履歴
       </button>
-      {project && <FileActions project={project} commit={commit} />}
+      {project && <FileActions project={project} commit={commit} confirm={confirm} saveSignal={saveSignal} />}
     </div>
     <div className={styles.saveArea}>
       <span className={styles.saveState} data-tone={state.tone} role="status">

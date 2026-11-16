@@ -3,7 +3,7 @@ import { createSafety, pathProblem, type Safety } from "../scene/safety";
 import type { SceneMap, Track } from "../scene/types";
 import { shortestTurn } from "../scene/units";
 import {
-  idleSnapshot, type HaltKind, type PositionState, type RobotRunStatus, type RunCheck, type RunCondition, type RunLogEntry,
+  idleSnapshot, type HaltKind, type InitialMismatch, type PositionState, type RobotRunStatus, type RunCheck, type RunCondition, type RunLogEntry,
   type RunResultFile, type RunResultRow, type RunRobot, type RunSnapshot,
 } from "../scene/runTypes";
 import { control, STOP, type Drive } from "./motionController";
@@ -94,8 +94,24 @@ export class SceneRunner {
   private checks: RunCheck[] = [];
   private log: RunLogEntry[] = [];
   private input: RunnerInput | null = null;
+  private waitTimeoutMs: number;
+  private lostSince = new Map<Bot, number>();
 
-  constructor(private deps: RunnerDeps, private options: { waitTimeoutMs?: number } = {}) {}
+  constructor(private deps: RunnerDeps, private options: { waitTimeoutMs?: number } = {}) {
+    this.waitTimeoutMs = options.waitTimeoutMs ?? WAIT_TIMEOUT_MS;
+  }
+
+  private orderOf(a: Bot, b: Bot): number {
+    const pa = a.priority ?? Infinity, pb = b.priority ?? Infinity;
+    if (pa !== pb) return pa - pb;
+    return (a.pose?.markerId ?? 99) - (b.pose?.markerId ?? 99);
+  }
+
+  setWaitTimeout(seconds: number): string | null {
+    if (!Number.isFinite(seconds) || seconds < 5 || seconds > 300) return "到着待ちの時間切れは5〜300秒で指定してください。";
+    this.waitTimeoutMs = Math.round(seconds * 1000);
+    return null;
+  }
 
   get active(): boolean { return this.phase === "running" || this.phase === "waiting" || this.phase === "halted" || this.positioning.active; }
   get prepared(): boolean { return this.phase !== "idle" && this.phase !== "finished" && this.phase !== "aborted"; }
@@ -126,6 +142,7 @@ export class SceneRunner {
     this.log = [];
     this.evasions = [];
     this.cooldown.clear();
+    this.lostSince.clear();
     this.lastTick = this.deps.now();
     return null;
   }
@@ -209,15 +226,18 @@ export class SceneRunner {
     if (!this.map) return idleSnapshot();
     const now = this.deps.now();
     const end = this.endedAt ?? now;
+    const sortedForPosition = [...this.bots].sort((a, b) => this.orderOf(a, b));
     return {
       phase: this.phase, mapId: this.map.id, mapName: this.map.name, reason: this.reason(),
+      alerts: this.alerts(), waitTimeoutSec: Math.round(this.waitTimeoutMs / 1000),
+      initialMismatches: this.initialMismatches(), excludedRobots: this.excludedViews(),
       halt: this.halt ? { kind: this.halt.kind, since: this.halt.since } : null,
       resume: this.phase === "halted" ? this.resumeConditions() : [],
       clock: this.clock, duration: this.plan?.duration ?? 0, realMs: this.startedAt === null ? 0 : end - this.startedAt, waitedMs: this.waitedMs,
       checks: this.checks, canStart: this.phase === "arming" && this.checks.length > 0 && this.checks.every((c) => c.ok || c.warn),
-      positioning: { active: this.positioning.active, items: this.bots
+      positioning: { active: this.positioning.active, items: sortedForPosition
         .map((b) => ({ trackId: b.track.id, name: b.track.name, state: b.position.state, detail: b.position.detail })) },
-      robots: this.bots.map((b) => this.robotView(b)), evasions: this.evasionViews(), log: this.log, rows: this.rows(),
+      robots: this.bots.map((b) => this.robotView(b)), evasions: this.evasionViews(), log: this.log, rows: this.rows(true),
     };
   }
 
@@ -227,7 +247,7 @@ export class SceneRunner {
       schema: "scene-run-result/v1", mapId: this.map?.id ?? null, mapName: this.map?.name ?? "",
       outcome: this.phase === "finished" ? "finished" : "aborted", startedAt: this.startedAt, endedAt: this.endedAt,
       realSeconds: this.startedAt === null ? 0 : (end - this.startedAt) / 1000, planSeconds: this.plan?.duration ?? 0,
-      waitedSeconds: this.waitedMs / 1000, rows: this.rows(), log: this.log,
+      waitedSeconds: this.waitedMs / 1000, rows: this.rows(false), log: this.log,
     };
   }
 
@@ -300,7 +320,7 @@ export class SceneRunner {
   private stepPositioning(now: number): void {
     const items = this.bots;
     const todo = items.filter((b) => b.position.state !== "arrived" && b.position.state !== "failed")
-      .sort((a, b) => (a.pose?.markerId ?? 99) - (b.pose?.markerId ?? 99));
+      .sort((a, b) => this.orderOf(a, b));
     for (const bot of items) if (!todo.includes(bot)) this.drive(bot, STOP);
     const bot = todo[0];
     for (const other of todo.slice(1)) this.drive(other, STOP);
@@ -353,6 +373,7 @@ export class SceneRunner {
         if (!bot.lost) {
           const last = bot.pose?.xMm !== undefined ? { x: bot.pose.xMm, y: bot.pose.yMm ?? 0 } : { x: bot.track.initial!.x, y: bot.track.initial!.y };
           bot.lost = this.lastKnown.get(bot) ?? last;
+          this.lostSince.set(bot, now);
           this.note("error", `${bot.track.name} を見失いました（最後の位置 (${Math.round(bot.lost.x)}, ${Math.round(bot.lost.y)})）`);
         }
         bot.status = "lost";
@@ -361,7 +382,7 @@ export class SceneRunner {
         continue;
       }
       this.lastKnown.set(bot, { x: at.x, y: at.y });
-      if (bot.lost) { bot.lost = null; this.note("info", `${bot.track.name} が追跡に戻りました`); }
+      if (bot.lost) { bot.lost = null; this.lostSince.delete(bot); this.note("info", `${bot.track.name} が追跡に戻りました`); }
       if (bot.pose?.insideField === false) return this.stopAndHalt("outside", `${bot.track.name} が領域の外に出ました`);
       const yielding = this.stepYielder(bot, at, now);
       if (yielding === "halt") return this.stopAndHalt("stuck", `${bot.track.name} が退避中に進めません（1回再試行しました）`);
@@ -404,7 +425,7 @@ export class SceneRunner {
       if (this.phase !== "waiting") { this.phase = "waiting"; this.waitingSince = now; this.deps.onClock?.(t, false); }
       this.waitedMs += dt;
       for (const { b, e } of blocking) b.waited.set(e.action.id, (b.waited.get(e.action.id) ?? 0) + dt / 1000);
-      if (now - (this.waitingSince ?? now) > (this.options.waitTimeoutMs ?? WAIT_TIMEOUT_MS)) this.stopAndHalt("timeout", "到着待ちの時間切れ");
+      if (now - (this.waitingSince ?? now) > this.waitTimeoutMs) this.stopAndHalt("timeout", "到着待ちの時間切れ");
       return;
     }
     if (this.phase === "waiting") { this.phase = "running"; this.waitingSince = null; this.deps.onClock?.(t, true); }
@@ -591,14 +612,66 @@ export class SceneRunner {
       { label: "基準マーカーが3枚以上", ok: loc.referenceCount >= 3 && loc.extrinsicsOk, detail: `${loc.referenceCount}/4` },
     ];
     if (this.halt.kind === "lost") {
+      const now = this.deps.now();
       for (const bot of this.bots) {
         const last = this.lastKnown.get(bot), at = this.tracked(bot);
         if (!bot.lost || !last) continue;
+        const since = this.lostSince.get(bot) ?? this.halt.since;
+        const sec = Math.max(0, (now - since) / 1000).toFixed(1);
+        conditions.push({ label: `${bot.track.name} が追跡中に戻った`, ok: at !== null, detail: at ? "追跡中" : `見失い ${sec}秒` });
         const d = at ? Math.hypot(at.x - last.x, at.y - last.y) : null;
         conditions.push({ label: `${bot.track.name} が停止前の位置の${RESUME_RADIUS_MM}mm以内`, ok: d !== null && d <= RESUME_RADIUS_MM, detail: d === null ? "未検出" : `${Math.round(d)}mm` });
       }
     }
     return conditions;
+  }
+
+  private alerts(): string[] {
+    if (this.phase !== "running" && this.phase !== "waiting") return [];
+    return this.bots.filter((b) => b.lost).map((b) => `${b.track.name} を見失い中: 次の同期点で全台停止します`);
+  }
+
+  private initialMismatches(): InitialMismatch[] {
+    if (this.phase !== "arming") return [];
+    const out: InitialMismatch[] = [];
+    for (const bot of this.bots) {
+      const posOk = bot.posErr !== null && bot.posErr <= ARRIVE_POS_MM;
+      const yawOk = bot.yawErr !== null && bot.yawErr <= ARRIVE_YAW_DEG;
+      if (!posOk || !yawOk) {
+        out.push({ trackId: bot.track.id, name: bot.track.name, posErrMm: bot.posErr, yawErrDeg: bot.yawErr, posOk, yawOk });
+      }
+    }
+    return out;
+  }
+
+  private excludedViews(): RunRobot[] {
+    const input = this.input;
+    if (!input) return [];
+    const inScene = new Set(this.bots.map((b) => b.track.robotId));
+    return input.poses.poses
+      .filter((p) => p.tracking === "tracking" && !inScene.has(p.robotId))
+      .map((p): RunRobot => {
+        const def = input.robots.find((r) => r.robotId === p.robotId);
+        return {
+          trackId: `excluded-${p.robotId}`,
+          name: p.robotId,
+          robotId: p.robotId,
+          markerId: p.markerId,
+          priority: def?.priority ?? null,
+          tracking: p.tracking,
+          status: "excluded",
+          bar: null,
+          barStart: null,
+          barEnd: null,
+          posErrMm: null,
+          yawErrDeg: null,
+          settledSec: 0,
+          pose: p.xMm !== undefined && p.yMm !== undefined && p.headingDeg !== undefined
+            ? { x: p.xMm, y: p.yMm, yaw: p.headingDeg } : null,
+          target: null,
+          note: "シーンに入っていません。動かない障害物として扱います",
+        };
+      });
   }
 
   // ---- shared ----
@@ -657,13 +730,19 @@ export class SceneRunner {
     };
   }
 
-  private rows(): RunResultRow[] {
+  private rows(live = false): RunResultRow[] {
+    const activePhase = this.phase === "running" || this.phase === "waiting" || this.phase === "halted";
     return this.bots.flatMap((bot) => bot.moves.map((e): RunResultRow => {
       const a = bot.arrivals.get(e.action.id);
+      let status: RunResultRow["status"] = "pending";
+      if (a) status = "arrived";
+      else if (this.phase === "aborted" || this.phase === "finished") status = "failed";
+      else if (live && activePhase && e.end! <= this.clock + EPS) status = "waiting";
+      else if (live && activePhase && e.start! <= this.clock + EPS) status = "running";
       return {
         trackId: bot.track.id, robot: bot.track.name, action: e.action.name, planStart: e.start!, planEnd: e.end!,
         arrivedAt: a?.at ?? null, posErrMm: a?.posErrMm ?? null, yawErrDeg: a?.yawErrDeg ?? null, waitedSec: bot.waited.get(e.action.id) ?? 0,
-        status: a ? "arrived" : this.phase === "aborted" || this.phase === "finished" ? "failed" : "pending",
+        status,
         note: a ? "" : this.phase === "aborted" ? "実行前に中止しました" : "",
       };
     }));

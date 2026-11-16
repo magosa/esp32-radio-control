@@ -26,7 +26,7 @@ export interface RouteStatus {
   routeId: string;
   running: boolean;
   elapsedMs: number;
-  perVehicle: { deviceId: string; stepIndex: number }[];
+  perVehicle: { deviceId: string; stepIndex: number; totalSteps?: number }[];
 }
 
 // Next.jsのバンドル環境では __dirname がビルド出力側を指してしまうため、
@@ -60,6 +60,7 @@ export class RouteEngine {
   private currentRouteId: string | null = null;
   private currentStepByDevice = new Map<string, RouteStep>();
   private stepIndexByDevice = new Map<string, number>();
+  private totalStepsByDevice = new Map<string, number>();
 
   constructor(private deps: { sendDrive: SendDriveFn; onStatus: StatusCallback }) {}
 
@@ -105,6 +106,7 @@ export class RouteEngine {
     this.currentStepByDevice.forEach((_step, deviceId) => this.deps.sendDrive(deviceId, "e", 0, 0));
     this.currentStepByDevice.clear();
     this.stepIndexByDevice.clear();
+    this.totalStepsByDevice.clear();
 
     this.running = false;
     this.emitStatus();
@@ -112,6 +114,7 @@ export class RouteEngine {
 
   private scheduleVehicle(deviceId: string, program: VehicleProgram): void {
     let offset = 0;
+    this.totalStepsByDevice.set(deviceId, program.toRendezvous.length + 1 + program.toDestination.length);
     const applyStep = (step: RouteStep, stepIndex: number) => {
       const timer = setTimeout(() => {
         this.currentStepByDevice.set(deviceId, step);
@@ -151,6 +154,7 @@ export class RouteEngine {
       perVehicle: Array.from(this.stepIndexByDevice.entries()).map(([deviceId, stepIndex]) => ({
         deviceId,
         stepIndex,
+        totalSteps: this.totalStepsByDevice.get(deviceId),
       })),
     });
   }

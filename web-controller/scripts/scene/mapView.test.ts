@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cellIndex } from "../../scene/grid";
+import { compilePlan, samplePlan } from "../../scene/timedPlan";
 import type { Furniture, SceneMap } from "../../scene/types";
 import {
-  VIEW_BOX, ZOOMS, applyMatrix, cellPath, clampToArea, clientToMm, displayLayout, doorLayout, furnitureLayout, gridLines,
-  headingArrow, isTap, mapSummary, mmToSvg, pxPerMm, svgAngle, svgToMm, svgY, textMm, wrapDisplayText, zoomWidth,
+  VIEW_BOX, ZOOMS, applyMatrix, axisTicks, cellPath, clampToArea, clientToMm, displayLayout, doorLayout, furnitureLayout, gridLines,
+  headingArrow, hitStageItem, isTap, mapSummary, mmToSvg, moveMarkers, pxPerMm, svgAngle, svgToMm, svgY, textMm, wrapDisplayText, zoomWidth,
 } from "../../scene/mapView";
 
 const near = (actual: number, expected: number, epsilon = 1e-9) =>
@@ -143,4 +144,45 @@ test("the summary counts rooms and actors for assistive technology", () => {
     time: 2.345, actors: [{ kind: "robot", count: 1 }, { kind: "human", count: 3 }, { kind: "robot", count: 1 }],
   });
   assert.equal(text, "本館。部屋0室、ロボット2台、人3人、時刻2.3秒");
+});
+
+test("axisTicks, moveMarkers and hitStageItem resolve waypoints, displays, actors and rooms", () => {
+  assert.deepEqual(axisTicks(), { xs: [0, 200, 400, 600, 800, 1000, 1100], ys: [0, 200, 400, 620] });
+  const cells: number[] = [];
+  for (let r = 2; r <= 25; r++) for (let c = 2; c <= 45; c++) cells.push(cellIndex(c, r));
+  const map: SceneMap = {
+    id: "m", name: "本館", editGridMm: 20, doorMode: "story",
+    rooms: [{ id: "r1", name: "会議室", color: "#8d9bff", kind: "room", material: "wood", cells }],
+    tracks: [
+      {
+        id: "tr-robot", kind: "robot", name: "R1", color: "#8d9bff", muted: false, locked: false,
+        initial: { x: 100, y: 100, yaw: 0, roomId: "r1" },
+        actions: [
+          { id: "a-show", name: "表示1", type: "show", position: 0, runSeconds: 1, x: 0, y: 0, yaw: 0, roomId: "r1", targetId: "tg2", text: "案内中", state: "meeting" },
+          { id: "a-move", name: "移動1", type: "move", position: 1, runSeconds: 5, x: 400, y: 200, yaw: 0, roomId: "r1", targetId: "tg1", text: "", state: "meeting" },
+        ],
+      },
+    ],
+  };
+  const plan = compilePlan(map);
+  const state = samplePlan(plan, 0.5);
+  const markers = moveMarkers(plan);
+  assert.equal(markers.length, 1);
+  assert.equal(markers[0].actionId, "a-move");
+  assert.equal(markers[0].label, "1");
+
+  // Waypoint hit
+  assert.deepEqual(hitStageItem(map, plan, state, { x: 400, y: 200 }, 1, true), { kind: "waypoint", trackId: "tr-robot", actionId: "a-move" });
+  // When paths are hidden, waypoint is not hit; falls through to room
+  assert.deepEqual(hitStageItem(map, plan, state, { x: 400, y: 200 }, 1, false), { kind: "room", roomId: "r1" });
+  // Display hit (actor-attached display is drawn at state.displays[0].x, y)
+  const disp = state.displays[0];
+  assert.ok(disp);
+  assert.deepEqual(hitStageItem(map, plan, state, { x: disp.x, y: disp.y }, 1, true), { kind: "display", trackId: "tr-robot", actionId: "a-show" });
+  // Actor hit
+  assert.deepEqual(hitStageItem(map, plan, state, { x: 100, y: 100 }, 1, true), { kind: "actor", trackId: "tr-robot", actorKind: "robot" });
+  // Room hit
+  assert.deepEqual(hitStageItem(map, plan, state, { x: 300, y: 300 }, 1, true), { kind: "room", roomId: "r1" });
+  // Outside room
+  assert.equal(hitStageItem(map, plan, state, { x: 1090, y: 610 }, 1, true), null);
 });

@@ -2,6 +2,33 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 
+interface BluetoothRemoteGATTCharacteristic extends EventTarget {
+  value?: DataView;
+  writeValue(value: BufferSource): Promise<void>;
+  writeValueWithoutResponse(value: BufferSource): Promise<void>;
+  startNotifications(): Promise<BluetoothRemoteGATTCharacteristic>;
+}
+interface BluetoothRemoteGATTService {
+  getCharacteristic(uuid: string): Promise<BluetoothRemoteGATTCharacteristic>;
+}
+interface BluetoothRemoteGATTServer {
+  connected: boolean;
+  connect(): Promise<BluetoothRemoteGATTServer>;
+  disconnect(): void;
+  getPrimaryService(uuid: string): Promise<BluetoothRemoteGATTService>;
+}
+interface BluetoothDevice extends EventTarget {
+  name?: string;
+  gatt?: BluetoothRemoteGATTServer;
+}
+declare global {
+  interface Navigator {
+    bluetooth: {
+      requestDevice(options: { filters?: { name?: string; namePrefix?: string }[]; optionalServices?: string[] }): Promise<BluetoothDevice>;
+    };
+  }
+}
+
 // Nordic UART Service (NUS) UUIDs
 export const NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 export const NUS_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // Web -> ESP32 (Write)

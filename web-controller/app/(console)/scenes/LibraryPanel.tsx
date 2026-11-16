@@ -51,7 +51,7 @@ export function LibraryPanel({ map, selection, open, className, onSelect, onEdit
           const Icon = ICONS[track.kind];
           return <li key={track.id}>
             <button type="button" className={styles.item} aria-pressed={selection.trackId === track.id && !selection.actionId && !selection.roomId}
-              onClick={() => onSelect({ trackId: track.id, actionId: null, blocks: [], roomId: selection.roomId })}>
+              onClick={() => onSelect({ trackId: track.id, actionId: null, blocks: [], roomId: null })}>
               <Icon aria-hidden="true" />
               <span>{track.name}<small>{trackKindLabel(track.kind)}</small></span>
             </button>

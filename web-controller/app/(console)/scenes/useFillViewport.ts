@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useState, type RefObject } from "react";
 
-const BOTTOM_GAP_PX = 34;
+const BOTTOM_GAP_PX = 8;
 
 // Height that makes the element end at the bottom of the window, so the workbench fits one screen and the cards scroll inside.
 export function useFillViewport(ref: RefObject<HTMLElement>): number | undefined {

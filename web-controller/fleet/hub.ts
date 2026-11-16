@@ -476,6 +476,7 @@ export class FleetHub {
       case "resume": failure = this.runner.resume(); break;
       case "abort": failure = this.runner.abort(); break;
       case "reset": failure = this.runner.reset(); break;
+      case "setWaitTimeout": failure = this.runner.setWaitTimeout(command.seconds); break;
     }
     if (failure) return failure;
     if (this.runner.prepared && !this.runTimer) this.runTimer = setInterval(() => this.runTick(), RUN_TICK_MS);

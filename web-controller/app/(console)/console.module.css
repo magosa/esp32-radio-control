@@ -72,8 +72,25 @@
   padding: 0 max(20px, calc((100vw - 1200px) / 2)) 32px;
   color-scheme: light;
 }
-/* The scene editor is a one-screen workbench and uses the full width. */
-.fleet[data-wide="true"] { padding-inline: max(16px, calc((100vw - 1800px) / 2)); }
+/* The scene editor is a one-screen Premiere-style NLE workbench and uses the full width with compact chrome. */
+.fleet[data-wide="true"] {
+  padding: 0 max(16px, calc((100vw - 1920px) / 2)) 8px;
+}
+.fleet[data-wide="true"] .header {
+  min-height: 52px;
+  padding: 4px 0;
+  gap: 8px 16px;
+}
+.fleet[data-wide="true"] .brand { gap: 10px; }
+.fleet[data-wide="true"] .brand h1 { font-size: 18px; line-height: 1.3; white-space: nowrap; }
+.fleet[data-wide="true"] .headerActions { gap: 4px; }
+.fleet[data-wide="true"] .headerActions :is(.secondary, .emergency) {
+  min-height: 38px;
+  padding: 6px 10px;
+  font-size: 12px;
+  gap: 5px;
+}
+.fleet[data-wide="true"] .headerActions svg { width: 15px; height: 15px; }
 .fleet::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: url("/appearance/glass-folds.png") center / cover no-repeat; opacity: var(--backdrop-opacity); }
 .fleet[data-theme="dark"] {
   --ink: #f1f5f9;
@@ -248,10 +265,14 @@
   .workspace { grid-template-columns: 240px minmax(0, 1fr); }
   .controlBody { grid-template-columns: minmax(0, 1fr); }
 }
-/* ナビが7項目になり、701〜1180pxではタイトルとナビが1行に収まらずタイトルが縦に潰れるため、2段にする。 */
+/* ナビが8項目になり、701〜1180pxではタイトルとナビが1行に収まらずタイトルが縦に潰れるため、2段にする。 */
 @media (min-width: 701px) and (max-width: 1360px) {
-  .header { flex-direction: column; align-items: stretch; gap: 12px; padding: 12px 0; }
-  .headerActions { justify-content: flex-start; flex-shrink: 1; }
+  .fleet:not([data-wide="true"]) .header { flex-direction: column; align-items: stretch; gap: 12px; padding: 12px 0; }
+  .fleet:not([data-wide="true"]) .headerActions { justify-content: flex-start; flex-shrink: 1; }
+}
+@media (min-width: 701px) and (max-width: 1080px) {
+  .fleet[data-wide="true"] .header { flex-direction: column; align-items: stretch; gap: 6px; padding: 6px 0; }
+  .fleet[data-wide="true"] .headerActions { justify-content: flex-start; flex-shrink: 1; }
 }
 @media (max-width: 700px) {
   .fleet { padding: 0 16px 24px; }

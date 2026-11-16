@@ -261,7 +261,7 @@ export interface RouteStatusMessage {
   routeId: string;
   running: boolean;
   elapsedMs: number;
-  perVehicle: { deviceId: string; stepIndex: number }[];
+  perVehicle: { deviceId: string; stepIndex: number; totalSteps?: number }[];
 }
 
 // デバイスから到着したimageFrameに受信時刻を付与してクライアントへ中継する
