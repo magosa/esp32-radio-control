@@ -43,6 +43,7 @@ function Overlay({ session }: { session: MapEditSession }) {
 export function MapEditorCanvas({ session }: { session: MapEditSession }) {
   const wrap = useRef<HTMLDivElement>(null);
   const draft = session.draft();
+  const mode = session.mode();
   // Tracks and actors would only clutter the layout, and a just-added empty region fails the plan's floor-plan validation.
   const view = useMemo(() => ({ ...draft, tracks: [], rooms: draft.rooms.filter((item) => item.cells.length > 0) }), [draft]);
   const tool = session.tool();
@@ -87,6 +88,6 @@ export function MapEditorCanvas({ session }: { session: MapEditSession }) {
   return <div ref={wrap} className={styles.canvas} data-tool={tool}
     onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
     onPointerCancel={session.strokeCancel} onLostPointerCapture={session.strokeCancel}>
-    <MapStage map={view} time={0} showGrid gridMm={draft.editGridMm} drawing overlay={<Overlay session={session} />} />
+    <MapStage map={view} time={0} showGrid showRoomLabels showRoomBoundaries={mode === "zoning"} gridMm={draft.editGridMm} drawing overlay={<Overlay session={session} />} />
   </div>;
 }

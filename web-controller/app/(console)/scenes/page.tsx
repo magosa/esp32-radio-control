@@ -239,7 +239,7 @@ function Editor({ scene, project, map, mapId }: {
             <PlaybackBar playback={playback} onFullscreen={() => setPreviewOpen(true)} />
           </div>
         </section>
-        <TimelineCard {...shared} playback={playback} paletteSlot={paletteSlot} dragActionType={dragActionType} onDragActionType={setDragActionType} />
+        <TimelineCard {...shared} playback={playback} paletteSlot={paletteSlot} toolbarSlot={zoomSlot} dragActionType={dragActionType} onDragActionType={setDragActionType} />
       </div>
       <div className={styles.controls}>
         <section className={`${consoleStyles.preferenceCard}`} aria-label="行と動作の追加">

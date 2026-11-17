@@ -420,6 +420,14 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
           return;
         }
         roomId = pending.id;
+      } else if (tool === "erase") {
+        // 消しゴムツール使用時は部屋選択を不要にする
+        // 任意のセルを消去可能にするため、roomIdをクリアしない
+      } else if (tool !== "room" && tool !== "corridor" && roomId === null) {
+        // その他のツール（room, corridor以外）で部屋未選択の場合はエラー
+        error = "部屋を選択してください。";
+        bump();
+        return;
       }
       setStroke({ tool, start: cell, last: cell, cells: new Set(), invalid: false });
       updateStroke(cell);

@@ -20,6 +20,8 @@ export interface MapStageProps {
   showGrid: boolean;
   showPaths?: boolean;
   showAxis?: boolean;
+  showRoomLabels?: boolean;
+  showRoomBoundaries?: boolean;
   selection?: SceneSelection;
   gridMm: EditGridMm;
   onPick?: (p: { x: number; y: number }) => void;
@@ -61,10 +63,10 @@ function useScale(): [RefObject<SVGSVGElement>, number] {
 }
 
 export function MapStage({
-  map, time, showGrid, showPaths = true, showAxis = false, selection, gridMm,
+  map, time, showGrid, showPaths = true, showAxis = false, showRoomLabels = false, showRoomBoundaries = false, selection, gridMm,
   onPick, onStageHit, onStageDrop, overlay, drawing, toolbarSlot,
 }: MapStageProps) {
-  const [zoom, setZoom] = useState<ZoomId>("fit");
+  const [zoom] = useState<ZoomId>("fit");
   const [cursor, setCursor] = useState<Point | null>(null);
   const [svgRef, scale] = useScale();
   const down = useRef<{ x: number; y: number } | null>(null);
@@ -126,12 +128,7 @@ export function MapStage({
   };
 
   const toolbar = (
-    <div className={styles.toolbar} role="toolbar" aria-label="表示倍率">
-      {ZOOMS.map((item) => (
-        <button key={item.id} type="button" className={styles.zoomButton} aria-pressed={zoom === item.id} onClick={() => setZoom(item.id)}>
-          {item.label}
-        </button>
-      ))}
+    <div className={styles.toolbar} role="toolbar" aria-label="表示">
       {showAxis && (
         <span className={styles.coords} data-part="cursor-coords" aria-live="off">
           {cursor ? `X ${cursor.x}mm / Y ${cursor.y}mm` : "X — / Y —"}
@@ -144,7 +141,7 @@ export function MapStage({
     <div className={styles.stage}>
       {toolbarSlot === undefined ? toolbar : toolbarSlot && createPortal(toolbar, toolbarSlot)}
       <div className={drawing ? `${styles.scroll} ${styles.drawing}` : styles.scroll} tabIndex={interactive ? 0 : undefined}>
-        <svg ref={svgRef} className={styles.map} viewBox={VIEW_BOX} style={{ width: zoomWidth(zoom), height: zoom === "fit" ? "100%" : "auto" }} role="img"
+        <svg ref={svgRef} className={styles.map} viewBox={VIEW_BOX} style={{ width: "100%", height: "100%" }} role="img"
           aria-label={mapSummary(map, { time, actors: state.actors })}
           onPointerMove={showAxis ? onMove : undefined}
           onPointerLeave={showAxis ? () => setCursor(null) : undefined}
@@ -155,7 +152,8 @@ export function MapStage({
           onDrop={onStageDrop ? onDrop : undefined}
           onPointerCancel={() => { down.current = null; }}>
           <MapBody map={map} scene={state} time={time} scale={scale} showGrid={showGrid} showPaths={showPaths}
-            showAxis={showAxis} selection={selection} gridMm={gridMm} plan={plan} overlay={overlay} />
+            showAxis={showAxis} showRoomLabels={showRoomLabels} showRoomBoundaries={showRoomBoundaries} selection={selection} gridMm={gridMm} plan={plan} overlay={overlay}
+            drawRobots={false} />
         </svg>
       </div>
       {firstError && <p className={styles.status} role="status">計画エラー: {firstError}</p>}

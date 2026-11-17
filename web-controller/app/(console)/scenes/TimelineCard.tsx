@@ -25,6 +25,8 @@ export interface TimelineCardProps extends EditorShared {
   playback: PlaybackControls;
   // Where the row and action palette is drawn (the page's right column). Nothing is drawn until it exists.
   paletteSlot: HTMLElement | null;
+  // Where zoom toolbar is drawn (the right column next to stage zoom).
+  toolbarSlot: HTMLElement | null;
   dragActionType?: ActionType | null;
   onDragActionType?: (type: ActionType | null) => void;
 }
@@ -428,6 +430,7 @@ export function TimelineCard(props: TimelineCardProps) {
           <button type="button" className={consoleStyles.secondary} aria-pressed={!fine} onClick={() => setFine(false)}>スナップ 0.5秒</button>
         </div>
       </div>
+      {props.toolbarSlot && createPortal(<>({/* zoom toolbar slot content */}</>, props.toolbarSlot)}
     </div>
     {props.paletteSlot && createPortal(<TrackPalette track={selectedTrack} selectedBlocks={selection.blocks.length} onAddTrack={onAddTrack} onAddAction={onAddAction}
       onMoveTrack={(direction) => { if (selectedTrack) run((m) => moveTrackBy(m, selectedTrack.id, direction), "行の並べ替え"); }}

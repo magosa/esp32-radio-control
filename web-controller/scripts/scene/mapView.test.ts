@@ -75,9 +75,9 @@ test("a tap tolerates small movement and rejects a drag", () => {
   assert.equal(isTap({ x: 10, y: 10 }, { x: 40, y: 10 }), false);
 });
 
-test("zoom levels are all, 150, 200 and 400 percent of the parent width", () => {
-  assert.deepEqual(ZOOMS.map((zoom) => zoom.label), ["全体", "150%", "200%", "400%"]);
-  assert.deepEqual(ZOOMS.map((zoom) => zoomWidth(zoom.id)), ["100%", "150%", "200%", "400%"]);
+test("zoom level is fit (全体) only", () => {
+  assert.deepEqual(ZOOMS.map((zoom) => zoom.label), ["全体"]);
+  assert.deepEqual(ZOOMS.map((zoom) => zoomWidth(zoom.id)), ["100%"]);
 });
 
 test("text never drops below 12 screen pixels", () => {

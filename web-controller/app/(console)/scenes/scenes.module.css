@@ -50,8 +50,8 @@
 .stageControls > :first-child { flex: 1 1 100%; }
 .exhibitPopover { position: absolute; right: 0; z-index: 30; margin-top: 4px; width: min(620px, calc(100vw - 48px)); padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28); }
 .anchor { position: relative; }
-.controls { display: grid; align-content: start; gap: var(--card-gap); min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.library { display: grid; align-content: start; gap: 8px; padding: 8px 10px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.controls { display: grid; align-content: start; gap: var(--card-gap); min-height: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--surface-strong); border: 1px solid var(--line); border-radius: 6px; }
+.library { display: grid; align-content: start; gap: 8px; padding: 8px 10px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--surface-strong); border: 1px solid var(--line); border-radius: 6px; }
 .library h2, .controls h2 { margin: 0 0 6px; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; }
 .libraryOnly { display: none; }
 .statusBar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; min-height: 26px; padding: 2px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 11px; }

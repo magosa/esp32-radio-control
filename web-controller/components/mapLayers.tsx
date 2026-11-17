@@ -27,9 +27,42 @@ const ACTIVITY_COLOR = MAP_COLORS.safetyCircle;
 function Floor({ map }: { map: SceneMap }) {
   return (
     <g>
+      <defs>
+        <pattern id="wood-pattern" patternUnits="userSpaceOnUse" width="40" height="40">
+          <rect width="40" height="40" fill="#c2a983" />
+          <line x1="0" y1="8" x2="40" y2="8" stroke="#b39977" strokeWidth="1" opacity="0.4" />
+          <line x1="0" y1="16" x2="40" y2="16" stroke="#b39977" strokeWidth="1" opacity="0.3" />
+          <line x1="0" y1="24" x2="40" y2="24" stroke="#b39977" strokeWidth="1" opacity="0.4" />
+          <line x1="0" y1="32" x2="40" y2="32" stroke="#b39977" strokeWidth="1" opacity="0.3" />
+        </pattern>
+        <pattern id="tile-pattern" patternUnits="userSpaceOnUse" width="40" height="40">
+          <rect width="40" height="40" fill="#dbe3df" />
+          <line x1="0" y1="40" x2="40" y2="40" stroke="#c5cfc4" strokeWidth="1" />
+          <line x1="40" y1="0" x2="40" y2="40" stroke="#c5cfc4" strokeWidth="1" />
+          <circle cx="20" cy="20" r="8" fill="none" stroke="#b8bfbb" strokeWidth="0.5" opacity="0.5" />
+        </pattern>
+        <pattern id="carpet-pattern" patternUnits="userSpaceOnUse" width="6" height="6">
+          <rect width="6" height="6" fill="#718796" />
+          <circle cx="2" cy="2" r="1" fill="#6a7a8a" opacity="0.3" />
+          <circle cx="5" cy="4" r="1" fill="#6a7a8a" opacity="0.3" />
+        </pattern>
+        <pattern id="concrete-pattern" patternUnits="userSpaceOnUse" width="20" height="20">
+          <rect width="20" height="20" fill="#bfc9c8" />
+          <rect x="0" y="0" width="10" height="10" fill="#b5bfbe" opacity="0.3" />
+          <rect x="10" y="10" width="10" height="10" fill="#b5bfbe" opacity="0.3" />
+          <circle cx="8" cy="8" r="1.5" fill="#a5afae" opacity="0.2" />
+          <circle cx="15" cy="15" r="1.5" fill="#a5afae" opacity="0.2" />
+        </pattern>
+      </defs>
       {MATERIALS.map((material) => {
         const cells = map.rooms.filter((room) => room.material === material).flatMap((room) => room.cells);
-        return cells.length ? <path key={material} d={cellPath(cells)} fill={MAP_COLORS.floor[material]} /> : null;
+        const patternId = {
+          wood: "url(#wood-pattern)",
+          tile: "url(#tile-pattern)",
+          carpet: "url(#carpet-pattern)",
+          concrete: "url(#concrete-pattern)",
+        }[material];
+        return cells.length ? <path key={material} d={cellPath(cells)} fill={patternId} /> : null;
       })}
     </g>
   );
@@ -63,11 +96,28 @@ function Doors({ map, openness }: { map: SceneMap; openness: Map<string, number>
         const l = doorLayout(door.opening);
         const open = Math.max(0, Math.min(1, openness.get(door.id) ?? 0));
         const color = open >= 0.5 ? MAP_COLORS.doorOpen : MAP_COLORS.doorClosed;
+        const isFlapper = door.kind === "flapper";
         return (
           <g key={door.id} transform={`translate(${l.x} ${l.y}) rotate(${l.rotate})`}>
+            {/* Door frame (dashed line) */}
             <line x1={0} y1={0} x2={l.length} y2={0} stroke={MAP_COLORS.wall} strokeWidth={1} strokeDasharray="2 2" />
-            <line x1={0} y1={0} x2={l.length} y2={0} stroke={color} strokeWidth={DOOR_LEAF_MM} strokeLinecap="butt"
-              transform={`rotate(${-90 * open})`} />
+            {isFlapper ? (
+              <>
+                {/* Flapper gate: double lines to indicate swinging from both sides */}
+                <line x1={0} y1={-3} x2={l.length} y2={-3} stroke={color} strokeWidth={DOOR_LEAF_MM} strokeLinecap="butt" opacity={0.7} />
+                <line x1={0} y1={3} x2={l.length} y2={3} stroke={color} strokeWidth={DOOR_LEAF_MM} strokeLinecap="butt" opacity={0.7} />
+                {/* Center line for clarity */}
+                <line x1={0} y1={0} x2={l.length} y2={0} stroke={color} strokeWidth={1} strokeDasharray="1 1" />
+              </>
+            ) : (
+              <>
+                {/* Automatic door: single swing arc line */}
+                <line x1={0} y1={0} x2={l.length} y2={0} stroke={color} strokeWidth={DOOR_LEAF_MM} strokeLinecap="butt"
+                  transform={`rotate(${-90 * open})`} />
+                {/* Door symbol: small perpendicular mark at the pivot */}
+                <circle cx={0} cy={0} r={1.5} fill={color} />
+              </>
+            )}
           </g>
         );
       })}
@@ -222,6 +272,8 @@ export interface MapBodyProps {
   showGrid?: boolean;
   showPaths?: boolean;
   showAxis?: boolean;
+  showRoomLabels?: boolean;
+  showRoomBoundaries?: boolean;
   selection?: SceneSelection;
   gridMm?: number;
   // The editor shows the planned routes and the robot bodies; the exhibit shows neither (the robots are physically there).
@@ -234,7 +286,7 @@ export interface MapBodyProps {
 }
 
 export function MapBody({
-  map, scene, time, scale, showGrid = false, showPaths = true, showAxis = false, selection,
+  map, scene, time, scale, showGrid = false, showPaths = true, showAxis = false, showRoomLabels = false, showRoomBoundaries = false, selection,
   gridMm = 20, plan, drawRobots = true, roomActivities = [], noticeInset = 0, overlay,
 }: MapBodyProps) {
   const openness = new Map(scene.doors.map((door) => [door.id, door.openness]));
@@ -265,13 +317,20 @@ export function MapBody({
         ))}
       </g>
       <Doors map={map} openness={openness} />
+      {showRoomBoundaries && (
+        <g stroke="#8884aa" strokeWidth={1.5} opacity={0.6} strokeDasharray="4 2">
+          {map.rooms.map((room) => room.cells.length > 0 ? (
+            <path key={`boundary-${room.id}`} d={cellPath(room.cells)} fill="none" />
+          ) : null)}
+        </g>
+      )}
       {showGrid && <Grid gridMm={gridMm} />}
       <rect width={VIEW_WIDTH} height={VIEW_HEIGHT} fill="none" stroke={MAP_COLORS.wall} strokeWidth={WALL_MM} />
       {plan && showPaths && <Paths plan={plan} scale={scale} selectedActionId={selection?.actionId} />}
       {scene.actors.filter((actor) => drawRobots || actor.kind !== "robot").map((actor) => (
         <Actor key={actor.id} actor={actor} scale={scale} selected={selection?.trackId === actor.id} />
       ))}
-      {floorPlan?.showRoomLabels && map.rooms.filter((room) => room.cells.length).map((room) => {
+      {(showRoomLabels || floorPlan?.showRoomLabels) && map.rooms.filter((room) => room.cells.length).map((room) => {
         const at = roomAnchor(room);
         return <text key={room.id} x={at.x} y={svgY(at.y)} textAnchor="middle" fontSize={textMm(12, scale)} fill={MAP_COLORS.wall}>{room.name}</text>;
       })}

@@ -54,12 +54,9 @@ export function isTap(down: Point, up: Point, slop = TAP_SLOP_PX): boolean {
   return Math.hypot(up.x - down.x, up.y - down.y) <= slop;
 }
 
-export type ZoomId = "fit" | "150" | "200" | "400";
+export type ZoomId = "fit";
 export const ZOOMS: readonly { id: ZoomId; label: string; factor: number }[] = [
   { id: "fit", label: "全体", factor: 1 },
-  { id: "150", label: "150%", factor: 1.5 },
-  { id: "200", label: "200%", factor: 2 },
-  { id: "400", label: "400%", factor: 4 },
 ];
 
 // Share of the scroll viewport's width; "fit" keeps the whole area visible.
