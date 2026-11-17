@@ -1,10 +1,10 @@
-import { DOOR_DEFAULT_CELLS, doorWidthOk } from "./equipment";
+import { DOOR_DEFAULT_CELLS, DOOR_MAX_CELLS, DOOR_MIN_CELLS, doorWidthOk } from "./equipment";
 import { canRedo, canUndo, initHistory, pushEdit, redo, undo, type EditorHistory } from "./editorHistory";
-import { furnitureCells, validateFloorPlan } from "./floorPlan";
-import { cellColRow, cellIndex, type Edge } from "./grid";
+import { furnitureCells, regionBounds, validateFloorPlan, type Bounds } from "./floorPlan";
+import { cellAt, cellColRow, cellIndex, type Edge } from "./grid";
 import { defaultId, type IdFactory } from "./ids";
 import {
-  addChargingZone, addDoorAt, addFurniture, addGate, addPartitionWall, deleteFixture, previewDoorAt,
+  addChargingZone, addDoorAt, addFurniture, addGate, addPartitionWall, deleteFixture, doorPreviewAt, gateFootprintAt,
   renameFixture, rotateFurnitureBy, setDoorKind, setFurnitureRotation, setFurnitureType,
 } from "./mapEditFixtures";
 import { toJapanese } from "./mapEditMessages";
@@ -14,8 +14,8 @@ import {
   addRegion, commitElevator, eraseCells, paintCells, removeRegionChecked, setRoomProps,
 } from "./mapEditRegions";
 import { newTrack } from "./model";
-import type { FurnitureType, Room, SceneMap, Segment } from "./types";
-import { CELL_COUNT, EDIT_GRID_OPTIONS, type EditGridMm } from "./units";
+import type { DoorMode, FurnitureType, Room, SceneMap, Segment } from "./types";
+import { CELL_COUNT, CELL_MM, COLUMNS, EDIT_GRID_OPTIONS, type EditGridMm } from "./units";
 
 export const MAP_UNDO_LIMIT = 100;
 const MAX_TRACKS = 128;
@@ -37,6 +37,12 @@ export interface MapStroke {
   invalid: boolean;
 }
 
+export interface GatePreview {
+  bounds: Bounds;
+  segments: readonly Segment[];
+  valid: boolean;
+}
+
 export type MapEditResult = { ok: true; map: SceneMap } | { ok: false; error: string };
 
 export interface MapEditSession {
@@ -47,6 +53,7 @@ export interface MapEditSession {
   entrance(): Edge;
   doorEdge(): DoorEdge;
   doorCells(): number;
+  gateDepthCells(): number;
   furnitureType(): FurnitureType;
   placementRotation(): Rotation;
   selectedRoomId(): string | null;
@@ -55,6 +62,7 @@ export interface MapEditSession {
   notice(): string | null;
   stroke(): MapStroke | null;
   doorPreview(): readonly Segment[] | null;
+  gatePreview(): GatePreview | null;
   isDirty(): boolean;
   canUndo(): boolean;
   canRedo(): boolean;
@@ -67,6 +75,7 @@ export interface MapEditSession {
   setEntrance(edge: Edge): void;
   setDoorEdge(edge: DoorEdge): void;
   setDoorCells(cells: number): void;
+  setGateDepthCells(cells: number): void;
   setFurnitureType(type: FurnitureType): void;
   selectRoom(id: string): void;
   selectItem(id: string | null): void;
@@ -78,6 +87,8 @@ export interface MapEditSession {
   strokeCancel(): void;
   placeDoorAt(x: number, y: number, maxDistance: number): void;
   hoverDoor(x: number, y: number, maxDistance: number): void;
+  hoverGate(x: number, y: number): void;
+  clearPlacementPreview(): void;
   addRegionOfTool(): void;
   deleteRegion(): void;
   setRoomProps(patch: Partial<Pick<Room, "name" | "kind" | "material" | "color">>): void;
@@ -89,6 +100,7 @@ export interface MapEditSession {
   deleteSelected(): void;
   setName(name: string): void;
   setRoomLabels(show: boolean): void;
+  setDoorMode(mode: DoorMode): void;
   undo(): void;
   redo(): void;
   result(): MapEditResult;
@@ -117,6 +129,7 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
   let entrance: Edge = "bottom";
   let doorEdge: DoorEdge = "auto";
   let doorCells = DOOR_DEFAULT_CELLS;
+  let gateDepthCells = 1;
   let furnitureType: FurnitureType = "desk";
   let placementRotation: Rotation = 0;
   let roomId: string | null = original.rooms[0]?.id ?? null;
@@ -126,6 +139,7 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
   let active: ActiveStroke | null = null;
   let strokeView: MapStroke | null = null;
   let preview: readonly Segment[] | null = null;
+  let gatePreview: GatePreview | null = null;
   let revision = 0;
   let dirtyFor: SceneMap | null = null;
   let dirtyValue = false;
@@ -138,12 +152,17 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
     [...draft().rooms].reverse().find((room) => room.appearance === "elevator" && room.cells.length === 0);
 
   function setStroke(next: ActiveStroke | null) {
+    if (next === null) gatePreview = null;
     active = next;
     strokeView = next && { tool: next.tool, cells: Array.from(next.cells).sort((a, b) => a - b), invalid: next.invalid };
   }
 
   function commit(next: SceneMap) {
-    if (!sameJson(next, draft())) hist = pushEdit(hist, next, MAP_UNDO_LIMIT);
+    if (!sameJson(next, draft())) {
+      hist = pushEdit(hist, next, MAP_UNDO_LIMIT);
+      preview = null;
+      gatePreview = null;
+    }
   }
 
   // Runs an edit; a failure leaves the draft untouched and reports the reason.
@@ -192,11 +211,47 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
     return cellIndex(Math.floor(col / k) * k, Math.floor(row / k) * k);
   }
 
+  function gateStrokeFootprint(start: number, end: number) {
+    const a = cellColRow(blockOrigin(start)), b = cellColRow(blockOrigin(end));
+    const horizontal = entrance === "top" || entrance === "bottom";
+    const delta = horizontal ? b.col - a.col : b.row - a.row;
+    const width = delta === 0 ? doorCells : Math.max(DOOR_MIN_CELLS, Math.min(DOOR_MAX_CELLS, Math.abs(delta) + 1));
+    const cols = horizontal ? width : gateDepthCells, rows = horizontal ? gateDepthCells : width;
+    const left = a.col + (horizontal && delta < 0 ? 1 - width : 0);
+    const bottom = a.row + (!horizontal && delta < 0 ? 1 - width : 0);
+    return {
+      ...gateFootprintAt((left + cols / 2) * CELL_MM, (bottom + rows / 2) * CELL_MM, entrance, width, gateDepthCells, 20),
+      width,
+    };
+  }
+
+  function validGatePreview(cells: number[], bounds: Bounds, width: number): GatePreview {
+    let id = 0;
+    const placed = addGate(draft(), cells, entrance, width, () => `gate-preview-${++id}`);
+    return { bounds, segments: placed.map.floorPlan!.walls!.slice(-3), valid: true };
+  }
+
   function updateStroke(cell: number) {
     const s = active!;
     const grid = draft().editGridMm;
     s.invalid = false;
-    if (s.tool === "gate" || s.tool === "elevator") {
+    if (s.tool === "gate") {
+      s.cells = new Set();
+      gatePreview = null;
+      try {
+        const footprint = gateStrokeFootprint(s.start, cell);
+        doorCells = footprint.width;
+        s.cells = new Set(footprint.cells);
+        gatePreview = { bounds: footprint.bounds, segments: [], valid: false };
+        gatePreview = validGatePreview(footprint.cells, footprint.bounds, footprint.width);
+        error = null;
+        notice = `入口幅 ${footprint.width * CELL_MM}mm。ドラッグで140〜240mmに調整し、離して設置します。`;
+      } catch (failure) {
+        s.invalid = true;
+        error = toJapanese(failure);
+        notice = null;
+      }
+    } else if (s.tool === "elevator") {
       const cells = entranceRect(blockOrigin(s.start), blockOrigin(cell), entrance, doorCells);
       if (cells) {
         s.cells = new Set(cells);
@@ -234,7 +289,9 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
       itemId = null;
       tool = "room";
     } else if (s.tool === "gate") {
-      const placed = addGate(map, cells, entrance, doorCells, makeId);
+      const bounds = regionBounds(cells);
+      const width = (entrance === "top" || entrance === "bottom" ? bounds.width : bounds.height) / CELL_MM;
+      const placed = addGate(map, cells, entrance, width, makeId);
       commit(placed.map);
       roomId = placed.roomId;
       itemId = placed.doorId;
@@ -274,6 +331,8 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
     const can = direction === "undo" ? canUndo(hist) : canRedo(hist);
     if (!can) return;
     hist = direction === "undo" ? undo(hist) : redo(hist);
+    preview = null;
+    gatePreview = null;
     error = null;
     notice = null;
     sanitizeSelection();
@@ -296,6 +355,7 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
     entrance: () => entrance,
     doorEdge: () => doorEdge,
     doorCells: () => doorCells,
+    gateDepthCells: () => gateDepthCells,
     furnitureType: () => furnitureType,
     placementRotation: () => placementRotation,
     selectedRoomId: () => roomId,
@@ -304,6 +364,7 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
     notice: () => notice,
     stroke: () => strokeView,
     doorPreview: () => preview,
+    gatePreview: () => gatePreview,
     isDirty() {
       if (dirtyFor !== hist.present) {
         dirtyFor = hist.present;
@@ -325,6 +386,7 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
       mode = next;
       tool = next === "room" ? "select" : roomById(roomId)?.kind ?? "room";
       preview = null;
+      gatePreview = null;
       error = null;
       notice = null;
       bump();
@@ -334,6 +396,7 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
       mode = ZONING_TOOLS.includes(next) ? "zoning" : "room";
       tool = next;
       preview = null;
+      gatePreview = null;
       error = null;
       notice = null;
       if (next === "elevator" && !pendingElevator()) attempt(createRegion);
@@ -346,11 +409,23 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
     setEntrance(edge) {
       entrance = edge;
       setStroke(null);
+      gatePreview = null;
       bump();
     },
     setDoorEdge(edge) {
       doorEdge = edge;
       preview = null;
+      gatePreview = null;
+      bump();
+    },
+    setGateDepthCells(cells) {
+      if (!Number.isInteger(cells) || cells < 1 || cells > COLUMNS) error = "ゲートの奥行きは20〜1100mmの20mm単位で指定してください。";
+      else {
+        gateDepthCells = cells;
+        setStroke(null);
+        error = null;
+        notice = null;
+      }
       bump();
     },
     setDoorCells(cells) {
@@ -361,6 +436,7 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
         error = null;
         setStroke(null);
         preview = null;
+        gatePreview = null;
       }
       bump();
     },
@@ -452,6 +528,7 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
       if (!active) return;
       setStroke(null);
       error = null;
+      notice = null;
       bump();
     },
 
@@ -469,16 +546,38 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
       bump();
     },
     hoverDoor(x, y, maxDistance) {
-      let next: readonly Segment[] | null = null;
-      try {
-        next = previewDoorAt(draft(), x, y, { roomId: roomId ?? undefined, edge: doorEdge, cells: doorCells, maxDistance });
-      } catch {
-        next = null;
-      }
-      if (!sameJson(next, preview)) {
-        preview = next;
+      const next = doorPreviewAt(draft(), x, y, { roomId: roomId ?? undefined, edge: doorEdge, cells: doorCells, maxDistance });
+      const hint = next.error ? `設置できません: ${toJapanese(new Error(next.error))}` : "クリックして自動ドアを設置できます。";
+      if (!sameJson(next.segments, preview) || notice !== hint) {
+        preview = next.segments;
+        notice = hint;
         bump();
       }
+    },
+    hoverGate(x, y) {
+      let next: GatePreview | null = null;
+      let hint = "ドラッグで入口幅を140〜240mmに調整し、離して設置します。";
+      try {
+        const cell = cellAt(x, y);
+        if (cell < 0) throw new Error("ゲート全体がマップ内に収まる場所を選んでください。");
+        const footprint = gateStrokeFootprint(cell, cell);
+        next = { bounds: footprint.bounds, segments: [], valid: false };
+        next = validGatePreview(footprint.cells, footprint.bounds, footprint.width);
+      } catch (error) {
+        hint = `設置できません: ${toJapanese(error)}`;
+      }
+      if (!sameJson(next, gatePreview) || notice !== hint) {
+        gatePreview = next;
+        notice = hint;
+        bump();
+      }
+    },
+    clearPlacementPreview() {
+      if (preview === null && gatePreview === null && notice === null) return;
+      preview = null;
+      gatePreview = null;
+      notice = null;
+      bump();
     },
     addRegionOfTool() {
       attempt(createRegion);
@@ -544,6 +643,11 @@ export function createMapEditSession(source: SceneMap, makeId: IdFactory = defau
     setRoomLabels(show) {
       const map = draft();
       commit({ ...map, floorPlan: { ...(map.floorPlan ?? { doors: [], furniture: [] }), showRoomLabels: show } });
+      bump();
+    },
+    setDoorMode(mode) {
+      if (mode !== "story" && mode !== "strict") error = "扉の確認モードが不正です。";
+      else { commit({ ...draft(), doorMode: mode }); error = null; }
       bump();
     },
     undo: () => history("undo"),

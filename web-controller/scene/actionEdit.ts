@@ -11,12 +11,14 @@ const ACTION_TYPES: Record<TrackKind, readonly ActionType[]> = {
   human: ["move", "show", "hide", "wait"],
   room: ["event-start", "event-end", "unlock", "wait"],
   display: ["show", "hide", "wait"],
+  door: ["door-open"],
 };
 const ACTION_NAMES: Record<ActionType, string> = {
   move: "移動", wait: "待機", show: "表示", hide: "表示を消去",
-  "event-start": "イベント発生", "event-end": "イベント終了", unlock: "ドア解錠",
+  "event-start": "イベント発生", "event-end": "イベント終了", unlock: "ドア解錠", "door-open": "開閉指示",
 };
 const TEMPLATE_LABELS: Record<DisplayTemplate, string> = { label: "テキスト", card: "案内カード", sign: "サイン / ピル" };
+export const DISPLAY_TEMPLATE_OPTIONS = DISPLAY_TEMPLATES.map((value) => ({ value, label: TEMPLATE_LABELS[value] }));
 const HATCH_LABELS: Record<HatchStyle, string> = { diagonal: "斜線", cross: "クロス", dots: "ドット" };
 const STATES: readonly RoomState[] = ["meeting", "outage", "fire"];
 const STATE_LABELS: Record<RoomState, string> = { meeting: "会議中", outage: "停電", fire: "火災" };
@@ -31,7 +33,7 @@ const byPosition = (track: Track) => [...track.actions].sort((a, b) => a.positio
 const inRange = (value: unknown, min: number, max: number) =>
   typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 // Bars that must last (move, wait, unlock) need at least 0.1 s; show/hide/event bars may be instant.
-const minSeconds = (type: ActionType) => type === "move" || type === "wait" || type === "unlock" ? MIN_TIMED_SECONDS : 0;
+const minSeconds = (type: ActionType) => type === "move" || type === "wait" || type === "unlock" || type === "door-open" ? MIN_TIMED_SECONDS : 0;
 
 export type FieldKind = "text" | "number" | "select" | "color" | "textarea";
 
@@ -61,7 +63,7 @@ export interface EndTarget {
 }
 
 export function availableTypes(track: Pick<Track, "kind">): ActionType[] {
-  return [...ACTION_TYPES[track.kind]];
+  return ACTION_TYPES[track.kind].filter((type) => track.kind !== "human" || type !== "show");
 }
 
 function editableTrack(map: SceneMap, trackId: string): Track {
@@ -142,7 +144,7 @@ export function actionFields(action: Action, trackKind: TrackKind): FieldSpec[] 
     case "show":
       fields.push(seconds("実行にかける秒数", 0), {
         key: "displayTemplate", label: "表示テンプレート", kind: "select",
-        options: DISPLAY_TEMPLATES.map((value) => ({ value, label: TEMPLATE_LABELS[value] })),
+        options: DISPLAY_TEMPLATE_OPTIONS,
       }, textField);
       break;
     case "hide":
@@ -219,10 +221,12 @@ function problem(map: SceneMap, trackId: string, action: Action): void {
   if (typeof action.name !== "string" || action.name.length > MAX_NAME) fail(`名前は${MAX_NAME}文字以内にしてください。`);
   if (!inRange(action.position, 0, MAX_SECONDS)) fail(`開始時刻は0〜${MAX_SECONDS}秒にしてください。`);
   const min = minSeconds(action.type);
-  if (!inRange(action.runSeconds, min, MAX_SECONDS)) fail(`秒数は${min}〜${MAX_SECONDS}秒にしてください。`);
+  if (!inRange(action.runSeconds, min, MAX_SECONDS)) fail(action.type === "door-open"
+    ? `終了時刻は開始時刻より${MIN_TIMED_SECONDS}秒以上後、${MAX_SECONDS}秒以内にしてください。`
+    : `秒数は${min}〜${MAX_SECONDS}秒にしてください。`);
   if (!inRange(action.x, 0, AREA_WIDTH_MM)) fail(`X座標は0〜${AREA_WIDTH_MM}mmにしてください。`);
   if (!inRange(action.y, 0, AREA_HEIGHT_MM)) fail(`Y座標は0〜${AREA_HEIGHT_MM}mmにしてください。`);
-  if (!inRange(action.yaw, -180, 180) || action.yaw === -180) fail("角度は-180°より大きく180°以下にしてください。");
+  if (!(typeof action.yaw === "number" && Number.isFinite(action.yaw) && action.yaw > -180 && action.yaw <= 180)) fail("角度は-180°より大きく180°以下にしてください。");
   if (action.roomId !== "" && !map.rooms.some((room) => room.id === action.roomId)) fail("指定した部屋がありません。");
   if (typeof action.text !== "string" || action.text.length > (action.type === "show" || action.type === "event-start" ? MAX_TEXT : 4000)) {
     fail(`表示する言葉は${MAX_TEXT}文字以内にしてください。`);
@@ -240,8 +244,12 @@ function problem(map: SceneMap, trackId: string, action: Action): void {
     if (!endTargets(map, action.type).some((target) => target.value === action.targetId)) fail("終了する項目を選択してください。");
   } else if (typeof action.targetId !== "string" || action.targetId === "") fail("動作の識別子がありません。");
   if (action.type === "unlock" && action.roomId === "") fail("解錠する部屋・設備を選択してください。");
+  if (action.type === "door-open") {
+    if (action.doorId !== track.doorId || action.roomId !== track.roomId || !action.doorId) fail("行の対象設備と開閉指示の対象が一致しません。");
+    if (!inRange(action.position + action.runSeconds, 0, MAX_SECONDS)) fail(`終了時刻は開始時刻より後、${MAX_SECONDS}秒以内にしてください。`);
+  }
   if (action.doorId !== undefined) {
-    if (action.type !== "unlock") fail("設備の指定は解錠の動作だけです。");
+    if (action.type !== "unlock" && action.type !== "door-open") fail("設備の指定は解錠・開閉指示の動作だけです。");
     if (!map.floorPlan?.doors.some((door) => door.id === action.doorId && door.roomId === action.roomId)) {
       fail("指定した設備がこの部屋にありません。");
     }

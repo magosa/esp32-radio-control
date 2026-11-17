@@ -1,11 +1,11 @@
 import {
-  DOOR_MAX_CELLS, DOOR_MIN_CELLS, doorWidthOk, edgePoints, mergedDoors, nearestDoorWall, placeDoor, placeGate,
+  assertDoorReferences, DOOR_MAX_CELLS, DOOR_MIN_CELLS, doorWidthOk, edgePoints, mergedDoors, nearestDoorWall, placeDoor, placeGate,
 } from "./equipment";
 import { regionBounds, rotateFurniture, validateFloorPlan } from "./floorPlan";
-import { cellColRow, type Edge } from "./grid";
+import { cellColRow, cellIndex, type Edge } from "./grid";
 import { defaultId, type IdFactory } from "./ids";
 import type { Door, FurnitureType, SceneMap, Segment } from "./types";
-import { CELL_MM } from "./units";
+import { CELL_MM, COLUMNS, ROWS, type EditGridMm } from "./units";
 
 type Rotation = 0 | 90 | 180 | 270;
 
@@ -26,35 +26,79 @@ function working(map: SceneMap): SceneMap {
 
 const roomOf = (map: SceneMap, cell: number) => map.rooms.find((room) => room.cells.includes(cell));
 
+function doorsAt(
+  map: SceneMap, x: number, y: number,
+  opts: { roomId?: string; edge?: Edge | "auto"; cells: number; maxDistance: number }, makeId: IdFactory,
+): Door[] {
+  const candidate = nearestDoorWall(map, x, y, opts);
+  if (!candidate || "independent" in candidate || !doorWidthOk(opts.cells)) return placeDoor(map, candidate, makeId, opts.cells);
+  const horizontal = candidate.edge === "top" || candidate.edge === "bottom";
+  const start = cellColRow(candidate.cell);
+  const candidates = Array.from({ length: opts.cells }, (_, offset) => ({
+    ...candidate, cell: candidate.cell - offset * (horizontal ? 1 : COLUMNS),
+  })).filter((item) => item.cell >= 0 && (horizontal
+    ? cellColRow(item.cell).row === start.row : cellColRow(item.cell).col === start.col));
+  const distance = (cell: number) => {
+    const at = cellColRow(cell);
+    return Math.abs(((horizontal ? at.col : at.row) + opts.cells / 2) * CELL_MM - (horizontal ? x : y));
+  };
+  candidates.sort((a, b) => distance(a.cell) - distance(b.cell));
+  let failure: unknown;
+  for (const item of candidates) {
+    try { return placeDoor(map, item, makeId, opts.cells); }
+    catch (error) { failure ??= error; }
+  }
+  throw failure ?? new Error("click near a wall");
+}
+
 export function addDoorAt(
   map: SceneMap, x: number, y: number,
   opts: { roomId?: string; edge?: Edge | "auto"; cells: number; maxDistance: number },
   makeId: IdFactory = defaultId,
 ): { map: SceneMap; doorId: string; roomId: string } {
-  const candidate = nearestDoorWall(map, x, y, opts);
-  const doors = placeDoor(map, candidate, makeId, opts.cells);
+  const doors = doorsAt(map, x, y, opts, makeId);
   const result = working(map);
   result.floorPlan!.doors.push(...doors);
   return { map: result, doorId: doors[0].id, roomId: doors[0].roomId };
+}
+
+export function doorPreviewAt(
+  map: SceneMap, x: number, y: number,
+  opts: { roomId?: string; edge?: Edge | "auto"; cells: number; maxDistance: number },
+): { segments: Segment[]; error: null } | { segments: null; error: string } {
+  try {
+    let next = 0;
+    const doors = doorsAt(map, x, y, opts, () => `preview-${++next}`);
+    const segments = doors.map((door) => {
+      if (door.cell === undefined || door.edge === undefined) return { x1: door.x1!, y1: door.y1!, x2: door.x2!, y2: door.y2! };
+      const [x1, y1, x2, y2] = edgePoints(door.cell, door.edge);
+      return { x1, y1, x2, y2 };
+    });
+    return { segments, error: null };
+  } catch (error) {
+    return { segments: null, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export function previewDoorAt(
   map: SceneMap, x: number, y: number,
   opts: { roomId?: string; edge?: Edge | "auto"; cells: number; maxDistance: number },
 ): Segment[] | null {
-  try {
-    let next = 0;
-    const candidate = nearestDoorWall(map, x, y, opts);
-    if (!candidate) return null;
-    const doors = placeDoor(map, candidate, () => `preview-${++next}`, opts.cells);
-    return doors.map((door) => {
-      if (door.cell === undefined || door.edge === undefined) return { x1: door.x1!, y1: door.y1!, x2: door.x2!, y2: door.y2! };
-      const [x1, y1, x2, y2] = edgePoints(door.cell, door.edge);
-      return { x1, y1, x2, y2 };
-    });
-  } catch {
-    return null;
-  }
+  return doorPreviewAt(map, x, y, opts).segments;
+}
+
+export function gateFootprintAt(x: number, y: number, entrance: Edge, width: number, depth: number, grid: EditGridMm) {
+  check(Number.isFinite(x) && Number.isFinite(y), "ゲートの座標は有限数で指定してください。");
+  check(doorWidthOk(width) && Number.isInteger(depth) && depth >= 1 && depth <= COLUMNS, "ゲートの幅・奥行きが不正です。");
+  const horizontal = entrance === "top" || entrance === "bottom";
+  const cols = horizontal ? width : depth, rows = horizontal ? depth : width;
+  const k = grid / CELL_MM;
+  const left = Math.round((x / CELL_MM - cols / 2) / k) * k;
+  const bottom = Math.round((y / CELL_MM - rows / 2) / k) * k;
+  check(left >= 0 && bottom >= 0 && left + cols <= COLUMNS && bottom + rows <= ROWS, "ゲート全体がマップ内に収まる場所を選んでください。");
+  const cells = Array.from({ length: rows }, (_, row) =>
+    Array.from({ length: cols }, (_, col) => cellIndex(left + col, bottom + row))).flat();
+  return { cells, bounds: { x: left * CELL_MM, y: bottom * CELL_MM, width: cols * CELL_MM, height: rows * CELL_MM } };
 }
 
 export function addGate(
@@ -179,6 +223,7 @@ export function deleteFixture(map: SceneMap, itemId: string | null): SceneMap {
   for (const door of plan.doors) if (door.wallId !== undefined && removedWalls.has(door.wallId)) removedDoors.add(door.id);
   plan.doors = plan.doors.filter((door) => !removedDoors.has(door.id));
   plan.walls = plan.walls!.filter((wall) => !removedWalls.has(wall.id));
+  assertDoorReferences(result);
   return result;
 }
 

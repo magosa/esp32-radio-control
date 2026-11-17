@@ -61,6 +61,22 @@ test("source map is never changed", () => {
   assert.deepEqual(source, before);
 });
 
+test("door confirmation mode is a draft edit with undo and redo", () => {
+  const source = emptyMap(room("a", rect(0, 0, 3, 3)));
+  const s = session(source);
+  s.setDoorMode("strict");
+  assert.equal(s.draft().doorMode, "strict");
+  assert.equal(s.isDirty(), true);
+  assert.equal(source.doorMode, "story");
+  s.undo();
+  assert.equal(s.draft().doorMode, "story");
+  assert.equal(s.isDirty(), false);
+  s.redo();
+  const result = s.result();
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.map.doorMode, "strict");
+});
+
 test("a rectangle drag is one operation and undo/redo restores it", () => {
   const s = session();
   s.addRegionOfTool();
@@ -405,7 +421,7 @@ test("edit grid: gate, elevator and partition drags start on the grid block", ()
   assert.deepEqual(Array.from(rows), [8]);
   g.strokeMove(cellIndex(13, 22));
   const moved = g.stroke()?.cells ?? [];
-  assert.deepEqual(Array.from(new Set(moved.map((cell) => Math.floor(cell / 55)))).sort((a, b) => a - b), [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+  assert.deepEqual(Array.from(new Set(moved.map((cell) => Math.floor(cell / 55)))), [8]);
   g.strokeCancel();
   const p = floor();
   p.setGrid(80);
@@ -573,6 +589,111 @@ test("hoverDoor does not notify when the preview is unchanged", () => {
   assert.equal(count, first);
   s.hoverDoor(300, 300, 5);
   assert.equal(s.doorPreview(), null);
+});
+
+test("gate placement shares its anchored preview, respects size and rejects occupied or out-of-map footprints", () => {
+  const source = emptyMap(room("floor", rect(0, 0, 54, 30)));
+  const s = session(source);
+  s.setTool("gate");
+  s.setDoorCells(7);
+  s.setGateDepthCells(3);
+  const before = structuredClone(s.draft());
+  s.hoverGate(350, 150);
+  assert.equal(s.gatePreview()?.valid, true);
+  assert.deepEqual(s.gatePreview()?.bounds, { x: 340, y: 140, width: 140, height: 60 });
+  assert.deepEqual(s.draft(), before);
+  s.hoverGate(550, 150);
+  assert.equal(s.gatePreview()?.bounds.x, 540);
+  drag(s, cellIndex(27, 7), cellIndex(27, 7));
+  assert.equal(s.error(), null);
+  assert.equal(s.draft().floorPlan?.doors.length, 1);
+  assert.equal(s.gatePreview(), null);
+  s.hoverGate(550, 150);
+  assert.equal(s.gatePreview()?.valid, false);
+  assert.match(s.notice() ?? "", /重ね/);
+  drag(s, cellIndex(27, 7), cellIndex(27, 7));
+  assert.equal(s.draft().floorPlan?.doors.length, 1);
+  assert.match(s.error() ?? "", /重ね/);
+  s.hoverGate(-1, -1);
+  assert.equal(s.gatePreview(), null);
+  assert.match(s.notice() ?? "", /マップ内/);
+  s.undo();
+  assert.equal(s.draft().floorPlan?.doors.length, 0);
+  s.redo();
+  assert.equal(s.draft().floorPlan?.doors.length, 1);
+  assert.deepEqual(source.floorPlan?.doors, []);
+});
+
+test("gate orientation rotates the selected footprint and leaving the canvas clears hover feedback", () => {
+  const s = session(emptyMap(room("floor", rect(0, 0, 54, 30))));
+  s.setTool("gate");
+  s.setDoorCells(8);
+  s.setGateDepthCells(4);
+  s.setEntrance("left");
+  s.hoverGate(400, 300);
+  assert.deepEqual(s.gatePreview()?.bounds, { x: 400, y: 300, width: 80, height: 160 });
+  s.setDoorCells(7);
+  assert.equal(s.gatePreview(), null);
+  s.hoverGate(400, 300);
+  s.clearPlacementPreview();
+  assert.equal(s.gatePreview(), null);
+  assert.equal(s.notice(), null);
+});
+
+test("gate dragging varies entrance width in either direction within 140-240mm and keeps standard frames at 20mm", () => {
+  const cases = [
+    { entrance: "bottom", dx: 6, dy: 3, width: 140 },
+    { entrance: "bottom", dx: 2, dy: 0, width: 140 },
+    { entrance: "bottom", dx: 20, dy: 0, width: 240 },
+    { entrance: "top", dx: -8, dy: 0, width: 180 },
+    { entrance: "left", dx: 2, dy: 9, width: 200 },
+    { entrance: "right", dx: 0, dy: -11, width: 240 },
+  ] as const;
+  for (const { entrance, dx, dy, width } of cases) {
+    const source = emptyMap(room("floor", rect(0, 0, 54, 30)));
+    const s = session(source);
+    s.setTool("gate");
+    s.setEntrance(entrance);
+    s.strokeBegin(cellIndex(20, 15));
+    s.strokeMove(cellIndex(20 + dx, 15 + dy));
+    const preview = s.gatePreview();
+    assert.equal(preview?.valid, true);
+    const horizontal = entrance === "bottom" || entrance === "top";
+    assert.equal(horizontal ? preview.bounds.width : preview.bounds.height, width);
+    assert.equal(horizontal ? preview.bounds.height : preview.bounds.width, 20);
+    assert.equal(s.draft().floorPlan?.doors.length, 0);
+    assert.equal(s.canUndo(), false);
+    s.strokeEnd();
+    assert.equal(s.error(), null);
+    assert.equal(s.draft().floorPlan?.doors.length, 1);
+    const frames = s.draft().floorPlan!.walls!.slice(0, 2);
+    assert.ok(frames.every((wall) => Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1) === 20));
+    const door = s.draft().floorPlan!.doors[0];
+    assert.equal(Math.hypot(door.x2! - door.x1!, door.y2! - door.y1!), width);
+    assert.equal(s.gatePreview(), null);
+    s.undo();
+    assert.equal(s.draft().floorPlan?.doors.length, 0);
+    s.redo();
+    assert.equal(s.draft().floorPlan?.doors.length, 1);
+    assert.equal(source.floorPlan?.doors.length, 0);
+  }
+});
+
+test("stretching a gate into furniture invalidates its preview and commits nothing", () => {
+  const source = emptyMap(room("floor", rect(0, 0, 54, 30)));
+  source.floorPlan!.furniture.push({ id: "plant", roomId: "floor", type: "plant", rotation: 0, cell: cellIndex(18, 10) });
+  const s = session(source);
+  s.setTool("gate");
+  s.setDoorCells(7);
+  s.strokeBegin(cellIndex(10, 10));
+  assert.equal(s.gatePreview()?.valid, true);
+  s.strokeMove(cellIndex(21, 10));
+  assert.equal(s.gatePreview()?.valid, false);
+  assert.match(s.error() ?? "", /家具/);
+  s.strokeEnd();
+  assert.equal(s.draft().floorPlan?.doors.length, 0);
+  assert.deepEqual(s.draft(), source);
+  assert.equal(s.canUndo(), false);
 });
 
 test("placeDoorAt places a door of the selected width and selects it", () => {

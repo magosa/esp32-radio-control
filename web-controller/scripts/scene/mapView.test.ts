@@ -5,7 +5,7 @@ import { compilePlan, samplePlan } from "../../scene/timedPlan";
 import type { Furniture, SceneMap } from "../../scene/types";
 import {
   VIEW_BOX, ZOOMS, applyMatrix, axisTicks, cellPath, clampToArea, clientToMm, displayLayout, doorLayout, furnitureLayout, gridLines,
-  headingArrow, hitStageItem, isTap, mapSummary, mmToSvg, moveMarkers, pxPerMm, svgAngle, svgToMm, svgY, textMm, wrapDisplayText, zoomWidth,
+  headingArrow, hitStageItem, humanGroupLayout, isTap, mapSummary, mmToSvg, moveMarkers, pxPerMm, svgAngle, svgToMm, svgY, textMm, wrapDisplayText, zoomWidth,
 } from "../../scene/mapView";
 
 const near = (actual: number, expected: number, epsilon = 1e-9) =>
@@ -13,6 +13,23 @@ const near = (actual: number, expected: number, epsilon = 1e-9) =>
 
 test("the view box is the 1100 x 620 mm area", () => {
   assert.equal(VIEW_BOX, "0 0 1100 620");
+});
+
+test("human groups keep every icon inside the map, including 1000 people at its corners", () => {
+  for (const count of [1, 2, 12, 1000]) {
+    for (const center of [{ x: 14, y: 14 }, { x: 1086, y: 606 }, { x: 550, y: 310 }]) {
+      const box = humanGroupLayout(count, center);
+      assert.ok(box.width <= 144 && box.height <= 144);
+      for (let index = 0; index < count; index++) {
+        const x = box.x - box.width / 2 + (index % box.columns + 0.5) * box.step;
+        const y = box.y + box.height / 2 - (Math.floor(index / box.columns) + 0.5) * box.step;
+        const half = box.step * 14 / 32;
+        assert.ok(x - half >= 0 && x + half <= 1100);
+        assert.ok(y - half >= 0 && y + half <= 620);
+      }
+    }
+  }
+  for (const invalid of [0, -1, 1.5, 1001, Number.NaN]) assert.throws(() => humanGroupLayout(invalid, { x: 0, y: 0 }), /人数/);
 });
 
 test("y is flipped at both edges of the area", () => {
@@ -162,6 +179,10 @@ test("axisTicks, moveMarkers and hitStageItem resolve waypoints, displays, actor
           { id: "a-move", name: "移動1", type: "move", position: 1, runSeconds: 5, x: 400, y: 200, yaw: 0, roomId: "r1", targetId: "tg1", text: "", state: "meeting" },
         ],
       },
+      {
+        id: "tr-human", kind: "human", name: "来場者", color: "#58d8ca", muted: false, locked: false, count: 12,
+        initial: { x: 200, y: 300, yaw: 0, roomId: "r1" }, actions: [],
+      },
     ],
   };
   const plan = compilePlan(map);
@@ -181,6 +202,7 @@ test("axisTicks, moveMarkers and hitStageItem resolve waypoints, displays, actor
   assert.deepEqual(hitStageItem(map, plan, state, { x: disp.x, y: disp.y }, 1, true), { kind: "display", trackId: "tr-robot", actionId: "a-show" });
   // Actor hit
   assert.deepEqual(hitStageItem(map, plan, state, { x: 100, y: 100 }, 1, true), { kind: "actor", trackId: "tr-robot", actorKind: "robot" });
+  assert.deepEqual(hitStageItem(map, plan, state, { x: 250, y: 330 }, 1, true), { kind: "actor", trackId: "tr-human", actorKind: "human" });
   // Room hit
   assert.deepEqual(hitStageItem(map, plan, state, { x: 300, y: 300 }, 1, true), { kind: "room", roomId: "r1" });
   // Outside room

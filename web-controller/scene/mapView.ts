@@ -195,6 +195,20 @@ export const WAYPOINT_RADIUS_MM = 12;
 const WAYPOINT_HIT_MM = 18;
 const HUMAN_HIT_MM = HUMAN_RADIUS_MM + 8;
 
+export function humanGroupLayout(count: number, center: Point) {
+  if (!Number.isInteger(count) || count < 1 || count > 1000) throw new RangeError("人数は1〜1000の整数で入力してください。");
+  const columns = Math.ceil(Math.sqrt(count));
+  const rows = Math.ceil(count / columns);
+  const step = Math.min(32, 144 / columns, 144 / rows);
+  const width = columns * step;
+  const height = rows * step;
+  return {
+    x: clamp(center.x, width / 2, VIEW_WIDTH - width / 2),
+    y: clamp(center.y, height / 2, VIEW_HEIGHT - height / 2),
+    width, height, columns, step,
+  };
+}
+
 export interface AxisTicks {
   xs: readonly number[];
   ys: readonly number[];
@@ -289,7 +303,9 @@ export function hitStageItem(
   for (const actor of scene.actors) {
     const radius = actor.kind === "robot" ? ROBOT_SIDE_MM / 2 : HUMAN_HIT_MM;
     const d = Math.hypot(point.x - actor.x, point.y - actor.y);
-    if (d <= radius && (!bestActor || d < bestActor.d)) bestActor = { actor, d };
+    const group = actor.kind === "human" && actor.count > 1 ? humanGroupLayout(actor.count, actor) : null;
+    const hit = group ? Math.abs(point.x - group.x) <= group.width / 2 + 8 && Math.abs(point.y - group.y) <= group.height / 2 + 8 : d <= radius;
+    if (hit && (!bestActor || d < bestActor.d)) bestActor = { actor, d };
   }
   if (bestActor) return { kind: "actor", trackId: bestActor.actor.id, actorKind: bestActor.actor.kind };
 

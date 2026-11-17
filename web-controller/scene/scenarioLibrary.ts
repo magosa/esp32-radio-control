@@ -1,7 +1,8 @@
 import { cellIndex } from "./grid";
 import { defaultId, type IdFactory } from "./ids";
 import { projectForSave, validateProject } from "./model";
-import { SCENE_SCHEMA, type Action, type Door, type Presentation, type Room, type SceneMap, type SceneProject, type Track } from "./types";
+import { populateScenarioStory } from "./scenarioStories";
+import { SCENE_SCHEMA, type Action, type Door, type Room, type SceneMap, type SceneProject, type Track } from "./types";
 
 export interface ScenarioMeta {
   id: string;
@@ -13,22 +14,22 @@ export interface ScenarioMeta {
 export const SCENARIO_CATALOG: readonly ScenarioMeta[] = [
   { id: "fleet-demo", title: "最新テストマップ（会議・清掃連携）", category: "demo", summary: "エントランス・Z字廊下・会議室・充電スペースを備えた標準テストマップ" },
   { id: "office-demo", title: "オフィステスト（直線廊下・受付・EV）", category: "demo", summary: "受付・直線廊下・オフィス・EVを備えたオフィス巡回マップ" },
-  { id: "daily-security", title: "1. 日常警備巡回", category: "daily", summary: "警備ロボットが各部屋と廊下を巡回し、待機機は充電スペースに留まります" },
-  { id: "daily-cleaning", title: "2. 日常清掃ルート", category: "daily", summary: "清掃ロボットが会議室と廊下を順番に清掃して充電スペースへ戻ります" },
-  { id: "daily-delivery", title: "3. 日常配送ルート", category: "daily", summary: "配送ロボットが受付からオフィスへ荷物を届けて帰還します" },
-  { id: "tutorial-passage", title: "4. 基本：廊下の通過", category: "tutorial", summary: "旋回してから直進する基本動作のチュートリアル" },
-  { id: "tutorial-door", title: "5. 基本：自動ドアの解錠と通過", category: "tutorial", summary: "部屋の解錠バーに合わせてドアを通過するチュートリアル" },
-  { id: "tutorial-fire", title: "6. 基本：火災発生と退避・確認", category: "tutorial", summary: "火災イベント発生時に清掃機が退避し、警備機が確認に向かいます" },
-  { id: "tutorial-crowd", title: "7. 基本：混雑情報の通知と迂回", category: "tutorial", summary: "混雑エリアの表示に先行して別ルートで目的地へ向かいます" },
-  { id: "tutorial-dirt", title: "8. 基本：汚れ検知と清掃完了", category: "tutorial", summary: "汚れ表示があるエリアを清掃し、完了とともに汚れ表示が消えます" },
-  { id: "tutorial-vip", title: "9. 基本：来客（VIP）の案内", category: "tutorial", summary: "受付から会議室まで来客グループを先導して案内します" },
-  { id: "bcp", title: "10. 応用：停電・BCP避難誘導", category: "usecase", summary: "停電発生時に案内表示を出しながら避難経路を確保します" },
-  { id: "garbage", title: "11. 応用：各室ゴミ回収巡回", category: "usecase", summary: "複数の部屋を回って回収作業を行い集積場所へ運びます" },
-  { id: "occupancy", title: "12. 応用：会議室利用後の自動清掃", category: "usecase", summary: "会議終了と退室を待ってから清掃ロボットが入室します" },
-  { id: "learning", title: "13. 応用：巡回ルートの検証走行", category: "usecase", summary: "複数のチェックポイントを定速で回り通行安全を確認します" },
-  { id: "hospitality", title: "14. 応用：おもてなし・会議室準備", category: "usecase", summary: "来客到着前に会議室の清掃と案内表示を完了させます" },
-  { id: "environment", title: "15. 応用：環境計測パトロール", category: "usecase", summary: "各部屋の温度・空気質を計測しながらステータスを表示します" },
-  { id: "remote", title: "16. 応用：遠隔点検・夜間見回り", category: "usecase", summary: "夜間の施錠エリアを順番に解錠しながら点検します" },
+  { id: "daily-security", title: "1. 日常運用：夜間警備巡回", category: "daily", summary: "昼は3役割が待機。夜になると警備が口の字廊下を一周し、充電場所へ戻ります" },
+  { id: "daily-cleaning", title: "2. 日常運用：夜間清掃", category: "daily", summary: "昼は充電待機。夜に清掃がエントランスの一部と廊下を清掃し、他の2台は待機します" },
+  { id: "daily-delivery", title: "3. 日常運用：荷物受取とEV乗車", category: "daily", summary: "室内充電場所→セキュリティ扉→荷物受取→扉→EV呼出待機→乗車" },
+  { id: "tutorial-passage", title: "4. 基本：通路の優先管理", category: "tutorial", summary: "群管理なしの対向停止と、B待機→A通行→B通行を同じマップで比較します" },
+  { id: "tutorial-door", title: "5. 基本：扉の優先管理", category: "tutorial", summary: "扉IN/OUTの対向停止と、A通過→一度閉扉→再開扉→B通過を比較します" },
+  { id: "tutorial-fire", title: "6. 基本：火災時の役割分担", category: "tutorial", summary: "口の字通路を反時計回りに走行。火災後、警備は誘導・清掃は退避します" },
+  { id: "tutorial-crowd", title: "7. 基本：見えない混雑を回避", category: "tutorial", summary: "建物がロボット視野外の混雑を把握。予定の左回りを右回りへ変更します" },
+  { id: "tutorial-dirt", title: "8. 基本：利用跡だけ清掃", category: "tutorial", summary: "会議参加者が退館後、人がいた会議室とエントランスの一部だけを清掃します" },
+  { id: "tutorial-vip", title: "9. 基本：VIPお迎え", category: "tutorial", summary: "模擬車番認識→歓迎→扉連動→VIPと同行→EV目的階呼出" },
+  { id: "bcp", title: "10. 応用：異常時対応（BCP）", category: "usecase", summary: "警備は異常エリアへ直行。清掃・配送は別々の待機場所へ退避します" },
+  { id: "garbage", title: "11. 応用：ゴミ検知→清掃出動", category: "usecase", summary: "カメラによるゴミ検知を可視化し、清掃ロボットが対象ゾーンだけを清掃します" },
+  { id: "occupancy", title: "12. 応用：人流変化→清掃出動", category: "usecase", summary: "在室→退室→空室の色変化を表示し、利用終了後に清掃します" },
+  { id: "learning", title: "13. 応用：拡張していくビル", category: "usecase", summary: "模擬の蓄積データから需要を予測し、清掃ルート・頻度・警備の役割を切り替えます" },
+  { id: "hospitality", title: "14. 応用：おもてなしの進化", category: "usecase", summary: "模擬回答→案内先をハイライト→配送ロボットが対応ゾーンへ移動します" },
+  { id: "environment", title: "15. 応用：警備巡回→空調連動", category: "usecase", summary: "巡回地点で環境をスキャン。建物へのデータ通知と空調状態の変化を表示します" },
+  { id: "remote", title: "16. 応用：トラブル時の遠隔就労", category: "usecase", summary: "エラー→通知→ゲーム風HUDと操作指示→復旧の自動再生。実操縦ではありません" },
 ];
 
 export const SIXTEEN_SCENARIO_IDS = SCENARIO_CATALOG.filter((item) => item.category !== "demo").map((item) => item.id);
@@ -117,10 +118,14 @@ function baseBuilding(makeId: IdFactory): { rooms: Room[]; doors: Door[] } {
 export function buildScenarioMap(scenarioId: string, makeId: IdFactory = defaultId): SceneMap {
   const meta = SCENARIO_CATALOG.find((item) => item.id === scenarioId);
   if (!meta) throw new Error(`未対応のシナリオIDです: ${scenarioId}`);
+  if (meta.category !== "demo") {
+    const map: SceneMap = { id: makeId(), name: meta.title, editGridMm: 20, doorMode: "strict", rooms: [], tracks: [] };
+    populateScenarioStory(map, scenarioId, makeId);
+    return projectForSave({ schema: SCENE_SCHEMA, name: meta.title, maps: [map] }).maps[0];
+  }
   const { rooms, doors } = baseBuilding(makeId);
 
   const tracks: Track[] = [];
-  let presentation: Presentation | undefined;
 
   const addRobot = (
     name: string,
@@ -211,77 +216,8 @@ export function buildScenarioMap(scenarioId: string, makeId: IdFactory = default
       ]);
       break;
     }
-    case "daily-security": {
-      addRobot("警備ロボット", "#8d9bff", "security", "robot-sec", { x: 260, y: 310, yaw: 0, roomId: "room-corridor" }, [
-        moveAction(makeId, "東端まで巡回", 1, 6, 780, 310, 0, "room-corridor"),
-        moveAction(makeId, "北へ旋回", 7.5, 1, 780, 310, 90, "room-corridor", "rotate"),
-        moveAction(makeId, "オフィスB確認", 9, 4, 780, 480, 90, "room-office-b"),
-      ]);
-      addRobot("待機清掃機", "#58d8ca", "cleaning", "robot-cln", { x: 140, y: 120, yaw: 0, roomId: "room-entrance" }, []);
-      break;
-    }
-    case "daily-cleaning": {
-      addRobot("清掃ロボット", "#58d8ca", "cleaning", "robot-cln", { x: 540, y: 310, yaw: -90, roomId: "room-corridor" }, [
-        moveAction(makeId, "会議室1へ入室", 1, 4, 540, 140, -90, "room-meeting1"),
-        moveAction(makeId, "北へ旋回", 5.5, 2, 540, 140, 90, "room-meeting1", "rotate"),
-        moveAction(makeId, "廊下へ戻る", 8, 4, 540, 310, 90, "room-corridor"),
-      ]);
-      break;
-    }
-    case "daily-delivery": {
-      addRobot("配送ロボット", "#ffbd70", "delivery", "robot-dlv", { x: 200, y: 140, yaw: 90, roomId: "room-entrance" }, [
-        moveAction(makeId, "エントランスから廊下へ", 1, 4, 200, 310, 90, "room-corridor"),
-        moveAction(makeId, "オフィスAへ移動", 5.5, 4, 200, 480, 90, "room-office-a"),
-      ]);
-      break;
-    }
-    case "tutorial-dirt": {
-      addRobot("清掃ロボット", "#58d8ca", "cleaning", "robot-cln", { x: 260, y: 310, yaw: 0, roomId: "room-corridor" }, [
-        moveAction(makeId, "汚れ箇所へ移動", 1, 5, 640, 310, 0, "room-corridor"),
-      ]);
-      presentation = {
-        version: 1,
-        scenarioId: "tutorial-dirt",
-        cues: [
-          { kind: "dirt", start: 0, end: 6, label: "清掃対象エリア", color: "#c9a26b", x: 560, y: 260, width: 160, height: 100 },
-          { kind: "notice", start: 6, end: 10, label: "清掃が完了しました", color: "#58d8ca" },
-        ],
-      };
-      break;
-    }
-    case "tutorial-crowd": {
-      addRobot("案内ロボット", "#73bafa", "delivery", "robot-nav", { x: 260, y: 310, yaw: 0, roomId: "room-corridor" }, [
-        moveAction(makeId, "迂回ルート移動", 2, 6, 780, 310, 0, "room-corridor"),
-      ]);
-      presentation = {
-        version: 1,
-        scenarioId: "tutorial-crowd",
-        cues: [
-          { kind: "zone", start: 0, end: 9, label: "混雑検知エリア", color: "#ff9a3d", x: 420, y: 420, width: 200, height: 120 },
-          { kind: "route", start: 1, end: 8, label: "推奨迂回ルート", color: "#58d8ca", points: [[260, 310], [780, 310]] },
-        ],
-      };
-      break;
-    }
-    default: {
-      // Deterministic distinct route per scenario index so all 16 scenarios are distinct and collision-safe
-      const idx = Math.max(0, SIXTEEN_SCENARIO_IDS.indexOf(scenarioId));
-      const startX = 200 + (idx % 4) * 60;
-      const endX = 620 + (idx % 5) * 60;
-      addRobot(`${meta.title} ロボット`, "#8d9bff", idx % 2 === 0 ? "security" : "cleaning", `robot-${idx + 1}`, {
-        x: startX, y: 310, yaw: 0, roomId: "room-corridor",
-      }, [
-        moveAction(makeId, `${meta.title} 移動`, 1, 5 + (idx % 3), endX, 310, 0, "room-corridor"),
-      ]);
-      presentation = {
-        version: 1,
-        scenarioId,
-        cues: [
-          { kind: "notice", start: 0, end: 6, label: meta.summary, color: "#73bafa" },
-        ],
-      };
-      break;
-    }
+    default:
+      throw new Error(`未対応のデモIDです: ${scenarioId}`);
   }
 
   const map: SceneMap = {
@@ -300,7 +236,6 @@ export function buildScenarioMap(scenarioId: string, makeId: IdFactory = default
       showRoomLabels: true,
     },
     tracks,
-    ...(presentation ? { presentation } : {}),
   };
 
   const validated = validateProject(projectForSave({ schema: SCENE_SCHEMA, name: meta.title, maps: [map] }));
