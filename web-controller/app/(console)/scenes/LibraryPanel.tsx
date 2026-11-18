@@ -4,10 +4,11 @@ import { Bot, DoorOpen, Monitor, User } from "lucide-react";
 import type { SceneSelection } from "@/scene/sceneSelection";
 import { trackKindLabel } from "@/scene/trackEdit";
 import type { SceneMap, TrackKind } from "@/scene/types";
+import type { SceneContextRequest } from "./editorTypes";
 import consoleStyles from "../console.module.css";
 import styles from "./library.module.css";
 
-const ICONS = { robot: Bot, human: User, room: DoorOpen, display: Monitor } as const satisfies Record<TrackKind, unknown>;
+const ICONS = { robot: Bot, human: User, room: DoorOpen, display: Monitor, door: DoorOpen } as const satisfies Record<TrackKind, unknown>;
 
 export interface LibraryPanelProps {
   map: SceneMap;
@@ -17,10 +18,12 @@ export interface LibraryPanelProps {
   className: string;
   onSelect(selection: SceneSelection): void;
   onEditMap(): void;
+  onEdit(target: SceneContextRequest["target"]): void;
+  requestContextMenu?(request: SceneContextRequest): void;
 }
 
 // The left column: what the map and the scene contain, one click from the thing it names.
-export function LibraryPanel({ map, selection, open, className, onSelect, onEditMap }: LibraryPanelProps) {
+export function LibraryPanel({ map, selection, open, className, onSelect, onEditMap, onEdit, requestContextMenu }: LibraryPanelProps) {
   const rooms = map.rooms.filter((room) => room.cells.length > 0);
   return <aside className={`${consoleStyles.preferenceCard} ${className}`} aria-label="ライブラリ" data-open={open}>
     <h2>ライブラリ</h2>
@@ -36,6 +39,12 @@ export function LibraryPanel({ map, selection, open, className, onSelect, onEdit
       <ul>
         {rooms.map((room) => <li key={room.id}>
           <button type="button" className={styles.item} aria-pressed={selection.roomId === room.id}
+            onDoubleClick={() => onEdit({ kind: "room", roomId: room.id })}
+            onContextMenu={(event) => {
+              if (!requestContextMenu) return;
+              event.preventDefault();
+              requestContextMenu({ x: event.clientX, y: event.clientY, target: { kind: "room", roomId: room.id } });
+            }}
             onClick={() => onSelect({ trackId: null, actionId: null, blocks: [], roomId: room.id })}>
             <i className={styles.swatch} style={{ background: room.color }} aria-hidden="true" />
             <span>{room.name}<small>{room.kind === "corridor" ? "廊下" : "部屋"} · {room.cells.length}マス</small></span>
@@ -56,6 +65,12 @@ export function LibraryPanel({ map, selection, open, className, onSelect, onEdit
               : `${trackKindLabel(track.kind)} · 動作 ${track.actions.length}件`;
           return <li key={track.id}>
             <button type="button" className={styles.item} aria-pressed={selection.trackId === track.id && !selection.actionId && !selection.roomId}
+              onDoubleClick={() => onEdit({ kind: "track", trackId: track.id })}
+              onContextMenu={(event) => {
+                if (!requestContextMenu) return;
+                event.preventDefault();
+                requestContextMenu({ x: event.clientX, y: event.clientY, target: { kind: "track", trackId: track.id } });
+              }}
               style={{ ["--item-color" as string]: track.color }}
               onClick={() => onSelect({ trackId: track.id, actionId: null, blocks: [], roomId: null })}>
               <Icon aria-hidden="true" />

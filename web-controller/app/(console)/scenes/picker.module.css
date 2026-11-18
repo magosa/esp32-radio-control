@@ -10,7 +10,7 @@
 .dialog[open] { display: grid; }
 .dialog:focus { outline: none; }
 .dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
-.dialog button:focus-visible, .dialog input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.dialog button:focus-visible, .dialog input:focus-visible, .dialog select:focus-visible, .dialog textarea:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .dialog h2 { margin: 0; font-size: 18px; font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
 .dialog p { margin: 0; font-size: var(--text-body); overflow-wrap: anywhere; }
 .dialog button { min-height: 44px; }
@@ -27,12 +27,22 @@
 .toggle[aria-pressed="true"] { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: -2px; font-weight: 600; }
 
 .field { display: grid; gap: 4px; color: var(--muted); font-size: var(--text-meta); }
-.field input {
+.field input, .field select, .field textarea {
   width: 140px; max-width: 100%; min-height: 44px; padding: 8px 10px; box-sizing: border-box;
   color: var(--ink); background: var(--glass-input); border: 1px solid var(--pk-edge); border-radius: 6px; font-size: var(--text-body);
 }
+.field textarea { width: min(440px, 70vw); resize: vertical; }
 
-.canvas { min-width: 0; cursor: crosshair; }
+.canvas { min-width: 0; }
+.workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: start; gap: 16px; }
+.workspace .controls { flex-direction: column; align-items: stretch; }
+.workspace .field input { width: 100%; }
+@media (max-width: 800px) {
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .workspace .controls { flex-direction: row; }
+}
+.marker { pointer-events: all; cursor: grab; }
+.marker[data-dragging="true"] { cursor: grabbing; }
 /* MapStage's scroll area (second child of its root) would otherwise grow with the zoom and push the buttons off screen. */
 .canvas > div > div:nth-child(2) { max-height: max(360px, calc(100vh - 340px)); max-height: max(360px, calc(100dvh - 340px)); }
 .overlay { pointer-events: none; }

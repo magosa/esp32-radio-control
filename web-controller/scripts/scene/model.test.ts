@@ -257,8 +257,10 @@ test("all new kinds and actions validate; defaults are unique, chain locally, an
   const makeId = seqIds();
   const project = createProject("p", makeId), map = project.maps[0];
   map.rooms.push({ id: "room-a", name: "会議室", color: "#73bafa", kind: "room", material: "wood", cells: [0, 1, 55, 56] });
+  map.floorPlan = { walls: [], furniture: [], doors: [{ id: "equipment-door", roomId: "room-a", cell: 0, edge: "left" }] };
   const pairs: Record<TrackKind, [ActionType, ActionType]> = {
     robot: ["move", "move"], human: ["move", "move"], room: ["event-start", "event-end"], display: ["show", "hide"],
+    door: ["door-open", "door-open"],
   };
   for (const kind of Object.keys(KINDS) as TrackKind[]) {
     const before = structuredClone(map);
@@ -288,6 +290,7 @@ test("all new kinds and actions validate; defaults are unique, chain locally, an
   assert.throws(() => newAction(map, secondRobot, "event-start", makeId), /not allowed/);
   map.rooms = [];
   map.tracks = [];
+  map.floorPlan.doors = [];
   const room = newTrack(map, "room", makeId);
   assert.equal(room.roomId, "");
   map.tracks.push(room);

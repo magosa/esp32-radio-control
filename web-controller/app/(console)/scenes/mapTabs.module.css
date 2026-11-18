@@ -14,13 +14,21 @@
 .renameInput { min-height: 44px; width: 150px; max-width: 100%; padding: 0 8px; font: inherit; font-size: 12px; color: var(--ink); background: var(--surface); border: 0; border-radius: 6px 0 0 6px; }
 .limit { font-size: var(--text-meta); color: var(--ink); opacity: 0.8; }
 .error { margin: 0; color: var(--warning-ink); font-size: var(--text-meta); overflow-wrap: anywhere; }
-.dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 20px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
-.dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.dialog { --mt-solid: #f5faff; width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 20px; color: var(--ink); background: var(--mt-solid); border: 1px solid var(--line); border-radius: 8px; }
+:global([data-theme="dark"]) .dialog { --mt-solid: #172338; }
+.dialog::backdrop { background: rgba(0, 0, 0, 0.75); }
+.wideDialog { width: min(760px, calc(100vw - 32px)); overflow-y: auto; box-sizing: border-box; }
 .dialog h2 { margin: 0 0 12px; font-size: var(--text-heading); }
 .field { display: grid; gap: 6px; margin: 12px 0; }
-.field input[type="text"] { min-height: 44px; padding: 0 10px; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
-.choices { margin: 0; padding: 0; border: 0; display: grid; gap: 4px; }
+.field input[type="text"], .field select { min-height: 44px; max-width: 100%; padding: 0 10px; font: inherit; color: var(--ink); background: var(--mt-solid); border: 1px solid var(--line); border-radius: 6px; }
+.choices { margin: 0; padding: 0; border: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
 .choices legend { padding: 0; margin-bottom: 4px; font-weight: 600; }
-.choice { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 8px; border-radius: 6px; overflow-wrap: anywhere; cursor: pointer; }
+.choice { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-content: start; align-items: center; gap: 10px; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; overflow-wrap: anywhere; cursor: pointer; }
+.choice[data-selected="true"] { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: -2px; }
+.choice:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
 .choice input { width: 20px; height: 20px; flex-shrink: 0; }
+.choice .thumbnail, .blankThumbnail { grid-column: 1 / -1; grid-row: 1; width: 100%; aspect-ratio: 1100 / 620; border: 1px solid var(--line); border-radius: 4px; box-sizing: border-box; }
+.choice .thumbnail { display: block; height: auto; }
+.blankThumbnail { display: grid; place-items: center; background: var(--surface-inset); }
+.blankThumbnail svg { width: 36px; height: 36px; color: var(--muted); }
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }

@@ -51,30 +51,22 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
-test("touch: zooming to 200% lets a one-finger drag scroll the map", async ({ browser }) => {
+test("touch: zooming fit keeps pinch-zoom enabled", async ({ browser }) => {
   const context = await browser.newContext({ hasTouch: true, viewport: { width: 1024, height: 800 } });
   const page = await context.newPage();
   await page.goto("/scenes");
   await expect(page.getByRole("tab").first()).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: "200%" }).tap();
   const scroller = page.locator("svg[role=img]").locator("xpath=ancestor::div[contains(@class,'scroll')][1]");
   await expect(scroller).toBeVisible();
-  const style = await scroller.evaluate((el) => ({ touch: getComputedStyle(el).touchAction, overflow: getComputedStyle(el).overflowX,
-    scrollable: el.scrollWidth > el.clientWidth }));
-  expect(style.scrollable).toBe(true);
-  expect(style.overflow).toBe("auto");
-  expect(style.touch).toContain("pan-x");
-  await scroller.evaluate((el) => { el.scrollLeft = 120; });
-  expect(await scroller.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+  const style = await scroller.evaluate((el) => ({ touch: getComputedStyle(el).touchAction }));
+  expect(style.touch).toContain("pinch-zoom");
   await context.close();
 });
 
-test("zoom buttons expose pressed state and are at least 44px tall", async ({ page }) => {
+test("zoom button is fit (全体) only and is at least 44px tall", async ({ page }) => {
   await openScenes(page);
-  for (const label of ["全体", "150%", "200%", "400%"]) {
-    const button = page.getByRole("button", { name: label, exact: true });
-    await button.click();
-    await expect(button).toHaveAttribute("aria-pressed", "true");
-    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-  }
+  const button = page.getByRole("button", { name: "全体", exact: true });
+  await button.click();
+  await expect(button).toHaveAttribute("aria-pressed", "true");
+  expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
 });

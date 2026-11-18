@@ -50,7 +50,7 @@ export function rangeIds(track: Pick<Track, "actions">, anchorId: string, target
   return ordered.slice(Math.min(from, to), Math.max(from, to) + 1).map((action) => action.id);
 }
 
-const DEFAULT_TYPE: Record<TrackKind, ActionType> = { robot: "move", human: "move", room: "event-start", display: "show" };
+const DEFAULT_TYPE: Record<TrackKind, ActionType> = { robot: "move", human: "move", room: "event-start", display: "show", door: "door-open" };
 
 export interface ActionRequest {
   trackId: string;

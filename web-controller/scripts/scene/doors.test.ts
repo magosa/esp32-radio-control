@@ -7,6 +7,7 @@ import {
 import { cellIndex } from "../../scene/grid";
 import { positionAt, type Point } from "../../scene/safety";
 import { compilePlan, samplePlan } from "../../scene/timedPlan";
+import { newAction, newTrack } from "../../scene/model";
 import type { Action, DoorMode, Room, SceneMap, Track } from "../../scene/types";
 
 const horizontal = { x1: 340, y1: 310, x2: 560, y2: 310 };
@@ -121,6 +122,55 @@ test("expiry during passage holds safely until clear and is deterministic when s
   assert.equal(sampleAt(plan, 6).held, false);
   assert.equal(sampleAt(plan, 5).held, true);
   assert.equal(sampleAt(plan, 0).unlocked, true);
+});
+
+test("explicit equipment windows animate at command times, finish closing and honor mute on both fixture kinds", () => {
+  for (const kind of ["automatic", "flapper"] as const) {
+    const { map } = fixture(null);
+    map.tracks = [];
+    for (const door of map.floorPlan!.doors) {
+      door.kind = kind;
+      door.openingId = "opening";
+    }
+    const owner = newTrack(map, "door");
+    map.tracks.push(owner);
+    owner.actions.push({ ...newAction(map, owner, "door-open"), position: 2, runSeconds: 3 });
+    const plan = compilePlan(map);
+    assert.deepEqual(plan.errors, []);
+    assert.equal(plan.duration, 5 + DOOR_TRANSITION_SECONDS);
+    for (const [time, openness] of [[0, 0], [1.999, 0], [2, 0], [2.3, 0.5], [2.6, 1], [4.999, 1], [5, 1], [5.3, 0.5], [5.6, 0], [8, 0], [3, 1], [0, 0]]) {
+      assert.equal(samplePlan(plan, time).doors[0].openness, openness);
+    }
+    owner.actions[0].runSeconds = 0.2;
+    const short = compilePlan(map);
+    assert.ok(Math.abs(short.duration - 2.4) < 1e-9);
+    for (const [time, openness] of [[2.1, 1 / 6], [2.2, 1 / 3], [2.3, 1 / 6], [2.4, 0]]) {
+      assert.ok(Math.abs(samplePlan(short, time).doors[0].openness - openness) < 1e-9);
+    }
+    owner.actions[0].runSeconds = 3;
+    owner.actions.push(newAction(map, owner, "door-open"));
+    const adjacent = compilePlan(map);
+    assert.equal(samplePlan(adjacent, 5).doors[0].openness, 1);
+    assert.equal(samplePlan(adjacent, 5.3).doors[0].openness, 1);
+    assert.equal(samplePlan(adjacent, 8.3).doors[0].openness, 0.5);
+    owner.muted = true;
+    assert.equal(samplePlan(compilePlan(map), 3).doors[0].openness, 0);
+  }
+});
+
+test("explicit windows permit strict passage and retain safe expiry behavior when seeking backwards", () => {
+  const { plan, unlock } = fixture(5);
+  unlock.action.type = "door-open";
+  unlock.action.doorId = "door-5";
+  prepareDoorPlan(plan);
+  assert.deepEqual(plan.errors, []);
+  assert.equal(sampleAt(plan, 0).openness, 0);
+  assert.equal(sampleAt(plan, 5).held, true);
+  assert.equal(sampleAt(plan, 5).openness, 1);
+  const release = plan.doorPlan![0].windows[0].heldUntil;
+  assert.equal(sampleAt(plan, release + 0.3).openness, 0.5);
+  assert.equal(sampleAt(plan, release + DOOR_TRANSITION_SECONDS).openness, 0);
+  assert.equal(sampleAt(plan, 5).openness, 1);
 });
 
 test("unlocked doors advertise only actors whose current path crosses that doorway", () => {

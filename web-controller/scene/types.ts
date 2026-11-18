@@ -4,8 +4,8 @@ import type { EditGridMm } from "./units";
 
 export const SCENE_SCHEMA = "fleet-scene/v1";
 
-export type TrackKind = "robot" | "human" | "room" | "display";
-export type ActionType = "move" | "wait" | "show" | "hide" | "event-start" | "event-end" | "unlock";
+export type TrackKind = "robot" | "human" | "room" | "display" | "door";
+export type ActionType = "move" | "wait" | "show" | "hide" | "event-start" | "event-end" | "unlock" | "door-open";
 export type CoordinateMode = "grid" | "free";
 export type RoomState = "meeting" | "fire" | "outage";
 export type DisplayTemplate = "label" | "card" | "sign";
@@ -142,10 +142,12 @@ export interface Track {
   locked: boolean;
   actions: Action[];
   initial?: Pose;
+  appearAt?: number;
   robotId?: string;
   robotRole?: RobotRole;
   count?: number;
   roomId?: string;
+  doorId?: string;
 }
 
 export interface SceneMap {

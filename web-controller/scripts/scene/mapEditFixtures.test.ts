@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { cellIndex } from "../../scene/grid";
 import { regionBounds, validateFloorPlan } from "../../scene/floorPlan";
 import { mergedDoors } from "../../scene/equipment";
+import { paintCells } from "../../scene/mapEditRegions";
 import {
   addChargingZone, addDoorAt, addFurniture, addGate, addPartitionWall, deleteFixture, previewDoorAt,
   renameFixture, rotateFurnitureBy, setDoorKind, setFurnitureRotation, setFurnitureType,
@@ -85,6 +86,41 @@ test("independent-wall doors preview and place at the requested width", () => {
   const placed = addDoorAt(map, 300, 200, opts, ids());
   assert.equal(fp(placed.map).doors[0].wallId, "wall");
   assert.equal(fp(placed.map).doors[0].x1, segments![0].x1);
+});
+
+test("edge-door previews follow the cursor and fit backwards at the far end of a wall", () => {
+  const map = plan(rect(2, 2, 14, 14));
+  const opts = { ...DOOR_OPTS, cells: 7 };
+  const middle = previewDoorAt(map, 180, 40, opts)!;
+  const end = previewDoorAt(map, 310, 40, opts)!;
+  assert.notDeepEqual(middle, end);
+  assert.equal(end[0].x1, 180);
+  assert.equal(end.at(-1)!.x2, 320);
+  const placed = addDoorAt(map, 310, 40, opts, ids());
+  const merged = mergedDoors(placed.map)[0];
+  assert.deepEqual(merged.points, [180, 40, 320, 40]);
+});
+
+test("drawn room walls preview and place doors from both sides of every boundary", () => {
+  const map = paintCells(plan([]), "floor", rect(5, 5, 20, 20), "room");
+  assert.ok(fp(map).walls!.length > 0);
+  const opts = { roomId: "floor", edge: "auto" as const, cells: 10, maxDistance: 24 };
+  for (const [x, y] of [[300, 98], [300, 102], [498, 300], [502, 300], [300, 498], [300, 502], [98, 300], [102, 300]]) {
+    const preview = pure(map, () => previewDoorAt(map, x, y, opts));
+    assert.ok(preview, `Missing preview at (${x}, ${y})`);
+    const placed = pure(map, () => addDoorAt(map, x, y, opts, ids()));
+    assert.equal(fp(placed.map).doors.length, 10);
+    const door = mergedDoors(placed.map)[0];
+    assert.deepEqual(door.points, [preview[0].x1, preview[0].y1, preview.at(-1)!.x2, preview.at(-1)!.y2]);
+  }
+});
+
+test("a door through automatically drawn shared walls leaves a robot-passable opening", () => {
+  let map = plan([]);
+  map.rooms = [region("left", rect(0, 0, 20, 25)), region("right", rect(20, 0, 20, 25))];
+  map = paintCells(paintCells(map, "left", [], "room"), "right", [], "room");
+  const placed = addDoorAt(map, 400, 250, { roomId: "left", edge: "auto", cells: 10, maxDistance: 24 }, ids());
+  assert.equal(pathProblem(createSafety(placed.map), { x: 300, y: 250 }, { x: 500, y: 250 }, "robot"), "");
 });
 
 test("a robot passes a 7-cell door placed between two rooms", () => {

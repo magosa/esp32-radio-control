@@ -238,9 +238,11 @@
 
 ### scenario-library.test.js
 
+16 本の動作は `scenarioStories.ts` に mm・安全半径 60mm で再構築。各シナリオを 0.1 秒刻みで最後までサンプルし、警告・失敗・向き・最終位置を検証する。通路比較用の中央通路は 260mm 幅とし、現行の単独通行予約に抵触せず両端から接近できる寸法にした（安全判定は変更しない）。保存済みのマップは自動上書きせず、シナリオ集から新しいタブへ追加し直す。
+
 | # | 上流テスト | 区分 | 移植先のテスト | 備考 |
 |---:|---|---|---|---|
-| 171 | the library contains sixteen distinct, independently generated scenarios | 移植済み | the library contains sixteen distinct, independently generated scenarios | `scripts/scene/scenarioLibrary.test.ts`（F32） |
+| 171 | the library contains sixteen distinct, independently generated scenarios | 移植済み | the library contains sixteen distinct scenarios plus the two demo presets<br>generated stories have independent IDs and can coexist without changing existing maps | `scripts/scene/scenarioLibrary.test.ts` |
 | 172 | daily-security: schema roundtrip, complete playback, facing and collision safety | 移植済み | daily-security: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
 | 173 | daily-cleaning: schema roundtrip, complete playback, facing and collision safety | 移植済み | daily-cleaning: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
 | 174 | daily-delivery: schema roundtrip, complete playback, facing and collision safety | 移植済み | daily-delivery: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
@@ -257,10 +259,10 @@
 | 185 | hospitality: schema roundtrip, complete playback, facing and collision safety | 移植済み | hospitality: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
 | 186 | environment: schema roundtrip, complete playback, facing and collision safety | 移植済み | environment: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
 | 187 | remote: schema roundtrip, complete playback, facing and collision safety | 移植済み | remote: schema roundtrip, complete playback, facing and collision safety | `scripts/scene/scenarioLibrary.test.ts`（F32） |
-| 188 | daily scenarios share building geometry and show three roles without moving standby robots | 移植済み | daily scenarios share building geometry and show three roles without moving standby robots | `scripts/scene/scenarioLibrary.test.ts`（F32） |
-| 189 | door priority demonstrates actual intermediate closure before the other robot crosses | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 190 | dirty regions are partial, visible before cleaning and removed when cleaning completes | 対象外: S2以降 |  | シナリオライブラリ（S3） |
-| 191 | building-side crowd information precedes clockwise detour and stays outside local sensor view | 対象外: S2以降 |  | シナリオライブラリ（S3） |
+| 188 | daily scenarios share building geometry and show three roles without moving standby robots | 移植済み | daily stories share the building, show three roles and move only the selected role | `scripts/scene/scenarioLibrary.test.ts` |
+| 189 | door priority demonstrates actual intermediate closure before the other robot crosses | 移植済み | passage and door stories demonstrate opposing approach, B yielding, then sequential crossing | 解錠 3 区間・中間の閉扉・再開扉も検証 |
+| 190 | dirty regions are partial, visible before cleaning and removed when cleaning completes | 移植済み | dirt disappears only after the cleaner works inside each partial dirty zone | 退室後の出動・対象内での清掃待機も検証 |
+| 191 | building-side crowd information precedes clockwise detour and stays outside local sensor view | 移植済み | crowd detection outside local view precedes changing the planned route | 変更前後の経路・視野外の混雑・迂回の実移動を検証 |
 | 192 | presentation input rejects malformed times, geometry, styling and excessive cue counts | 移植済み | validatePresentation rejects malformed times, geometry, styling and excessive cue counts |  |
 
 ### scene-features.test.js

@@ -44,11 +44,34 @@ const fieldOf = (fields: FieldSpec[], key: string) => fields.find((field) => fie
 const near = (actual: number | undefined, expected: number) =>
   assert.ok(actual !== undefined && Math.abs(actual - expected) < 1e-9, `${actual} !== ${expected}`);
 
-test("availableTypes lists the four row kinds", () => {
+test("availableTypes lists the row kinds", () => {
   assert.deepEqual(availableTypes(track("r", "robot")), ["move", "show", "hide", "wait"]);
-  assert.deepEqual(availableTypes(track("h", "human")), ["move", "show", "hide", "wait"]);
+  assert.deepEqual(availableTypes(track("h", "human")), ["move", "hide", "wait"]);
   assert.deepEqual(availableTypes(track("m", "room")), ["event-start", "event-end", "unlock", "wait"]);
   assert.deepEqual(availableTypes(track("d", "display")), ["show", "hide", "wait"]);
+  assert.deepEqual(availableTypes(track("equipment", "door")), ["door-open"]);
+});
+
+test("opening drafts require a matching fixture and a positive window ending within the timeline limit", () => {
+  const owner = track("equipment", "door", [], { doorId: "door", roomId: "floor" });
+  const map = scene([owner], { floorPlan: { furniture: [], walls: [], doors: [{ id: "door", roomId: "floor", cell: cellIndex(2, 2), edge: "left" }] } });
+  const draft = openActionDraft(map, owner.id, null, "door-open", { position: 2, runSeconds: 3 }, ids()).action;
+  assert.equal(validateAction(map, owner.id, draft).ok, true);
+  assert.equal(draft.doorId, "door");
+  assert.equal(draft.roomId, "floor");
+  for (const change of [{ runSeconds: 0 }, { runSeconds: -1 }, { runSeconds: NaN }, { position: 86400 }, { doorId: "missing" }, { roomId: "" }]) {
+    assert.equal(validateAction(map, owner.id, { ...draft, ...change }).ok, false);
+  }
+  assert.equal(validateAction(map, owner.id, { ...draft, position: 86397 }).ok, true);
+});
+
+test("human display creation is hidden while saved display actions remain editable", () => {
+  const saved = act("notice", { type: "show", text: "受付はこちら" });
+  const map = scene([track("h", "human", [saved])]);
+  assert.throws(() => openActionDraft(map, "h", null, "show"), /配置できません/);
+  const opened = pure(map, () => openActionDraft(map, "h", saved.id));
+  assert.deepEqual(opened.action, saved);
+  assert.equal(validateAction(map, "h", opened.action).ok, true);
 });
 
 test("availableTypes returns a copy that cannot corrupt the table", () => {

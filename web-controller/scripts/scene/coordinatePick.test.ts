@@ -6,6 +6,8 @@ import {
   constrainAxis, normalizeYaw180, pickPoint, pickProblem, pickRoom,
 } from "../../scene/coordinatePick";
 import type { EditGridMm } from "../../scene/units";
+import { compilePlan, samplePlan } from "../../scene/timedPlan";
+import { newAction } from "../../scene/model";
 import type { Room, SceneMap, Track } from "../../scene/types";
 
 const region = (id: string, cells: number[], kind: Room["kind"] = "room"): Room => ({
@@ -124,6 +126,20 @@ test("constrainAxis returns the origin for the same point, never mutates, and re
     assert.throws(() => constrainAxis({ x: bad, y: 0 }, { x: 1, y: 1 }), /有限/);
     assert.throws(() => constrainAxis({ x: 0, y: 0 }, { x: 1, y: bad }), /有限/);
   }
+});
+
+test("initial placement checks the displayed time's actual poses rather than past or future initial positions", () => {
+  const m = open();
+  const moving = track("moving", "robot", 200, 300);
+  const later = { ...track("later", "robot", 800, 300), appearAt: 10 };
+  moving.actions = [{ ...newAction(m, moving, "move"), position: 0, runSeconds: 5, x: 500, y: 300 }];
+  m.tracks = [moving, later];
+  const plan = compilePlan(m);
+  const at = (time: number) => samplePlan(plan, time).actors;
+  assert.equal(pickProblem(m, "robot", { x: 200, y: 300 }, 0, at(5)), "");
+  assert.match(pickProblem(m, "robot", { x: 500, y: 300 }, 0, at(5)), /重な/);
+  assert.equal(pickProblem(m, "human", { x: 800, y: 300 }, 0, at(5)), "");
+  assert.match(pickProblem(m, "human", { x: 800, y: 300 }, 0, at(10)), /重な/);
 });
 
 test("pickProblem allows an open point and rejects points outside the area", () => {

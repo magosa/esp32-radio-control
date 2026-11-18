@@ -44,7 +44,7 @@ export function PreviewDialog({ open, map, playback, onClose }: PreviewDialogPro
         <button type="button" className={consoleStyles.primary} onClick={onClose}>閉じる</button>
       </header>
       <div className={styles.stage} style={{ "--aspect": VIEW_WIDTH / VIEW_HEIGHT } as CSSProperties}>
-        <MapStage map={map} time={playback.time} showGrid={false} gridMm={map.editGridMm} />
+        <MapStage map={map} time={playback.time} showGrid={false} gridMm={map.editGridMm} drawRobots />
       </div>
       <PlaybackBar playback={playback} />
     </>}

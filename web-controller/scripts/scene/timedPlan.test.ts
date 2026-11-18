@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { cellIndex } from "../../scene/grid";
 import { createProject, newAction, newTrack, projectForSave, validateProject } from "../../scene/model";
 import { actionPreview, addFacingTurns, compilePlan, samplePlan } from "../../scene/timedPlan";
+import { replaceAction } from "../../scene/trackEdit";
+import { sceneAnalysis } from "../../app/(console)/scenes/sceneAnalysis";
 import type { Action, ActionType, Room, SceneMap, Track, TrackKind } from "../../scene/types";
 
 const close = (a: number, b: number, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -50,6 +52,35 @@ test("fixed timeline uses exact bar start/end and keeps mm segments as the plann
   close(plan.duration, 10);
 });
 
+test("shared editor analysis follows immutable edits and undo, not just map IDs", () => {
+  const { map, track, action } = fixture(), robot = track("robot");
+  const move = action(robot, "move", { runSeconds: 4, x: 230, y: 90 });
+  const before = structuredClone(map);
+  const original = sceneAnalysis(map);
+  const edited = replaceAction(map, robot.id, { ...move, runSeconds: 8, x: 390 });
+  const changed = sceneAnalysis(edited);
+  close(original.duration, 4);
+  close(changed.duration, 8);
+  close(samplePlan(changed.plan, 8).actors[0].x, 390);
+  close(changed.states[move.id].end!, 8);
+  const restored = sceneAnalysis(map);
+  close(restored.duration, 4);
+  close(samplePlan(restored.plan, 4).actors[0].x, 230);
+  close(restored.states[move.id].end!, 4);
+  assert.deepEqual(map, before);
+});
+
+test("shared editor analysis refreshes safety errors after fixing an overlapping action", () => {
+  const { map, track, action } = fixture(), display = track("display");
+  action(display, "wait", { runSeconds: 5 });
+  const overlap = action(display, "wait", { position: 4, runSeconds: 2 });
+  assert.ok(sceneAnalysis(map).errors.some((error) => /重な/.test(error)));
+  const fixed = replaceAction(map, display.id, { ...overlap, position: 5 });
+  assert.deepEqual(sceneAnalysis(fixed).errors, []);
+  assert.equal(sceneAnalysis(fixed).states[overlap.id].status, "complete");
+  assert.ok(sceneAnalysis(map).errors.some((error) => /重な/.test(error)));
+});
+
 test("untrusted initial keys cannot override actor identity in samplePlan", () => {
   const { map, track } = fixture(), robot = track("robot");
   robot.robotId = "robot-a";
@@ -61,6 +92,38 @@ test("untrusted initial keys cannot override actor identity in samplePlan", () =
   assert.equal(actor.name, robot.name);
   assert.equal(actor.count, 1);
   assert.deepEqual([actor.x, actor.y, actor.yaw, actor.roomId], [90, 90, 0, "room"]);
+});
+
+test("actors appear at their absolute start time, keep legacy visibility and do not collide before appearing", () => {
+  const { project, map, track, action } = fixture();
+  const robot = track("robot", { x: 90, y: 310 });
+  action(robot, "move", { position: 0, runSeconds: 4, x: 330, y: 310 });
+  const human = track("human", { x: 90, y: 310 });
+  human.appearAt = 5.5;
+  validateProject(projectForSave(project));
+  const plan = compilePlan(map);
+  assert.deepEqual(samplePlan(plan, 0).actors.map(actor => actor.id), [robot.id]);
+  assert.deepEqual(samplePlan(plan, 5.49).actors.map(actor => actor.id), [robot.id]);
+  assert.deepEqual(samplePlan(plan, 5.5).actors.map(actor => actor.id), [robot.id, human.id]);
+  assert.equal(plan.duration, 5.5);
+  assert.ok(!plan.warnings.some(warning => warning.code === "collision"));
+  human.appearAt = 0;
+  assert.ok(compilePlan(map).warnings.some(warning => warning.code === "collision"));
+});
+
+test("new actions start at appearance time and earlier actions are explicitly blocked", () => {
+  const { map, track, action } = fixture();
+  for (const kind of ["robot", "human"] as const) {
+    const actor = track(kind, { x: kind === "robot" ? 90 : 500, y: 310 });
+    actor.appearAt = 12.5;
+    const move = action(actor, "move", { runSeconds: 2, x: kind === "robot" ? 210 : 650, y: 310 });
+    assert.equal(move.position, 12.5);
+    const plan = compilePlan(map);
+    assert.ok(!samplePlan(plan, 12.49).actors.some(item => item.id === actor.id));
+    close(samplePlan(plan, 13.5).actors.find(item => item.id === actor.id)!.x, kind === "robot" ? 150 : 575);
+    move.position = 10;
+    assert.match(compilePlan(map).entries.find(entry => entry.action.id === move.id)!.reason ?? "", /表示開始/);
+  }
 });
 
 test("same-row overlap is an error and does not slip the bar or block other rows", () => {
@@ -386,6 +449,17 @@ test("twelve-cell corridors are not exclusive and parked robots in narrow corrid
   const blocked = action(early, "move", { position: 4, runSeconds: 10, x: 750, y: 310, roomId: "hall" });
   plan = compilePlan(map);
   assert.match(samplePlan(plan, 20).actionStates[blocked.id].reason, /通行時刻が重なっています/);
+});
+
+test("a future robot only reserves a narrow corridor from its appearance time", () => {
+  const { map, track, action } = corridor();
+  const future = track("robot", { x: 550, y: 310, roomId: "hall" });
+  future.appearAt = 20;
+  const moving = track("robot", { x: 210, y: 310, roomId: "left" });
+  const pass = action(moving, "move", { position: 0, runSeconds: 10, x: 890, y: 310, roomId: "right" });
+  assert.deepEqual(compilePlan(map).errors, []);
+  future.appearAt = 4;
+  assert.match(compilePlan(map).entries.find(entry => entry.action.id === pass.id)!.reason ?? "", /廊下/);
 });
 
 test("room activities list stationary robots in rooms, excluding moving robots and charging zones", () => {

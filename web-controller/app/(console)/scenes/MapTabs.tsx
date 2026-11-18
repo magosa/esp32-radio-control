@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { BookOpen, Pencil, Plus, X } from "lucide-react";
+import { MapBody } from "@/components/mapLayers";
+import { VIEW_BOX } from "@/scene/mapView";
 import { copyMapLayout, createProject } from "@/scene/model";
 import { MAX_MAPS, afterDelete, canAddMap, canDeleteMap, neighbourTab, nextMapName, validateMapName } from "@/scene/mapTabsLogic";
 import { SCENARIO_CATALOG, buildScenarioMap } from "@/scene/scenarioLibrary";
@@ -14,25 +16,26 @@ export interface MapTabsProps {
   project: SceneProject;
   activeMapId: string;
   onSelect(id: string): void;
+  onDrawNewMap(): void;
   commit: Commit;
 }
 
 type DialogState = { kind: "add" } | { kind: "delete"; id: string } | { kind: "scenarios" } | null;
 
-function Modal({ title, onClose, children }: { title: string; onClose(): void; children: ReactNode }) {
+function Modal({ title, onClose, children, wide = false }: { title: string; onClose(): void; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
     if (dialog && !dialog.open) dialog.showModal();
   }, []);
-  return <dialog ref={ref} className={styles.dialog} aria-labelledby="map-dialog-title"
+  return <dialog ref={ref} className={`${styles.dialog}${wide ? ` ${styles.wideDialog}` : ""}`} aria-labelledby="map-dialog-title"
     onCancel={(event) => { event.preventDefault(); onClose(); }}>
     <h2 id="map-dialog-title">{title}</h2>
     {children}
   </dialog>;
 }
 
-export function MapTabs({ project, activeMapId, onSelect, commit }: MapTabsProps) {
+export function MapTabs({ project, activeMapId, onSelect, onDrawNewMap, commit }: MapTabsProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -124,7 +127,8 @@ export function MapTabs({ project, activeMapId, onSelect, commit }: MapTabsProps
     if (error) { setDialogError(error); return; }
     setDialog(null);
     onSelect(created.id);
-    focusTab(created.id);
+    if (source === "new") onDrawNewMap();
+    else focusTab(created.id);
   };
 
   const applyDelete = (id: string) => {
@@ -201,6 +205,7 @@ export function MapTabs({ project, activeMapId, onSelect, commit }: MapTabsProps
           </select>
         </label>
         <p>{SCENARIO_CATALOG.find((item) => item.id === scenarioId)?.summary}</p>
+        <p>新しいタブに追加します。既存のマップや編集内容は変更しません。以前追加したシナリオを更新する場合は、ここから追加し直してください。</p>
         {dialogError && <p className={styles.error} role="alert">{dialogError}</p>}
         <div className={styles.actions}>
           <button type="button" className={consoleStyles.secondary} onClick={closeDialog}>キャンセル</button>
@@ -208,19 +213,25 @@ export function MapTabs({ project, activeMapId, onSelect, commit }: MapTabsProps
         </div>
       </form>
     </Modal>}
-    {dialog?.kind === "add" && <Modal title="マップを追加" onClose={closeDialog}>
+    {dialog?.kind === "add" && <Modal title="マップを追加" onClose={closeDialog} wide>
       <form onSubmit={(event) => { event.preventDefault(); applyAdd(); }}>
         <fieldset className={styles.choices}>
           <legend>作り方</legend>
-          <label className={styles.choice}>
+          <label className={styles.choice} data-selected={source === "new"}>
             <input type="radio" name="map-source" checked={source === "new"} onChange={() => setSource("new")} />
+            <span className={styles.blankThumbnail} aria-hidden="true"><Plus /></span>
             <span>新しくマップを描く</span>
           </label>
-          {maps.map((map) => <label key={map.id} className={styles.choice}>
+          {maps.map((map) => <label key={map.id} className={styles.choice} data-selected={source === map.id}>
             <input type="radio" name="map-source" checked={source === map.id} onChange={() => setSource(map.id)} />
+            <svg className={styles.thumbnail} viewBox={VIEW_BOX} aria-hidden="true" data-map-preview={map.id}>
+              <MapBody map={{ ...map, presentation: undefined }} scene={{ actors: [], displays: [], events: [], doors: [] }}
+                time={0} scale={0.25} showPaths={false} showRoomLabels />
+            </svg>
             <span>「{map.name}」の配置をコピー</span>
           </label>)}
         </fieldset>
+        <p>部屋・廊下・壁・家具・扉の配置をコピーします。ロボット・人・シーケンスは含みません。</p>
         <label className={styles.field}>
           <span>マップ名</span>
           <input type="text" value={addName} onChange={(event) => setAddName(event.target.value)} />

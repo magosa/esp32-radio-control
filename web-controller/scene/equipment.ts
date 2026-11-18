@@ -199,7 +199,8 @@ export function nearestDoorWall(
     const span = Math.min(doorMm, high - low);
     const coordinate = Math.max(low, Math.min(high, horizontal ? x : y));
     const candidate = (x - (horizontal ? coordinate : wall.x1)) ** 2 + (y - (horizontal ? wall.y1 : coordinate)) ** 2;
-    if (candidate > distance) continue;
+    // A room boundary can also be stored as short wall segments; keep its continuous edge candidate.
+    if (candidate > distance || (candidate === distance && nearest && !("independent" in nearest))) continue;
     const start = Math.max(low, Math.min(high - span, low + Math.floor((coordinate - low - span / 2) / CELL_MM) * CELL_MM));
     distance = candidate;
     nearest = {
@@ -247,4 +248,20 @@ export function mergedDoors(map: SceneMap): MergedDoor[] {
     groups.push({ ...door, points: [door.x1!, door.y1!, door.x2!, door.y2!], adjacentRoomId: null, memberIds: [door.id] });
   }
   return groups.map((group) => ({ ...group, opening: inset(group.points) }));
+}
+
+export function equipmentTargets(map: SceneMap) {
+  return mergedDoors(map).map((door, index) => {
+    const kind = door.kind ?? "automatic";
+    const room = map.rooms.find((room) => room.id === door.roomId);
+    const name = door.name || `${kind === "flapper" ? "フラッパーゲート" : "自動ドア"} ${index + 1}`;
+    return { doorId: door.id, memberIds: door.memberIds, roomId: door.roomId, kind, name, label: `${name}（${room?.name ?? door.roomId}）` };
+  });
+}
+
+export function assertDoorReferences(map: SceneMap): void {
+  const ids = new Set((map.floorPlan?.doors ?? []).map((door) => door.id));
+  const reference = map.tracks.find((track) => (track.doorId !== undefined && !ids.has(track.doorId)) ||
+    track.actions.some((action) => action.doorId !== undefined && !ids.has(action.doorId)));
+  if (reference) throw new Error(`この設備は「${reference.name}」の行で使用中です。先に対象の行・指示を削除してください。`);
 }

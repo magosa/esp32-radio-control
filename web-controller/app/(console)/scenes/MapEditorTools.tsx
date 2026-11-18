@@ -4,8 +4,8 @@ import { DOOR_MAX_CELLS, DOOR_MIN_CELLS } from "@/scene/equipment";
 import type { Edge } from "@/scene/grid";
 import { FURNITURE_TYPES } from "@/scene/mapColors";
 import { ROOM_TOOLS, ZONING_TOOLS, type DoorEdge, type MapEditSession, type MapTool, type Rotation } from "@/scene/mapEditSession";
-import type { FurnitureType } from "@/scene/types";
-import { EDIT_GRID_OPTIONS } from "@/scene/units";
+import type { DoorMode, FurnitureType } from "@/scene/types";
+import { COLUMNS, EDIT_GRID_OPTIONS } from "@/scene/units";
 import { Group, SelectField, ToggleButton } from "./MapEditorFields";
 import styles from "./mapEditor.module.css";
 
@@ -24,6 +24,10 @@ const WIDTHS = Array.from({ length: DOOR_MAX_CELLS - DOOR_MIN_CELLS + 1 }, (_, i
 const EDGES = (Object.keys(EDGE_LABELS) as Edge[]).map((value) => ({ value, label: EDGE_LABELS[value] }));
 const DOOR_EDGES: { value: DoorEdge; label: string }[] = [{ value: "auto", label: "自動" }, ...EDGES];
 const ROTATIONS = ([0, 90, 180, 270] as Rotation[]).map((value) => ({ value, label: `${value}°` }));
+const DOOR_MODES: { value: DoorMode; label: string }[] = [
+  { value: "story", label: "ストーリー確認" }, { value: "strict", label: "連携確認" },
+];
+const GATE_DEPTHS = Array.from({ length: COLUMNS }, (_, index) => ({ value: index + 1, label: `${(index + 1) * 20}mm` }));
 
 export function MapEditorTools({ session }: { session: MapEditSession }) {
   const mode = session.mode();
@@ -43,6 +47,7 @@ export function MapEditorTools({ session }: { session: MapEditSession }) {
       <ToggleButton pressed={session.drawMode() === "rectangle"} onClick={() => session.setDrawMode("rectangle")}>長方形ドラッグ</ToggleButton>
     </Group>}
     {needsWidth && <SelectField label="入口幅" value={session.doorCells()} options={WIDTHS} onChange={session.setDoorCells} />}
+    {tool === "gate" && <SelectField label="ゲートの奥行き" value={session.gateDepthCells()} options={GATE_DEPTHS} onChange={session.setGateDepthCells} />}
     {(tool === "gate" || tool === "elevator") && <SelectField label="入口の向き" value={session.entrance()} options={EDGES} onChange={session.setEntrance} />}
     {tool === "door" && <SelectField label="ドアの辺" value={session.doorEdge()} options={DOOR_EDGES} onChange={session.setDoorEdge} />}
     {tool === "furniture" && <>
@@ -52,5 +57,10 @@ export function MapEditorTools({ session }: { session: MapEditSession }) {
     </>}
     <SelectField label="編集グリッド" value={session.draft().editGridMm}
       options={EDIT_GRID_OPTIONS.map((value) => ({ value, label: `${value}mm` }))} onChange={session.setGrid} />
+    <SelectField label="扉の確認モード" value={session.draft().doorMode} options={DOOR_MODES} onChange={session.setDoorMode} />
+    {(tool === "door" || tool === "gate") && <p className={styles.hint}>
+      {tool === "door" ? "壁の近くにカーソルを合わせ、ハイライトされた場所をクリックして設置します。"
+        : "扉の長さ方向へドラッグして入口幅を140〜240mm（20mm単位）に調整し、離して設置します。側枠の標準奥行きは20mmです。"}
+    </p>}
   </div>;
 }

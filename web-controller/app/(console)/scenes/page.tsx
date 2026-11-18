@@ -1,22 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { roomContainsPoint } from "@/scene/floorPlan";
-import type { StageHit } from "@/scene/mapView";
-import { EMPTY_SELECTION, pruneSelection, type SceneSelection } from "@/scene/sceneSelection";
-import { compilePlan } from "@/scene/timedPlan";
-import { addProblem, addRequest } from "@/scene/timelineDrag";
-import { deleteActions, deleteTrack, duplicateAction } from "@/scene/trackEdit";
-import type { ActionType, SceneMap } from "@/scene/types";
+import type { SceneMap } from "@/scene/types";
 import { usePlayback } from "@/hooks/usePlayback";
 import { useSceneProject, type SceneProjectApi } from "@/hooks/useSceneProject";
 import consoleStyles from "../console.module.css";
 import { ActionDialog } from "./ActionDialog";
 import { CoordinatePicker } from "./CoordinatePicker";
-import type { ActionEditRequest, EditMap, PickRequest } from "./editorTypes";
 import { ExhibitControls } from "./ExhibitControls";
-import { Inspector } from "./Inspector";
 import { LibraryPanel } from "./LibraryPanel";
 import { MapEditorDialog } from "./MapEditorDialog";
 import { MapStage } from "./MapStage";
@@ -25,10 +17,13 @@ import { PlaybackBar } from "./PlaybackBar";
 import { PreviewDialog } from "./PreviewDialog";
 import { ProjectBar } from "./ProjectBar";
 import { SequenceDialog } from "./SequenceDialog";
+import { SceneContextMenu } from "./SceneContextMenu";
 import { StatusBar } from "./StatusBar";
 import { TimelineCard } from "./TimelineCard";
 import { useConfirm } from "./useConfirm";
 import { useFillViewport } from "./useFillViewport";
+import { useSceneEditor } from "./useSceneEditor";
+import { sceneAnalysis } from "./sceneAnalysis";
 import timeline from "./timeline.module.css";
 import styles from "./scenes.module.css";
 
@@ -80,120 +75,26 @@ function Editor({ scene, project, map, mapId }: {
   const [showPaths, setShowPaths] = useState(true);
   const [mapEditing, setMapEditing] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [selection, setSelection] = useState<SceneSelection>(EMPTY_SELECTION);
-  const [actionRequest, setActionRequest] = useState<ActionEditRequest | null>(null);
-  const [pickRequest, setPickRequest] = useState<PickRequest | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [exhibitOpen, setExhibitOpen] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [dragActionType, setDragActionType] = useState<ActionType | null>(null);
   const [paletteSlot, setPaletteSlot] = useState<HTMLElement | null>(null);
   const [zoomSlot, setZoomSlot] = useState<HTMLElement | null>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const pageHeight = useFillViewport(pageRef);
   const { confirm, dialog: confirmDialog } = useConfirm();
-  const duration = useMemo(() => compilePlan(map).duration, [map]);
+  const { duration, errors } = sceneAnalysis(map);
   const playback = usePlayback(duration, map);
-
-  // An edit, an undo or switching maps can remove what was selected.
-  useEffect(() => { setSelection((current) => pruneSelection(current, map)); }, [map]);
-  useEffect(() => { setSelection(EMPTY_SELECTION); setActionRequest(null); setPickRequest(null); }, [mapId]);
-
-  const { commit } = scene;
-  const edit = useCallback<EditMap>((change, label) => {
-    const reason = commit((draft) => {
-      const index = draft.maps.findIndex((item) => item.id === mapId);
-      if (index < 0) throw new Error("編集中のマップが見つかりません。");
-      draft.maps[index] = change(draft.maps[index]);
-    }, label);
-    if (reason === null) setNotice(`${label}（元に戻せます）`);
-    else setNotice(reason);
-    return reason;
-  }, [commit, mapId]);
-
-  const onStageHit = useCallback((hit: StageHit, doubleClick: boolean) => {
-    if (!hit) {
-      setSelection(EMPTY_SELECTION);
-      return;
-    }
-    if (hit.kind === "waypoint") {
-      setSelection({ trackId: hit.trackId, actionId: hit.actionId, blocks: [hit.actionId], roomId: null });
-      setActionRequest({ trackId: hit.trackId, actionId: hit.actionId });
-      return;
-    }
-    if (hit.kind === "display") {
-      setSelection({ trackId: hit.trackId, actionId: hit.actionId, blocks: [hit.actionId], roomId: null });
-      return;
-    }
-    if (hit.kind === "actor") {
-      setSelection({ trackId: hit.trackId, actionId: null, blocks: [], roomId: null });
-      if (doubleClick && hit.actorKind === "robot") {
-        setActionRequest({ trackId: hit.trackId, actionId: null });
-      }
-      return;
-    }
-    setSelection({ trackId: null, actionId: null, blocks: [], roomId: hit.roomId });
-  }, []);
-
-  const onStageDrop = useCallback((point: { x: number; y: number }) => {
-    const type = dragActionType;
-    setDragActionType(null);
-    if (!type) return;
-    const track = map.tracks.find((item) => item.id === selection.trackId) ?? map.tracks[0];
-    if (!track) { setNotice("配置先の行を選択してください。"); return; }
-    const problem = addProblem(track, type);
-    if (problem) { setNotice(problem); return; }
-    const room = map.rooms.find((item) => roomContainsPoint(item, point.x, point.y));
-    const req = addRequest(track, playback.time, true, type);
-    setSelection({ trackId: track.id, actionId: null, blocks: [], roomId: null });
-    setActionRequest({
-      ...req,
-      overrides: { ...req.overrides, x: point.x, y: point.y, ...(room ? { roomId: room.id } : {}) },
-    });
-  }, [dragActionType, map, selection.trackId, playback.time]);
-
-  const onShortcut = useCallback(async (action: "togglePlay" | "delete" | "duplicate") => {
-    if (action === "togglePlay") {
-      playback.toggle();
-      return;
-    }
-    if (action === "duplicate") {
-      const targetId = selection.actionId ?? selection.blocks[0];
-      if (!targetId) { setNotice("複製する動作を選択してください。"); return; }
-      let created = "";
-      let ownerId = selection.trackId;
-      const reason = edit((current) => {
-        const res = duplicateAction(current, targetId);
-        created = res.actionId;
-        ownerId = res.map.tracks.find((t) => t.actions.some((a) => a.id === created))?.id ?? ownerId;
-        return res.map;
-      }, "動作の複製");
-      if (reason === null && created) setSelection({ trackId: ownerId, actionId: created, blocks: [created], roomId: null });
-      return;
-    }
-    if (action === "delete") {
-      if (selection.blocks.length > 0) {
-        const ids = [...selection.blocks];
-        const first = map.tracks.flatMap((t) => t.actions).find((a) => a.id === ids[0]);
-        const text = ids.length === 1 ? `「${first?.name ?? "動作"}」を削除します。` : `選択した ${ids.length} 件の動作を削除します。`;
-        if (await confirm("動作の削除", text, { danger: true, confirmLabel: "削除" })) {
-          edit((current) => deleteActions(current, ids), "動作の削除");
-        }
-      } else if (selection.trackId) {
-        const track = map.tracks.find((t) => t.id === selection.trackId);
-        if (!track) return;
-        if (await confirm("行の削除", `「${track.name}」の行を削除します。`, { danger: true, confirmLabel: "削除" })) {
-          if (edit((current) => deleteTrack(current, track.id), "行の削除") === null) setSelection(EMPTY_SELECTION);
-        }
-      }
-    }
-  }, [playback, selection, map.tracks, confirm, edit]);
-
-  const shared = {
-    map, selection, onSelect: setSelection, edit, confirm,
-    requestAction: setActionRequest, requestPick: setPickRequest,
-  };
-  const actionTrack = actionRequest ? map.tracks.find((track) => track.id === actionRequest.trackId) : undefined;
+  const {
+    selection, setSelection, actionRequest, setActionRequest, pickRequest, setPickRequest, notice,
+    dragActionType, setDragActionType, edit, onStageHit, onStageDrop, onShortcut, shared,
+    contextMenu, closeContextMenu, openContextSequence, openSequenceTarget, deleteContextTarget, onStageContextMenu,
+  } = useSceneEditor({ map, mapId, commit: scene.commit, playback, confirm });
+  const actionTrack = actionRequest ? map.tracks.find((track) => track.id === actionRequest.trackId) ?? actionRequest.draftTrack : undefined;
+  const sequenceRequested = actionTrack?.kind === "robot" || actionTrack?.kind === "human" || actionTrack?.kind === "door" || actionRequest?.editor === "sequence";
+  const contextTarget = contextMenu?.target;
+  const contextTrack = contextTarget?.kind === "track" ? map.tracks.find((track) => track.id === contextTarget.trackId) : undefined;
+  const contextRoom = contextTarget?.kind === "room" ? map.rooms.find((room) => room.id === contextTarget.roomId) : undefined;
+  const contextObject = contextTrack ?? contextRoom;
   const editMap = () => { setLibraryOpen(false); setMapEditing(true); };
 
   return <div ref={pageRef} className={styles.page} style={{ height: pageHeight, ...(scene.locked ? { gridTemplateRows: "auto auto auto minmax(0, 1fr) auto" } : {}) }}>
@@ -203,10 +104,10 @@ function Editor({ scene, project, map, mapId }: {
     <ProjectBar project={project} commit={scene.commit} undo={scene.undo} redo={scene.redo} canUndo={scene.canUndo}
       canRedo={scene.canRedo} saveState={scene.saveState} history={scene.history} reload={scene.reload}
       confirm={confirm} onShortcut={(action) => { void onShortcut(action); }} />
-    <MapTabs project={project} activeMapId={mapId} onSelect={scene.setActiveMap} commit={scene.commit} />
+    <MapTabs project={project} activeMapId={mapId} onSelect={scene.setActiveMap} onDrawNewMap={editMap} commit={scene.commit} />
     <div className={styles.workspace}>
-      <LibraryPanel className={styles.library} open={libraryOpen} map={map} selection={selection} onSelect={(next) => { setSelection(next); setLibraryOpen(false); }}
-        onEditMap={editMap} />
+      <LibraryPanel className={styles.library} open={libraryOpen} map={map} selection={selection} onSelect={setSelection}
+        onEditMap={editMap} onEdit={(target) => { setLibraryOpen(false); openSequenceTarget(target); }} requestContextMenu={shared.requestContextMenu} />
       <div className={styles.center}>
         <section className={`${consoleStyles.preferenceCard} ${styles.stageCard}`} aria-label="マップ">
           <div className={styles.stageHead}>
@@ -231,35 +132,40 @@ function Editor({ scene, project, map, mapId }: {
             </div>
             <Link href="/run" className={consoleStyles.secondary}>実行画面を開く ▸</Link>
           </div>
+          {errors.length > 0 && <div className={styles.planProblems} role="alert" aria-label="シーンの再生エラー">
+            <strong>設定どおりに再生できない動作があります。安全判定で停止するため、次の原因を解消してください。</strong>
+            <ul>{errors.map((error, index) => <li key={index}>{error}</li>)}</ul>
+          </div>}
           <div className={styles.stageBody}>
-            <MapStage map={map} time={playback.time} showGrid={showGrid} showPaths={showPaths} showAxis
-              selection={selection} gridMm={map.editGridMm} onStageHit={onStageHit} onStageDrop={onStageDrop} toolbarSlot={zoomSlot} />
+            <MapStage map={map} time={playback.time} showGrid={showGrid} showPaths={showPaths} showAxis drawRobots
+              selection={selection} gridMm={map.editGridMm} onStageHit={onStageHit} onStageDrop={onStageDrop}
+              onStageContextMenu={onStageContextMenu} toolbarSlot={zoomSlot} />
           </div>
           <div className={styles.stageControls}>
             <PlaybackBar playback={playback} onFullscreen={() => setPreviewOpen(true)} />
           </div>
         </section>
-        <TimelineCard {...shared} playback={playback} paletteSlot={paletteSlot} dragActionType={dragActionType} onDragActionType={setDragActionType} />
+        <TimelineCard {...shared} playback={playback} paletteSlot={paletteSlot} toolbarSlot={zoomSlot} dragActionType={dragActionType} onDragActionType={setDragActionType} />
       </div>
-      <div className={styles.controls}>
-        <section className={`${consoleStyles.preferenceCard}`} aria-label="行と動作の追加">
+      <section className={`${consoleStyles.preferenceCard} ${styles.controls}`} aria-label="行と動作の追加">
           <h2>行の管理</h2>
           <div ref={setPaletteSlot} className={timeline.paletteColumn} />
-        </section>
-        <Inspector {...shared} playback={playback} onEditMap={editMap} onDragActionType={setDragActionType} />
-      </div>
+      </section>
     </div>
     <StatusBar notice={notice} map={map} saveState={scene.saveState} locked={scene.locked} />
     <MapEditorDialog map={map} open={mapEditing} onClose={() => setMapEditing(false)}
       onApply={(next) => edit(() => next, "マップの編集")} />
-    {actionRequest && actionTrack?.kind === "robot" && (
+    {actionRequest && actionTrack && sequenceRequested && (
       <SequenceDialog request={actionRequest} map={map} edit={edit} requestPick={setPickRequest} onClose={() => setActionRequest(null)} />
     )}
-    {actionRequest && actionTrack && actionTrack.kind !== "robot" && (
+    {actionRequest && actionTrack && !sequenceRequested && (
       <ActionDialog request={actionRequest} map={map} edit={edit} requestPick={setPickRequest} onClose={() => setActionRequest(null)} />
     )}
     {pickRequest && <CoordinatePicker request={pickRequest} map={map} onClose={() => setPickRequest(null)} />}
     <PreviewDialog open={previewOpen} map={map} playback={playback} onClose={() => setPreviewOpen(false)} />
     {confirmDialog}
+    {contextMenu && contextObject && <SceneContextMenu request={contextMenu}
+      name={contextObject.name} locked={contextTrack?.locked ?? false}
+      onSequence={openContextSequence} onDelete={() => { void deleteContextTarget(); }} onClose={closeContextMenu} />}
   </div>;
 }

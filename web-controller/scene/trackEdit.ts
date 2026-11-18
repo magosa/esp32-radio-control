@@ -1,6 +1,7 @@
 import { cellCenter } from "./grid";
+import { equipmentTargets } from "./equipment";
 import { defaultId, type IdFactory } from "./ids";
-import { KINDS, newAction, newTrack, validateProject } from "./model";
+import { KINDS, MAX_SECONDS, newAction, newTrack, validateProject } from "./model";
 import { createSafety, pathProblem } from "./safety";
 import { checkSequence } from "./timelineEdit";
 import { SCENE_SCHEMA, type Action, type ActionType, type Pose, type SceneMap, type Track, type TrackKind } from "./types";
@@ -13,7 +14,7 @@ const MAX_NAME = 120;
 const COPY_OFFSET_S = 6;
 const COPY_SUFFIX = " copy";
 const CLEARANCE_MM = 5;
-const EDITABLE = ["name", "color", "count", "robotRole", "robotId", "roomId"] as const;
+const EDITABLE = ["name", "color", "count", "robotRole", "robotId", "roomId", "appearAt"] as const;
 const ROLES = ["cleaning", "security", "delivery"];
 const RESERVED_IDS = ["$start", "__proto__", "constructor", "prototype"];
 
@@ -22,10 +23,11 @@ const ALLOWED: Record<TrackKind, readonly ActionType[]> = {
   human: ["move", "show", "hide", "wait"],
   room: ["event-start", "event-end", "unlock", "wait"],
   display: ["show", "hide", "wait"],
+  door: ["door-open"],
 };
 const ACTION_LABELS: Record<ActionType, string> = {
   move: "移動", show: "表示", hide: "表示を消去", "event-start": "イベント発生",
-  "event-end": "イベント終了", unlock: "ドア解錠", wait: "待機",
+  "event-end": "イベント終了", unlock: "ドア解錠", wait: "待機", "door-open": "開閉指示",
 };
 
 export const trackKindLabel = (kind: TrackKind): string => KINDS[kind];
@@ -67,7 +69,7 @@ function freeInitial(map: SceneMap, kind: "robot" | "human"): Pose {
 }
 
 export function addTrack(
-  map: SceneMap, kind: TrackKind, opts: { roomId?: string; index?: number } = {}, makeId: IdFactory = defaultId,
+  map: SceneMap, kind: TrackKind, opts: { roomId?: string; doorId?: string; index?: number } = {}, makeId: IdFactory = defaultId,
 ): { map: SceneMap; trackId: string } {
   check(Object.hasOwn(KINDS, kind), "行の種類が不正です。");
   check(map.tracks.length < MAX_TRACKS, `トラックは最大${MAX_TRACKS}本です。`);
@@ -79,6 +81,12 @@ export function addTrack(
   if (kind === "room" && opts.roomId !== undefined) {
     check(result.rooms.some((room) => room.id === opts.roomId), "指定された部屋が見つかりません。");
     added.roomId = opts.roomId;
+  }
+  if (kind === "door" && opts.doorId !== undefined) {
+    const target = equipmentTargets(result).find((target) => target.memberIds.includes(opts.doorId ?? ""));
+    check(target, "指定されたドア・ゲートが見つかりません。");
+    check(!result.tracks.some((track) => track.kind === "door" && target.memberIds.includes(track.doorId ?? "")), "この設備の行は追加済みです。");
+    Object.assign(added, { doorId: target.doorId, roomId: target.roomId, name: target.name });
   }
   if (kind === "robot" || kind === "human") added.initial = freeInitial(result, kind);
   result.tracks.splice(index, 0, added);
@@ -112,7 +120,7 @@ export function setTrackFlag(map: SceneMap, trackId: string, flag: "muted" | "lo
 
 export function updateTrack(
   map: SceneMap, trackId: string,
-  patch: Partial<Pick<Track, "name" | "color" | "count" | "robotRole" | "robotId" | "roomId">>,
+  patch: Partial<Pick<Track, "name" | "color" | "count" | "robotRole" | "robotId" | "roomId" | "appearAt">>,
 ): SceneMap {
   const result = structuredClone(map);
   const track = result.tracks[trackAt(result, trackId)];
@@ -132,6 +140,11 @@ export function updateTrack(
       check(track.kind === "human", "人数を設定できるのは人の行だけです。");
       check(Number.isInteger(value) && (value as number) >= 1 && (value as number) <= MAX_COUNT, `人数は1〜${MAX_COUNT}の整数で指定してください。`);
       track.count = value as number;
+    } else if (key === "appearAt") {
+      check(track.kind === "robot" || track.kind === "human", "表示開始を設定できるのはロボットと人の行だけです。");
+      check(typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MAX_SECONDS,
+        `表示開始は0〜${MAX_SECONDS}秒の有限数で指定してください。`);
+      track.appearAt = value;
     } else if (key === "robotRole") {
       check(track.kind === "robot", "ロボットの役割を設定できるのはロボットの行だけです。");
       check(ROLES.includes(value as string), "ロボットの役割が不正です。");
