@@ -117,14 +117,10 @@ async function main() {
     editGridMm: 20,
     doorMode: "story",
     rooms: [arenaRoom],
-    doors: [],
-    furniture: [],
-    presentations: [],
     tracks,
   };
 
-  const safety = createSafety(newMap);
-  const plan = compilePlan(newMap, safety);
+  const plan = compilePlan(newMap);
   console.log(`Plan compiled: ${plan.entries.length} entries, duration: ${plan.duration}s`);
   const blocked = plan.entries.filter((e) => e.blocked);
   if (blocked.length > 0) {

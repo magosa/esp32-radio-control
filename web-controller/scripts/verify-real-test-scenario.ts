@@ -45,11 +45,11 @@ async function main() {
 
   const getPoses = (): PoseStateMessage => ({
     type: "poseState",
-    localizer: { connected: true, running: true, camera: "test", referenceCount: 4, extrinsicsOk: true, frameAgeMs: 20 },
+    localizer: { connected: true, running: true, camera: "test", referenceCount: 4, referenceIds: [40, 41, 42, 43], extrinsicsOk: true, frameAgeMs: 20, fps: 15, latencyMs: 20 },
     field: { cameraHeightMm: 800, widthMm: 1107, heightMm: 623, referenceSizeMm: 33 },
     poses: [
-      { robotId: "robot-rc-a5f848", deviceId: "rc-a5f848", name: "R0", markerId: 0, tracking: "tracking", xMm: robot0.x, yMm: robot0.y, headingDeg: robot0.yaw, insideField: true, ageMs: 20 },
-      { robotId: "robot-rc-a50a28", deviceId: "rc-a50a28", name: "R1", markerId: 1, tracking: "tracking", xMm: robot1.x, yMm: robot1.y, headingDeg: robot1.yaw, insideField: true, ageMs: 20 },
+      { robotId: "robot-rc-a5f848", deviceId: "rc-a5f848", markerId: 0, tracking: "tracking", xMm: robot0.x, yMm: robot0.y, headingDeg: robot0.yaw, insideField: true, ageMs: 20 },
+      { robotId: "robot-rc-a50a28", deviceId: "rc-a50a28", markerId: 1, tracking: "tracking", xMm: robot1.x, yMm: robot1.y, headingDeg: robot1.yaw, insideField: true, ageMs: 20 },
     ],
   });
 
