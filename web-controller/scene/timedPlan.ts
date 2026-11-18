@@ -267,6 +267,10 @@ function schedule(map: SceneMap, safety: Safety, parked: Parked[]): Schedule {
       continue;
     }
     if (!(a.position >= 0)) { block(e, "開始時刻が負のバーは置けません。", true); continue; }
+    if (isActor(track.kind) && a.position < (track.appearAt ?? 0) - EPS) {
+      block(e, `表示開始（${track.appearAt}秒）より前に動作を配置できません。`, true);
+      continue;
+    }
     if (!(a.runSeconds >= 0)) { block(e, "バーの長さが不正です。", true); continue; }
     if (a.runSeconds === 0 && !ZERO_LENGTH_ALLOWED.has(a.type)) {
       block(e, "長さ0のバーは非表示・イベント終了だけに置けます。", true);
@@ -311,9 +315,10 @@ function schedule(map: SceneMap, safety: Safety, parked: Parked[]): Schedule {
   const index = new Map<PlanEntry, number>();
   for (const event of log) if (!index.has(event.entry)) index.set(event.entry, index.size);
   log.sort((a, b) => a.at - b.at || index.get(a.entry)! - index.get(b.entry)! || priority[a.kind] - priority[b.kind]);
-  const duration = Math.max(0, ...entries.map((e) => e.end ?? 0));
+  const duration = Math.max(0, ...entries.map((e) => e.end ?? 0),
+    ...map.tracks.filter((track) => isActor(track.kind) && !track.muted).map((track) => track.appearAt ?? 0));
   const trajectories: Trajectory[] = map.tracks.filter((t) => t.initial && !t.muted && isActor(t.kind)).map((t) => {
-    let from: Point = t.initial!, cursor = 0;
+    let from: Point = t.initial!, cursor = t.appearAt ?? 0;
     const segments: TrajectorySegment[] = [];
     for (const e of entries.filter((e) => e.track === t && e.action.type === "move" && e.start !== null)
       .sort((a, b) => a.start! - b.start!)) {
@@ -340,7 +345,7 @@ function movementPosition(e: PlanEntry, time: number): PlanPose {
 export function samplePlan(plan: ScenePlan, time: number): SceneState {
   if (!(Number.isFinite(time) && time >= 0)) throw new Error("再生時刻は0以上の有限数で指定してください。");
   const { map, entries, log } = plan;
-  const actors: SceneActor[] = map.tracks.filter((t) => isActor(t.kind) && !t.muted && t.initial).map((t) => ({
+  const actors: SceneActor[] = map.tracks.filter((t) => isActor(t.kind) && !t.muted && t.initial && time >= (t.appearAt ?? 0)).map((t) => ({
     id: t.id, kind: t.kind as ActorKind, name: t.name, color: t.color,
     count: t.kind === "human" ? t.count ?? 1 : 1,
     ...(t.kind === "robot" ? { robotRole: t.robotRole ?? "cleaning" } : {}),

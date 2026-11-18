@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 import { availableTypes } from "@/scene/actionEdit";
 import { setRoomProps } from "@/scene/mapEditRegions";
-import { compilePlan, samplePlan, type ActionState } from "@/scene/timedPlan";
+import { samplePlan, type ActionState } from "@/scene/timedPlan";
 import { adjustTimeline } from "@/scene/timelineEdit";
 import { formatTime } from "@/scene/timelineView";
 import {
@@ -15,6 +15,7 @@ import { EMPTY_SELECTION, type EditorShared, type PlaybackControls } from "./edi
 import { ColorField, Group, SelectField, TextCommit, ToggleButton } from "./MapEditorFields";
 import own from "./inspector.module.css";
 import styles from "./scenes.module.css";
+import { sceneAnalysis } from "./sceneAnalysis";
 
 export interface InspectorProps extends EditorShared {
   playback: PlaybackControls;
@@ -86,11 +87,7 @@ export function Inspector(props: InspectorProps) {
 
 function MapSafetySection({ ctx }: { ctx: Ctx }) {
   const { map, playback, run } = ctx;
-  const analysis = useMemo(() => {
-    const plan = compilePlan(map);
-    const done = samplePlan(plan, plan.duration);
-    return { errors: done.errors, warnings: done.warnings };
-  }, [map]);
+  const analysis = sceneAnalysis(map);
   const setDoorMode = (mode: "story" | "strict") => {
     if (map.doorMode === mode) return;
     run((current) => ({ ...structuredClone(current), doorMode: mode }), "扉の確認モードの変更");
@@ -132,11 +129,12 @@ function pickInitial(ctx: Ctx, track: Track) {
   const initial = track.initial;
   if (!initial) return;
   ctx.requestPick({
-    mode: "initial", kind: track.kind, title: `${track.name} の初期位置`, color: track.color,
-    help: "地図をクリックして位置を決め、向きを指定します。「適用」するまで保存されません。",
+    mode: "initial", kind: track.kind, trackId: track.id, title: `${track.name} の初期位置`, color: track.color,
+    help: "マーカーをドラッグして初期位置を決め、向きを指定します。「適用」で位置を確定します。",
     value: { x: initial.x, y: initial.y, yaw: initial.yaw, roomId: initial.roomId },
     onSelect: (value) => ctx.edit((map) => setInitialPose(map, track.id, {
       x: value.x, y: value.y, yaw: value.yaw ?? initial.yaw, roomId: value.roomId ?? initial.roomId,
+      coordinateMode: "free",
     }), "初期位置の設定"),
   });
 }
@@ -270,7 +268,7 @@ function TrackPanel({ ctx, track }: { ctx: Ctx; track: Track }) {
 function ActionPanel({ ctx, track, action }: { ctx: Ctx; track: Track; action: Action }) {
   const { map, rev, playback, run, fail, confirm, onSelect, requestAction, requestPick } = ctx;
   const locked = track.locked;
-  const plan = useMemo(() => compilePlan(map), [map]);
+  const { plan } = sceneAnalysis(map);
   const state = samplePlan(plan, playback.time).actionStates[action.id];
   const robot = track.kind === "robot";
   const rotating = action.type === "move" && action.motion === "rotate";
@@ -292,7 +290,7 @@ function ActionPanel({ ctx, track, action }: { ctx: Ctx; track: Track; action: A
   const pickMoveTarget = () => {
     requestPick({
       mode: "move", kind: track.kind, title: `${action.name} の位置を指定`, color: track.color,
-      help: "マップをクリックして位置を決めます。「適用」するまで保存されません。",
+      help: "マーカーをドラッグして位置を決めます。「適用」で位置を確定します。",
       value: { x: action.x, y: action.y, roomId: action.roomId, ...(action.coordinateMode ? { coordinateMode: action.coordinateMode } : {}) },
       onSelect: (value) => ctx.edit((current) => replaceAction(current, track.id, {
         ...action, x: value.x, y: value.y, roomId: value.roomId ?? action.roomId,
@@ -327,10 +325,7 @@ function ActionPanel({ ctx, track, action }: { ctx: Ctx; track: Track; action: A
       <TextCommit label="実行時間（秒）" value={String(Math.round(action.runSeconds * 10) / 10)} syncKey={rev} disabled={locked}
         onCommit={(t) => commitNumber(t, "実行時間", (runSeconds) => ({ runSeconds }))} />
       {((action.type === "move" && !rotating) || (action.type === "show" && track.kind === "display")) && <>
-        <TextCommit label="X座標 (mm)" value={String(Math.round(action.x))} syncKey={rev} disabled={locked}
-          onCommit={(t) => commitNumber(t, "X座標", (x) => ({ x }))} />
-        <TextCommit label="Y座標 (mm)" value={String(Math.round(action.y))} syncKey={rev} disabled={locked}
-          onCommit={(t) => commitNumber(t, "Y座標", (y) => ({ y }))} />
+        <p className={own.help}>位置 X {Math.round(action.x)} / Y {Math.round(action.y)} mm（マップでドラッグして変更）</p>
       </>}
       {action.type === "move" && rotating && (
         <TextCommit label="回転後の角度 (°)" value={String(Math.round(action.yaw))} syncKey={rev} disabled={locked}

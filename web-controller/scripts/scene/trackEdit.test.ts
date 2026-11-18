@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { cellIndex } from "../../scene/grid";
 import { COLORS, KINDS, newAction, newTrack, validateProject } from "../../scene/model";
-import { addDoorAt } from "../../scene/mapEditFixtures";
+import { addDoorAt, addGate, deleteFixture } from "../../scene/mapEditFixtures";
+import { mergedDoors } from "../../scene/equipment";
+import { eraseCells } from "../../scene/mapEditRegions";
 import { createSafety, pathProblem } from "../../scene/safety";
 import {
   MAX_TRACKS, actionTypeLabel, addActionToTrack, addTrack, deleteActions, deleteTrack, duplicateAction,
@@ -76,6 +78,21 @@ test("addTrack names, colors and defaults follow the track kind", () => {
   assert.equal(track(display.map, display.trackId).initial, undefined);
   assert.equal(display.map.tracks.length, 5);
   valid(display.map);
+});
+
+test("appearance time is persisted for actors and rejects invalid values or non-actor rows", () => {
+  const { map, trackIds: [robot, human, display] } = build("robot", "human", "display");
+  for (const id of [robot, human]) {
+    const updated = pure(map, () => updateTrack(map, id, { appearAt: 2.5 }));
+    assert.equal(valid(updated).maps[0].tracks.find(item => item.id === id)!.appearAt, 2.5);
+    for (const appearAt of [-1, Number.NaN, Infinity, 86401]) {
+      rejects(map, () => updateTrack(map, id, { appearAt }), /表示開始/);
+      const invalid = structuredClone(map);
+      track(invalid, id).appearAt = appearAt;
+      assert.throws(() => valid(invalid), /appearAt/);
+    }
+  }
+  rejects(map, () => updateTrack(map, display, { appearAt: 0 }), /ロボットと人/);
 });
 
 test("addTrack inserts at the requested index and rejects an invalid index", () => {
@@ -421,8 +438,9 @@ test("addActionToTrack allows only the types of each row kind and rejects overla
   const allowed: Record<TrackKind, ActionType[]> = {
     robot: ["move", "show", "hide", "wait"], human: ["move", "show", "hide", "wait"],
     room: ["event-start", "event-end", "unlock", "wait"], display: ["show", "hide", "wait"],
+    door: ["door-open"],
   };
-  const all: ActionType[] = ["move", "wait", "show", "hide", "event-start", "event-end", "unlock"];
+  const all: ActionType[] = ["move", "wait", "show", "hide", "event-start", "event-end", "unlock", "door-open"];
   const { map, trackIds } = build("robot", "human", "room", "display");
   const kinds: TrackKind[] = ["robot", "human", "room", "display"];
   kinds.forEach((kind, i) => {
@@ -437,11 +455,39 @@ test("addActionToTrack allows only the types of each row kind and rejects overla
       else rejects(map, () => withAction(map, owner.id, type), new RegExp(`${KINDS[kind]}.*${actionTypeLabel(type)}`));
     }
   });
+
   const { map: m, trackIds: [a] } = build("robot");
   const moved = withAction(m, a, "move", { runSeconds: 6 });
   rejects(moved.map, () => withAction(moved.map, a, "wait", { position: 3 }), /重なって/);
   rejects(m, () => withAction(m, "nope", "move"), /見つかりません/);
   rejects(m, () => withAction(m, a, "move", { x: 5000 }));
+});
+
+test("equipment rows bind whole openings, persist windows and protect referenced fixtures", () => {
+  let map = addDoorAt(base(), 300, 0, { cells: 10, maxDistance: 24 }, mk).map;
+  map = addGate(map, rect(30, 20, 10, 1), "bottom", 10, mk).map;
+  const [automatic, flapper] = mergedDoors(map);
+  assert.ok(automatic.memberIds.length > 1);
+  const first = pure(map, () => addTrack(map, "door", { doorId: automatic.memberIds[1] }, mk));
+  assert.equal(first.map.tracks[0].doorId, automatic.id);
+  assert.equal(first.map.tracks[0].initial, undefined);
+  rejects(first.map, () => addTrack(first.map, "door", { doorId: automatic.id }, mk), /追加済み/);
+  rejects(first.map, () => addTrack(first.map, "door", { doorId: "missing" }, mk), /見つかりません/);
+  const second = addTrack(first.map, "door", { doorId: flapper.id }, mk);
+  const opened = withAction(second.map, second.trackId, "door-open", { position: 2, runSeconds: 4 });
+  const action = track(opened.map, second.trackId).actions[0];
+  assert.deepEqual([action.doorId, action.roomId, action.position + action.runSeconds], [flapper.id, "floor", 6]);
+  assert.deepEqual(valid(JSON.parse(JSON.stringify(opened.map)) as SceneMap).maps[0], opened.map);
+  rejects(opened.map, () => deleteFixture(opened.map, automatic.memberIds[1]), /使用中/);
+  rejects(opened.map, () => eraseCells(opened.map, [automatic.cell!]), /使用中/);
+  rejects(opened.map, () => deleteFixture(opened.map, flapper.wallId!), /使用中/);
+  assert.equal(deleteFixture(deleteTrack(opened.map, first.trackId), automatic.memberIds[1]).floorPlan!.doors.some((door) => automatic.memberIds.includes(door.id)), false);
+  for (const change of [{ runSeconds: 0 }, { position: 86400 }, { doorId: automatic.id }]) {
+    rejects(opened.map, () => replaceAction(opened.map, second.trackId, { ...action, ...change }));
+  }
+  const duplicate = structuredClone(opened.map);
+  duplicate.tracks.push({ ...newTrack(map, "door", mk), doorId: automatic.memberIds[1], roomId: "floor" });
+  assert.throws(() => valid(duplicate), /duplicated/);
 });
 
 test("replaceAction swaps the edited action and validates it", () => {

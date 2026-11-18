@@ -2,6 +2,7 @@ import { roomAnchor, roomContainsPoint } from "./floorPlan";
 import { snapToEditGrid } from "./grid";
 import { clampToArea } from "./mapView";
 import { createSafety, pathProblem } from "./safety";
+import type { SceneActor } from "./timedPlan";
 import type { CoordinateMode, Room, SceneMap, TrackKind } from "./types";
 import { HUMAN_RADIUS_MM, SAFETY_RADIUS_MM, normalizeYaw } from "./units";
 
@@ -47,26 +48,30 @@ export function normalizeYaw180(deg: number): number {
 
 const radiusOf = (kind: TrackKind) => kind === "robot" ? SAFETY_RADIUS_MM : HUMAN_RADIUS_MM;
 
-// An initial pose (yaw given) must not overlap another row's initial pose; the caller leaves the row being edited out of `map`.
-function overlapProblem(map: SceneMap, kind: "robot" | "human", point: Point): string {
-  for (const other of map.tracks) {
-    if (!other.initial || (other.kind !== "robot" && other.kind !== "human")) continue;
+// The picker supplies sampled actors for its preview time; other callers use initial poses.
+function overlapProblem(map: SceneMap, kind: "robot" | "human", point: Point,
+  actors?: readonly Pick<SceneActor, "kind" | "x" | "y">[]): string {
+  const obstacles = actors ?? map.tracks.flatMap((track) =>
+    track.initial && (track.kind === "robot" || track.kind === "human")
+      ? [{ kind: track.kind, x: track.initial.x, y: track.initial.y }] : []);
+  for (const other of obstacles) {
     if (kind === "human" && other.kind === "human") continue;
     const clearance = radiusOf(kind) + radiusOf(other.kind);
-    if (Math.hypot(other.initial.x - point.x, other.initial.y - point.y) < clearance - EPS) {
-      return "他の行の初期位置と重なります。位置をずらしてください。";
+    if (Math.hypot(other.x - point.x, other.y - point.y) < clearance - EPS) {
+      return "他の行の位置と重なります。位置をずらしてください。";
     }
   }
   return "";
 }
 
-export function pickProblem(map: SceneMap, kind: TrackKind, point: Point, yaw?: number): string {
+export function pickProblem(map: SceneMap, kind: TrackKind, point: Point, yaw?: number,
+  actors?: readonly Pick<SceneActor, "kind" | "x" | "y">[]): string {
   requireFinite(point);
   if (yaw !== undefined && (!Number.isFinite(yaw) || yaw < -180 || yaw > 180)) return BAD_YAW;
   if (kind !== "robot" && kind !== "human") return "";
   const problem = pathProblem(createSafety(map), point, point, kind);
   if (problem) return problem;
-  return yaw === undefined ? "" : overlapProblem(map, kind, point);
+  return yaw === undefined ? "" : overlapProblem(map, kind, point, actors);
 }
 
 export function pickRoom(map: SceneMap, mm: Point): { roomId: string; anchor: Point } | null {

@@ -46,6 +46,7 @@ export interface DoorWindow {
   start: number;
   end: number;
   heldUntil: number;
+  forced?: boolean;
 }
 
 export type PlannedDoor = MergedDoor & { passages: DoorPassage[]; windows: DoorWindow[] };
@@ -140,29 +141,52 @@ function crossingTime(opening: Segment, segment: TrajectorySegment, radius: numb
 }
 
 function doorWindows(plan: DoorPlanInput, doors: MergedDoor[], paths: DoorPath[]): PlannedDoor[] {
-  const unlocks = plan.entries.filter((e) => e.action.type === "unlock" && !e.blocked && e.outcome === "success" &&
+  const controls = plan.entries.filter((e) => (e.action.type === "unlock" || e.action.type === "door-open") && !e.blocked && e.outcome === "success" &&
     e.start !== null && e.end !== null && e.end > e.start);
-  return doors.map((door) => ({
-    ...door,
-    passages: paths.flatMap((path) => path.segments.flatMap((segment) => {
-      if (!Number.isFinite(segment.end)) return [];
-      const crossing = crossingTime(door.opening, segment, path.radius);
-      if (!crossing) return [];
-      return [{
-        actorId: path.id, start: segment.start, end: segment.end,
-        openingStart: Math.max(0, segment.start - DOOR_TRANSITION_SECONDS),
-        openBy: segment.start > 0 ? segment.start : Math.min(DOOR_TRANSITION_SECONDS, crossing.enter),
-      }];
-    })),
-    windows: unlocks.filter((e) => e.action.doorId ? door.memberIds.includes(e.action.doorId) : e.action.roomId === door.roomId)
-      .map((entry) => ({
+  return doors.map((door) => {
+    const windows = controls.filter((e) => e.action.doorId ? door.memberIds.includes(e.action.doorId) : e.action.roomId === door.roomId)
+      .map((entry): DoorWindow => ({
         start: entry.start!, end: entry.end!,
         heldUntil: Math.max(entry.end!, ...paths.map((path) => clearAt(door.opening, path, entry.end!))),
+        ...(entry.action.type === "door-open" ? { forced: true } : {}),
+      }));
+    const commanded: DoorWindow[] = [];
+    for (const window of windows.filter((window) => window.forced).sort((a, b) => a.start - b.start)) {
+      const previous = commanded.at(-1);
+      if (previous && window.start <= previous.end) {
+        previous.end = Math.max(previous.end, window.end);
+        previous.heldUntil = Math.max(previous.heldUntil, window.heldUntil);
+      } else commanded.push({ ...window });
+    }
+    return {
+      ...door,
+      passages: paths.flatMap((path) => path.segments.flatMap((segment) => {
+        if (!Number.isFinite(segment.end)) return [];
+        const crossing = crossingTime(door.opening, segment, path.radius);
+        if (!crossing) return [];
+        return [{
+          actorId: path.id, start: segment.start, end: segment.end,
+          openingStart: Math.max(0, segment.start - DOOR_TRANSITION_SECONDS),
+          openBy: segment.start > 0 ? segment.start : Math.min(DOOR_TRANSITION_SECONDS, crossing.enter),
+        }];
       })),
-  }));
+      windows: [...windows.filter((window) => !window.forced), ...commanded],
+    };
+  });
 }
 
 const allowed = (door: PlannedDoor, at: number) => door.windows.some((w) => at >= w.start && at < w.heldUntil);
+const openingPeak = (window: DoorWindow) => window.heldUntil > window.end ? 1 :
+  Math.min(1, (window.end - window.start) / DOOR_TRANSITION_SECONDS);
+const closingEnd = (window: DoorWindow) => window.heldUntil + openingPeak(window) * DOOR_TRANSITION_SECONDS;
+
+function commandedOpenness(window: DoorWindow, time: number): number {
+  if (time < window.start) return 0;
+  const value = time < window.end
+    ? Math.min(1, (time - window.start) / DOOR_TRANSITION_SECONDS)
+    : Math.min(openingPeak(window), openingPeak(window) - (time - window.heldUntil) / DOOR_TRANSITION_SECONDS);
+  return Math.round(Math.max(0, value) * 1e9) / 1e9;
+}
 
 export function prepareDoorPlan(plan: DoorPlanInput): void {
   const doors = mergedDoors(plan.map);
@@ -211,7 +235,8 @@ export function prepareDoorPlan(plan: DoorPlanInput): void {
   plan.doorPlan = doorWindows(plan, doors, paths);
   if (plan.log) plan.log = plan.log.filter((item) => !item.entry.blocked);
   plan.warnings = [...plan.warnings.filter((w) => w.code !== "collision"), ...collisionWarnings(paths)];
-  plan.duration = Math.max(0, ...plan.entries.map((e) => e.end ?? 0));
+  plan.duration = Math.max(0, ...plan.entries.map((e) => e.end ?? 0),
+    ...plan.doorPlan.flatMap((door) => door.windows.filter((window) => window.forced && Number.isFinite(window.heldUntil)).map(closingEnd)));
 }
 
 export function sampleDoorPlan(plan: DoorPlanInput, time: number): DoorSample[] {
@@ -221,6 +246,8 @@ export function sampleDoorPlan(plan: DoorPlanInput, time: number): DoorSample[] 
   return (plan.doorPlan ?? []).map((door) => {
     const unlocked = door.windows.some((w) => time >= w.start && time < w.end);
     const held = door.windows.some((w) => time >= w.end && time < w.heldUntil);
+    const sensorEnabled = door.windows.some((w) => !w.forced && time >= w.start && time < w.end);
+    const commanded = Math.max(0, ...door.windows.filter((w) => w.forced).map((w) => commandedOpenness(w, time)));
     let openness = 0;
     for (const passage of door.passages) {
       if (time < passage.openingStart || time >= passage.end + DOOR_TRANSITION_SECONDS) continue;
@@ -237,7 +264,7 @@ export function sampleDoorPlan(plan: DoorPlanInput, time: number): DoorSample[] 
     }
     return {
       id: door.id, unlocked, held,
-      openness: held ? 1 : unlocked ? openness : 0,
+      openness: held ? 1 : Math.max(commanded, sensorEnabled ? openness : 0),
       actorIds: door.passages.filter((p) => time >= p.start && time < p.end).map((p) => p.actorId),
     };
   });

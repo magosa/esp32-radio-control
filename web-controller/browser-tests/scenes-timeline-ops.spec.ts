@@ -262,7 +262,7 @@ test("Delete on a bar asks first; cancelling keeps it, confirming removes it in 
   expect((await savedTracks(page)).find((t) => t.id === "rb")!.actions.map((a) => a.id)).toEqual(["m1", "m2"]);
 });
 
-test("wireframe UI features: edit points, facing turns, same-kind row, path toggle, door mode, and stage interactions", async ({ page }) => {
+test("wireframe UI features: edit points, facing turns, path toggle, door mode, and stage interactions", async ({ page }) => {
   await openSeeded(page, [timelineMap({ locked: false })], 1280);
   const playBar = page.getByRole("region", { name: "マップ" }).getByRole("toolbar", { name: "再生" });
   await playBar.getByRole("button", { name: "次の編集点" }).click();
@@ -277,13 +277,6 @@ test("wireframe UI features: edit points, facing turns, same-kind row, path togg
   await expect(stageSvg.locator('[data-part="planned-paths"]')).toHaveCount(0);
   await page.getByLabel("パス").check();
   await expect(stageSvg.locator('[data-part="planned-paths"]')).toHaveCount(1);
-
-  // Add same kind of row (F25)
-  await timelineCard(page).getByRole("button", { name: /^人 1/ }).first().click();
-  const beforeSame = await latestRevision(page);
-  await page.getByRole("button", { name: "＋ 選択中と同種の行を追加" }).click();
-  await settled(page, beforeSame + 1);
-  expect((await savedTracks(page)).length).toBe(5);
 
   // Door mode toggle in inspector (F30)
   const inspector = page.getByRole("complementary", { name: "設定" });

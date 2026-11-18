@@ -12,6 +12,11 @@ async function addMap(page: Page, name?: string, copyFrom?: string) {
   if (copyFrom) await dialog.getByLabel(`「${copyFrom}」の配置をコピー`).check();
   if (name !== undefined) await dialog.getByLabel("マップ名").fill(name);
   await dialog.getByRole("button", { name: "追加" }).click();
+  if (!copyFrom) {
+    const editor = page.getByRole("dialog", { name: "マップを編集", exact: true });
+    await expect(editor).toBeVisible();
+    await editor.getByRole("button", { name: "キャンセル", exact: true }).click();
+  }
 }
 
 test("adds maps up to 8, then the add button is disabled with a visible reason", async ({ page }) => {

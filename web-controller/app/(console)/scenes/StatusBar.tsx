@@ -1,15 +1,14 @@
 "use client";
 
-import { useMemo } from "react";
 import { saveStateLabel } from "@/scene/editorShortcuts";
 import type { SaveState } from "@/scene/historyTypes";
-import { compilePlan } from "@/scene/timedPlan";
 import type { SceneMap } from "@/scene/types";
 import styles from "./scenes.module.css";
+import { sceneAnalysis } from "./sceneAnalysis";
 
 // Bottom of the workbench (F2): operation notice, plan state, history save state, storage location and active run status.
 export function StatusBar({ notice, map, saveState, locked }: { notice: string; map: SceneMap; saveState?: SaveState; locked?: boolean }) {
-  const plan = useMemo(() => compilePlan(map), [map]);
+  const { plan } = sceneAnalysis(map);
   const problems = plan.errors.length + plan.warnings.length;
   const save = saveState ? saveStateLabel(saveState) : null;
   return <footer className={styles.statusBar} aria-label="ステータス">

@@ -1,9 +1,10 @@
 "use client";
 
-import { Bot, DoorOpen, Maximize2, Monitor, RotateCw, User } from "lucide-react";
+import { Bot, DoorOpen, Expand, Maximize2, Minimize2, Monitor, RotateCw, User } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { addFacingTurns, compilePlan, samplePlan, type ActionState } from "@/scene/timedPlan";
+import { addFacingTurns, type ActionState } from "@/scene/timedPlan";
+import { newAction } from "@/scene/model";
 import {
   addProblem, addRequest, barStatus, moveOffset, previewDrop, rangeIds, resizeOffset, KEY_RESIZE_STEP_S, MAX_RUN_S, MIN_RESIZE_S,
   type Dragged, type DropPreview,
@@ -12,7 +13,7 @@ import { adjustTimeline, type TimelineAlignment } from "@/scene/timelineEdit";
 import {
   fitPx, PX_DEFAULT, PX_MAX, PX_MIN, pxToTime, quantize, rulerTicks, timeToPx, timelineHorizon,
 } from "@/scene/timelineView";
-import { actionTypeLabel, addTrack, deleteActions, deleteTrack, moveTrack, moveTrackBy, replaceAction, setTrackFlag, trackKindLabel } from "@/scene/trackEdit";
+import { actionTypeLabel, addActionToTrack, addTrack, deleteActions, moveTrack, replaceAction, setInitialPose, setTrackFlag, trackKindLabel, updateTrack } from "@/scene/trackEdit";
 import type { Action, ActionType, SceneMap, Track, TrackKind } from "@/scene/types";
 import consoleStyles from "../console.module.css";
 import type { EditorShared, PlaybackControls } from "./editorTypes";
@@ -20,11 +21,14 @@ import styles from "./scenes.module.css";
 import { TimelineBar } from "./TimelineBar";
 import timeline from "./timeline.module.css";
 import { TrackPalette } from "./TrackPalette";
+import { sceneAnalysis } from "./sceneAnalysis";
 
 export interface TimelineCardProps extends EditorShared {
   playback: PlaybackControls;
   // Where the row and action palette is drawn (the page's right column). Nothing is drawn until it exists.
   paletteSlot: HTMLElement | null;
+  // Where zoom toolbar is drawn (the right column next to stage zoom).
+  toolbarSlot: HTMLElement | null;
   dragActionType?: ActionType | null;
   onDragActionType?: (type: ActionType | null) => void;
 }
@@ -32,9 +36,9 @@ export interface TimelineCardProps extends EditorShared {
 const LABEL_W = 192;
 const LANE_TAIL_PX = 160;
 const TAP_MS = 400;
-const ICONS = { robot: Bot, human: User, room: DoorOpen, display: Monitor } as const;
+const ICONS = { robot: Bot, human: User, room: DoorOpen, display: Monitor, door: DoorOpen } as const;
 const LOCKED = "この行はロックされています。";
-const KEY_HINT = "バーはドラッグで移動、右端の取っ手で長さを変更。Shift で他のバーの端に吸着。Ctrl/⌘ で追加選択、Shift で行内を範囲選択。レーンのダブルクリック（タッチはダブルタップ）、または動作ボタンのドラッグで動作を追加。";
+const KEY_HINT = "バーはドラッグで移動、右端の取っ手で長さを変更。Shift で他のバーの端に吸着。Ctrl/⌘ で追加選択、Shift で行内を範囲選択。行名やレーンをダブルクリックでシーケンス一括設定。右クリックで行の操作。";
 
 interface DragView {
   kind: "move" | "resize";
@@ -64,6 +68,8 @@ export function TimelineCard(props: TimelineCardProps) {
   const [drop, setDrop] = useState<DropView | null>(null);
   const [reorderOver, setReorderOver] = useState<string | null>(null);
   const [viewport, setViewport] = useState(0);
+  const [fullscreen, setFullscreen] = useState(false);
+  const section = useRef<HTMLElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const latest = useRef({ ...props, px, fine });
   latest.current = { ...props, px, fine };
@@ -74,17 +80,28 @@ export function TimelineCard(props: TimelineCardProps) {
   const taps = useRef({ id: "", at: 0 });
   const laneTap = useRef({ id: "", at: 0 });
   const lastOpen = useRef(0);
-  const lastAdd = useRef(0);
 
-  const analysis = useMemo(() => {
-    const plan = compilePlan(map);
-    const done = samplePlan(plan, plan.duration);
-    return { duration: plan.duration, states: done.actionStates, warnings: done.warnings, errors: done.errors };
-  }, [map]);
+  const analysis = sceneAnalysis(map);
   const horizon = timelineHorizon(map, analysis.duration);
   const laneWidth = Math.max(timeToPx(horizon, px) + LANE_TAIL_PX, viewport - LABEL_W);
   const selectedBlocks = useMemo(() => new Set(selection.blocks), [selection.blocks]);
-  const selectedTrack = map.tracks.find((track) => track.id === selection.trackId) ?? null;
+
+  useEffect(() => {
+    const update = () => setFullscreen(document.fullscreenElement === section.current);
+    document.addEventListener("fullscreenchange", update);
+    return () => document.removeEventListener("fullscreenchange", update);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    const element = section.current;
+    if (!element) return;
+    try {
+      if (document.fullscreenElement === element) await document.exitFullscreen();
+      else await element.requestFullscreen();
+    } catch (error) {
+      setMessage(`時間軸の全画面表示を切り替えられませんでした: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
 
   useEffect(() => {
     if (!message) return;
@@ -274,22 +291,67 @@ export function TimelineCard(props: TimelineCardProps) {
     run((m) => replaceAction(m, trackId, next), "バーの長さの変更");
   }, [run]);
 
-  const askDeleteTrack = async () => {
-    const track = selectedTrack;
-    if (!track) return;
-    if (track.locked) { setMessage(LOCKED); return; }
-    const count = track.actions.length;
-    const text = `「${track.name}」の行を削除します。${count ? `この行の動作 ${count} 件も削除されます。` : ""}`;
-    if (await props.confirm("行の削除", text, { danger: true, confirmLabel: "削除" })) run((m) => deleteTrack(m, track.id), "行の削除");
-  };
-
-  const onAddTrack = (kind: TrackKind, overrideRoomId?: string) => {
+  const onAddTrack = (kind: TrackKind, overrideRoomId?: string, doorId?: string) => {
     let created = "";
+    let addedMap = map;
     const roomId = kind === "room" ? (overrideRoomId ?? (selection.roomId || undefined)) : undefined;
-    const ok = run((m) => { const result = addTrack(m, kind, { roomId }); created = result.trackId; return result.map; }, `${trackKindLabel(kind)}の行を追加`);
+    const ok = run((m) => {
+      const result = addTrack(m, kind, { roomId, doorId });
+      created = result.trackId;
+      addedMap = result.map;
+      return result.map;
+    }, `${trackKindLabel(kind)}の行を追加`);
     if (ok && created) {
       props.onSelect({ trackId: created, actionId: null, blocks: [], roomId: null });
-      if (kind === "robot") props.requestAction({ trackId: created, actionId: null });
+      const track = addedMap.tracks.find((t) => t.id === created);
+      if (!track) { setMessage("追加した行が見つかりません。"); return; }
+      if (kind === "door") {
+        props.requestAction({ trackId: created, actionId: null, type: "door-open", editor: "sequence" });
+      } else if (kind === "robot" || kind === "human") {
+        const initial = track.initial;
+        if (initial) props.requestPick({
+          mode: "initial", kind: track.kind, trackId: created, title: `${track.name} の初期位置`, color: track.color,
+          count: track.count,
+          help: `${trackKindLabel(kind)}をドラッグして初期位置を決めます。「適用」で確定し、シーケンスの設定へ進みます。`,
+          value: { x: initial.x, y: initial.y, yaw: initial.yaw, roomId: initial.roomId, appearAt: track.appearAt ?? 0 },
+          onSelect: (value) => {
+            const error = latest.current.edit((map) => {
+              const placed = setInitialPose(map, created, {
+                x: value.x, y: value.y, yaw: value.yaw ?? initial.yaw, roomId: value.roomId ?? initial.roomId,
+                coordinateMode: "free",
+              });
+              return updateTrack(placed, created, { appearAt: value.appearAt, ...(kind === "human" ? { count: value.count } : {}) });
+            }, "初期位置の設定");
+            if (error) return error;
+            latest.current.requestAction({ trackId: created, actionId: null, editor: "sequence" });
+            return null;
+          },
+        });
+      } else if (kind === "display") {
+        const action = newAction(addedMap, track, "show");
+        props.requestPick({
+          mode: "move", kind, trackId: created, title: `${track.name} の表示位置と内容`, color: track.color,
+          help: "表示項目と言葉を選び、マップ上の表示をドラッグして位置を調整します。「適用」で確定し、シーケンスの設定へ進みます。",
+          value: { x: action.x, y: action.y, roomId: action.roomId },
+          display: { text: "表示テキスト", displayTemplate: "label" },
+          onSelect: (value) => {
+            const display = value.display;
+            if (!display) return "表示内容を指定してください。";
+            let actionId = "";
+            const error = latest.current.edit((current) => {
+              const added = addActionToTrack(current, created, "show", {
+                x: value.x, y: value.y, roomId: value.roomId ?? "", coordinateMode: "free",
+                text: display.text, displayTemplate: display.displayTemplate,
+              });
+              actionId = added.actionId;
+              return added.map;
+            }, "表示位置と内容の設定");
+            if (error) return error;
+            latest.current.requestAction({ trackId: created, actionId, editor: "sequence" });
+            return null;
+          },
+        });
+      }
     }
   };
 
@@ -303,23 +365,10 @@ export function TimelineCard(props: TimelineCardProps) {
     setMessage(reason);
   };
 
-  const onAddAction = (type: ActionType) => {
-    if (!selectedTrack) { setMessage("配置先の行を選択してください。"); return; }
-    const problem = addProblem(selectedTrack, type);
-    if (problem) { setMessage(problem); return; }
-    setMessage(null);
-    props.requestAction(addRequest(selectedTrack, playback.time, fine, type));
-  };
-
-  const addAt = (track: Track, clientX: number, lane: HTMLElement) => {
-    const now = performance.now();
-    if (now - lastAdd.current < TAP_MS) return;
-    lastAdd.current = now;
+  const openTrackSequence = (track: Track) => {
+    pause();
     selectTrack(track.id);
-    const problem = addProblem(track, addRequest(track, 0, fine).type);
-    if (problem) { setMessage(problem); return; }
-    setMessage(null);
-    props.requestAction(addRequest(track, pxToTime(clientX - lane.getBoundingClientRect().left, px), fine));
+    props.requestAction({ trackId: track.id, actionId: null, editor: "sequence" });
   };
 
   const onLanePointerUp = (event: ReactPointerEvent<HTMLElement>, track: Track) => {
@@ -327,7 +376,7 @@ export function TimelineCard(props: TimelineCardProps) {
     const now = performance.now();
     if (laneTap.current.id === track.id && now - laneTap.current.at < TAP_MS) {
       laneTap.current = { id: "", at: 0 };
-      addAt(track, event.clientX, event.currentTarget);
+      openTrackSequence(track);
     } else laneTap.current = { id: track.id, at: now };
   };
 
@@ -412,7 +461,7 @@ export function TimelineCard(props: TimelineCardProps) {
   const playheadLeft = timeToPx(Math.min(playback.time, Math.max(playback.duration, 0)), px);
   const handlers = { onBarPointerDown, onHandlePointerDown, onOpen: openAction, onDelete: (_trackId: string, actionId: string) => askDeleteActions(actionId), onResizeKey };
 
-  return <section className={`${consoleStyles.preferenceCard} ${styles.timelineCard} ${timeline.root}`} aria-label="時間軸">
+  return <section ref={section} className={`${consoleStyles.preferenceCard} ${styles.timelineCard} ${timeline.root}`} aria-label="時間軸">
     <div className={timeline.header}>
       <h2>時間軸</h2>
       <div className={timeline.toolbar} role="toolbar" aria-label="時間軸の表示">
@@ -423,16 +472,24 @@ export function TimelineCard(props: TimelineCardProps) {
             onChange={(event) => setPx(Number(event.target.value))} />
         </label>
         <button type="button" className={consoleStyles.secondary} onClick={onFit}><Maximize2 aria-hidden="true" />全体表示</button>
+        <button type="button" className={consoleStyles.secondary} onClick={() => { void toggleFullscreen(); }}
+          aria-pressed={fullscreen}>
+          {fullscreen ? <Minimize2 aria-hidden="true" /> : <Expand aria-hidden="true" />}
+          {fullscreen ? "元の表示に戻す" : "シーケンスを全画面表示"}
+        </button>
         <div className={timeline.snap} role="group" aria-label="スナップ">
           <button type="button" className={consoleStyles.secondary} aria-pressed={fine} onClick={() => setFine(true)}>スナップ 0.1秒</button>
           <button type="button" className={consoleStyles.secondary} aria-pressed={!fine} onClick={() => setFine(false)}>スナップ 0.5秒</button>
         </div>
       </div>
+      {props.toolbarSlot && createPortal(<>({/* zoom toolbar slot content */}</>, props.toolbarSlot)}
     </div>
-    {props.paletteSlot && createPortal(<TrackPalette track={selectedTrack} selectedBlocks={selection.blocks.length} onAddTrack={onAddTrack} onAddAction={onAddAction}
-      onMoveTrack={(direction) => { if (selectedTrack) run((m) => moveTrackBy(m, selectedTrack.id, direction), "行の並べ替え"); }}
-      onDeleteTrack={askDeleteTrack} onDeleteActions={() => askDeleteActions()}
-      onDragType={(type) => { paletteType.current = type; props.onDragActionType?.(type); if (!type) setDrop(null); }} />, props.paletteSlot)}
+    {props.paletteSlot && createPortal(<TrackPalette map={map} selectedTrack={map.tracks.find((track) => track.id === selection.trackId)}
+      onAddTrack={onAddTrack} onAddDoor={(doorId) => onAddTrack("door", undefined, doorId)}
+      onAddOpen={() => {
+        const track = map.tracks.find((track) => track.id === selection.trackId);
+        if (track?.kind === "door" && !track.locked) props.requestAction({ trackId: track.id, actionId: null, type: "door-open", editor: "sequence" });
+      }} />, props.paletteSlot)}
     {message && <p className={timeline.alert} role="alert">{message}</p>}
     <div ref={scroller} className={timeline.scroller} role="region" aria-label="時間軸のスクロール領域" tabIndex={0}>
       <div className={timeline.canvas} style={{ width: LABEL_W + laneWidth, ["--px" as string]: `${px}px` }}>
@@ -451,13 +508,19 @@ export function TimelineCard(props: TimelineCardProps) {
         {map.tracks.map((track, index) => {
           const Icon = ICONS[track.kind];
           const isSelected = selection.trackId === track.id;
-          const sub = `${track.kind === "human" ? `${track.count ?? 1}人 / GROUP` : trackKindLabel(track.kind)}${track.muted ? " · 除外中" : ""}${track.locked ? " · 固定" : ""}`;
+          const sub = `${track.kind === "human" ? `${track.count ?? 1}人 / GROUP` : trackKindLabel(track.kind)}${track.appearAt ? ` · 表示 ${track.appearAt}秒〜` : ""}${track.muted ? " · 除外中" : ""}${track.locked ? " · 固定" : ""}`;
           return <div key={track.id} className={timeline.row} data-track-id={track.id} data-selected={isSelected} data-over={reorderOver === track.id}
+            onContextMenu={(event) => {
+              if (!props.requestContextMenu) return;
+              event.preventDefault();
+              props.requestContextMenu({ x: event.clientX, y: event.clientY, target: { kind: "track", trackId: track.id } });
+            }}
             onDragOver={(event) => onRowDragOver(event, track)} onDragLeave={() => setReorderOver((current) => (current === track.id ? null : current))}
             onDrop={(event) => onRowDrop(event, index)}>
             <div className={timeline.label} draggable onDragStart={(event) => onLabelDragStart(event, track)}
               onDragEnd={() => { reorderSource.current = null; setReorderOver(null); }}>
               <button type="button" className={timeline.labelMain} aria-pressed={isSelected} onClick={() => selectTrack(track.id)}
+                onDoubleClick={() => openTrackSequence(track)}
                 style={{ ["--track-color" as string]: track.color }}>
                 <Icon aria-hidden="true" />
                 <span className={timeline.labelText}><strong>{track.name}</strong><small>{sub}</small></span>
@@ -473,7 +536,10 @@ export function TimelineCard(props: TimelineCardProps) {
               data-muted={track.muted} data-locked={track.locked} data-selected={isSelected}
               onPointerDown={(event) => { if (event.target === event.currentTarget) selectTrack(track.id); }}
               onPointerUp={(event) => onLanePointerUp(event, track)}
-              onDoubleClick={(event) => { if (event.target === event.currentTarget) addAt(track, event.clientX, event.currentTarget); }}
+              onDoubleClick={(event) => {
+                if (event.target !== event.currentTarget) return;
+                openTrackSequence(track);
+              }}
               onDragOver={(event) => onLaneDragOver(event, track)}
               onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDrop(null); }}
               onDrop={(event) => onLaneDrop(event, track)}>

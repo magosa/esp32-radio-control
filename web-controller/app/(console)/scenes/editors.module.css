@@ -46,6 +46,12 @@
 .note { color: var(--ink); overflow-wrap: anywhere; }
 .problem { color: var(--warning-ink); font-weight: 600; overflow-wrap: anywhere; }
 .overlay { pointer-events: none; }
+.placement { min-width: 0; }
+.placement:focus { outline: none; }
+.dragHandle { pointer-events: all; cursor: grab; }
+.placement[data-dragging="true"], .placement[data-dragging="true"] .dragHandle { cursor: grabbing; }
+.rotationRing { fill: none; stroke: #15803d; stroke-width: 2; stroke-dasharray: 6 5; }
+.rotationKnob { fill: #bbf7d0; stroke: #15803d; stroke-width: 3; }
 
 /* Robot sequence dialog */
 .sequence { display: grid; gap: 12px; align-content: start; min-width: 0; }

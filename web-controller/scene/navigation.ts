@@ -60,20 +60,25 @@ function doorWallSegments(map: SceneMap, doors: MergedDoor[], walls: Map<string,
   return segments;
 }
 
-function independentWallSegments(wall: Wall, doors: MergedDoor[]): Segment[] {
+export function wallSegments(wall: Wall, doors: MergedDoor[]): Segment[] {
   const horizontal = wall.y1 === wall.y2;
+  const low = horizontal ? wall.x1 : wall.y1, high = horizontal ? wall.x2 : wall.y2;
   const piece = (from: number, to: number): Segment => horizontal
     ? { x1: from, y1: wall.y1, x2: to, y2: wall.y1 } : { x1: wall.x1, y1: from, x2: wall.x1, y2: to };
-  const cuts = doors.filter((door) => door.wallId === wall.id)
-    .map(({ opening }) => horizontal ? [opening.x1, opening.x2] : [opening.y1, opening.y2])
+  const cuts = doors.filter((door) => door.wallId === wall.id || (door.cell !== undefined && (horizontal
+    ? door.opening.y1 === wall.y1 && door.opening.y2 === wall.y1
+    : door.opening.x1 === wall.x1 && door.opening.x2 === wall.x1)))
+    .map(({ opening }) => horizontal
+      ? [Math.max(low, opening.x1), Math.min(high, opening.x2)]
+      : [Math.max(low, opening.y1), Math.min(high, opening.y2)])
+    .filter(([start, end]) => start < end)
     .sort((a, b) => a[0] - b[0]);
   const segments: Segment[] = [];
-  let cursor = horizontal ? wall.x1 : wall.y1;
+  let cursor = low;
   for (const [start, end] of cuts) {
     if (start > cursor) segments.push(piece(cursor, start));
     cursor = Math.max(cursor, end);
   }
-  const high = horizontal ? wall.x2 : wall.y2;
   if (cursor < high) segments.push(piece(cursor, high));
   return segments;
 }
@@ -100,7 +105,7 @@ export function buildNavigation(map: SceneMap): SceneNavigation {
     }),
     walls: [
       ...doorWallSegments(map, doors, walls),
-      ...(plan.walls ?? []).flatMap((wall) => independentWallSegments(wall, doors)),
+      ...(plan.walls ?? []).flatMap((wall) => wallSegments(wall, doors)),
     ],
     doors: doors.map((door) => ({
       id: door.id, roomId: door.roomId,

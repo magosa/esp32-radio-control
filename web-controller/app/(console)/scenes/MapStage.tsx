@@ -9,10 +9,11 @@ import {
   type Matrix, type Point, type StageHit, type ZoomId,
 } from "@/scene/mapView";
 import type { SceneSelection } from "@/scene/sceneSelection";
-import { compilePlan, samplePlan, type ScenePlan } from "@/scene/timedPlan";
+import { samplePlan } from "@/scene/timedPlan";
 import type { SceneMap } from "@/scene/types";
 import { type EditGridMm } from "@/scene/units";
 import styles from "./mapStage.module.css";
+import { sceneAnalysis } from "./sceneAnalysis";
 
 export interface MapStageProps {
   map: SceneMap;
@@ -20,28 +21,21 @@ export interface MapStageProps {
   showGrid: boolean;
   showPaths?: boolean;
   showAxis?: boolean;
+  showRoomLabels?: boolean;
+  showRoomBoundaries?: boolean;
+  drawRobots?: boolean;
   selection?: SceneSelection;
   gridMm: EditGridMm;
   onPick?: (p: { x: number; y: number }) => void;
   onStageHit?: (hit: StageHit, doubleClick: boolean) => void;
+  onStageContextMenu?: (hit: StageHit, point: Point) => void;
   onStageDrop?: (p: { x: number; y: number }) => void;
   // Drawn inside the SVG above the map, in the SVG's own units (use svgY for y).
-  overlay?: ReactNode;
+  overlay?: ReactNode | ((scale: number) => ReactNode);
   // Single-finger touches draw instead of scrolling; only pinch gestures stay with the browser.
   drawing?: boolean;
   // Where the zoom buttons are drawn. Undefined keeps them above the map; null waits for the slot to exist.
   toolbarSlot?: HTMLElement | null;
-}
-
-// Compiled once per map reference so tabs showing the same map share one plan.
-const planCache = new WeakMap<SceneMap, ScenePlan>();
-function planFor(map: SceneMap): ScenePlan {
-  let plan = planCache.get(map);
-  if (!plan) {
-    plan = compilePlan(map);
-    planCache.set(map, plan);
-  }
-  return plan;
 }
 
 function useScale(): [RefObject<SVGSVGElement>, number] {
@@ -61,15 +55,15 @@ function useScale(): [RefObject<SVGSVGElement>, number] {
 }
 
 export function MapStage({
-  map, time, showGrid, showPaths = true, showAxis = false, selection, gridMm,
-  onPick, onStageHit, onStageDrop, overlay, drawing, toolbarSlot,
+  map, time, showGrid, showPaths = true, showAxis = false, showRoomLabels = false, showRoomBoundaries = false, selection, gridMm,
+  onPick, onStageHit, onStageDrop, onStageContextMenu, overlay, drawing, toolbarSlot, drawRobots = false,
 }: MapStageProps) {
-  const [zoom, setZoom] = useState<ZoomId>("fit");
+  const [zoom] = useState<ZoomId>("fit");
   const [cursor, setCursor] = useState<Point | null>(null);
   const [svgRef, scale] = useScale();
   const down = useRef<{ x: number; y: number } | null>(null);
   const lastTap = useRef<{ key: string; at: number }>({ key: "", at: 0 });
-  const plan = planFor(map);
+  const { plan } = sceneAnalysis(map);
   const state = useMemo(() => samplePlan(plan, time), [plan, time]);
   const firstError = plan.errors[0];
   const interactive = !!(onPick || onStageHit);
@@ -82,7 +76,7 @@ export function MapStage({
   const pick = (event: PointerEvent<SVGSVGElement>) => {
     const start = down.current;
     down.current = null;
-    if (!interactive || !start || !isTap(start, { x: event.clientX, y: event.clientY })) return;
+    if (event.button !== 0 || !interactive || !start || !isTap(start, { x: event.clientX, y: event.clientY })) return;
     const mm = toMm(event.clientX, event.clientY);
     if (!mm) return;
     if (onStageHit) {
@@ -126,12 +120,7 @@ export function MapStage({
   };
 
   const toolbar = (
-    <div className={styles.toolbar} role="toolbar" aria-label="表示倍率">
-      {ZOOMS.map((item) => (
-        <button key={item.id} type="button" className={styles.zoomButton} aria-pressed={zoom === item.id} onClick={() => setZoom(item.id)}>
-          {item.label}
-        </button>
-      ))}
+    <div className={styles.toolbar} role="toolbar" aria-label="表示">
       {showAxis && (
         <span className={styles.coords} data-part="cursor-coords" aria-live="off">
           {cursor ? `X ${cursor.x}mm / Y ${cursor.y}mm` : "X — / Y —"}
@@ -144,18 +133,27 @@ export function MapStage({
     <div className={styles.stage}>
       {toolbarSlot === undefined ? toolbar : toolbarSlot && createPortal(toolbar, toolbarSlot)}
       <div className={drawing ? `${styles.scroll} ${styles.drawing}` : styles.scroll} tabIndex={interactive ? 0 : undefined}>
-        <svg ref={svgRef} className={styles.map} viewBox={VIEW_BOX} style={{ width: zoomWidth(zoom), height: zoom === "fit" ? "100%" : "auto" }} role="img"
+        <svg ref={svgRef} className={styles.map} viewBox={VIEW_BOX} style={{ width: "100%", height: "100%" }} role="img"
           aria-label={mapSummary(map, { time, actors: state.actors })}
           onPointerMove={showAxis ? onMove : undefined}
           onPointerLeave={showAxis ? () => setCursor(null) : undefined}
           onPointerDown={interactive ? (e) => { down.current = { x: e.clientX, y: e.clientY }; } : undefined}
           onPointerUp={interactive ? pick : undefined}
           onDoubleClick={onStageHit ? onDoubleClick : undefined}
+          onContextMenu={onStageContextMenu ? (event) => {
+            const point = toMm(event.clientX, event.clientY);
+            if (!point) return;
+            const hit = hitStageItem(map, plan, state, point, scale, showPaths);
+            if (!hit) return;
+            event.preventDefault();
+            onStageContextMenu(hit, { x: event.clientX, y: event.clientY });
+          } : undefined}
           onDragOver={onStageDrop ? onDragOver : undefined}
           onDrop={onStageDrop ? onDrop : undefined}
           onPointerCancel={() => { down.current = null; }}>
           <MapBody map={map} scene={state} time={time} scale={scale} showGrid={showGrid} showPaths={showPaths}
-            showAxis={showAxis} selection={selection} gridMm={gridMm} plan={plan} overlay={overlay} />
+            showAxis={showAxis} showRoomLabels={showRoomLabels} showRoomBoundaries={showRoomBoundaries} selection={selection}             gridMm={gridMm} plan={plan} overlay={typeof overlay === "function" ? overlay(scale) : overlay}
+            drawRobots={drawRobots} />
         </svg>
       </div>
       {firstError && <p className={styles.status} role="status">計画エラー: {firstError}</p>}

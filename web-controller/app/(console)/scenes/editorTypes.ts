@@ -1,4 +1,4 @@
-import type { Action, ActionType, CoordinateMode, SceneMap, TrackKind } from "@/scene/types";
+import type { Action, ActionType, CoordinateMode, SceneMap, Track, TrackKind } from "@/scene/types";
 import type { SceneSelection } from "@/scene/sceneSelection";
 
 export { EMPTY_SELECTION, type SceneSelection } from "@/scene/sceneSelection";
@@ -13,25 +13,39 @@ export type Confirm = (title: string, message: string, options?: { danger?: bool
 export interface ActionEditRequest {
   trackId: string;
   actionId: string | null;
+  editor?: "sequence";
+  draftTrack?: Track;
   type?: ActionType;
   overrides?: Partial<Omit<Action, "id" | "type">>;
+}
+
+export interface SceneContextRequest {
+  target: { kind: "track"; trackId: string } | { kind: "room"; roomId: string };
+  x: number;
+  y: number;
 }
 
 export interface PickValue {
   x: number;
   y: number;
   yaw?: number;
+  count?: number;
+  appearAt?: number;
   roomId?: string;
   coordinateMode?: CoordinateMode;
+  display?: Pick<Action, "text" | "displayTemplate">;
 }
 
 // Asks the page to open the map coordinate picker. `onSelect` returns a Japanese reason to keep the picker open.
 export interface PickRequest {
   mode: "move" | "initial" | "room";
   kind: TrackKind;
+  trackId?: string;
   title: string;
   help?: string;
   color?: string;
+  count?: number;
+  display?: Pick<Action, "text" | "displayTemplate">;
   value: PickValue;
   onSelect(value: PickValue): string | null;
 }
@@ -59,4 +73,5 @@ export interface EditorShared {
   confirm: Confirm;
   requestAction(request: ActionEditRequest): void;
   requestPick(request: PickRequest): void;
+  requestContextMenu?(request: SceneContextRequest): void;
 }

@@ -1,6 +1,7 @@
 import { CELL_COUNT, AREA_HEIGHT_MM, AREA_WIDTH_MM, EDIT_GRID_OPTIONS } from "./units";
 import { snapToEditGrid } from "./grid";
 import { validateFloorPlan } from "./floorPlan";
+import { equipmentTargets, mergedDoors } from "./equipment";
 import { defaultId, type IdFactory } from "./ids";
 import { buildNavigation } from "./navigation";
 import { validatePresentation } from "./presentation";
@@ -19,7 +20,7 @@ import {
 export { defaultId, type IdFactory };
 
 export const COLORS = ["#8d9bff", "#58d8ca", "#ffbd70", "#ec87c7", "#73bafa", "#bd9afa"];
-export const KINDS: Record<TrackKind, string> = { robot: "ロボット", human: "人", room: "部屋", display: "画面表示" };
+export const KINDS: Record<TrackKind, string> = { robot: "ロボット", human: "人", room: "部屋", display: "画面表示", door: "ドア・ゲート" };
 export const DISPLAY_TEMPLATES: readonly DisplayTemplate[] = ["label", "card", "sign"];
 export const HATCH_STYLES: readonly HatchStyle[] = ["diagonal", "cross", "dots"];
 
@@ -28,18 +29,19 @@ const ACTION_TYPES: Record<TrackKind, readonly ActionType[]> = {
   human: ["move", "show", "hide", "wait"],
   room: ["event-start", "event-end", "unlock", "wait"],
   display: ["show", "hide", "wait"],
+  door: ["door-open"],
 };
 const ACTION_NAMES: Record<ActionType, string> = {
   move: "移動", wait: "待機", show: "表示", hide: "非表示",
-  "event-start": "イベント開始", "event-end": "イベント終了", unlock: "解錠",
+  "event-start": "イベント開始", "event-end": "イベント終了", unlock: "解錠", "door-open": "開閉指示",
 };
-const MAX_SECONDS = 86400;
+export const MAX_SECONDS = 86400;
 const isActor = (kind: TrackKind) => kind === "robot" || kind === "human";
 const byPosition = (track: Track) => [...track.actions].sort((a, b) => a.position - b.position);
 
 function defaultRunSeconds(type: ActionType): number {
   if (type === "move") return 6;
-  if (type === "wait" || type === "show" || type === "event-start" || type === "unlock") return 3;
+  if (type === "wait" || type === "show" || type === "event-start" || type === "unlock" || type === "door-open") return 3;
   return 0.5;
 }
 
@@ -62,6 +64,11 @@ export function newTrack(map: SceneMap, kind: TrackKind, makeId: IdFactory = def
   if (isActor(kind)) track.initial = { ...snapToEditGrid(111 + ((peers.length * 69) % 969), 111, map.editGridMm), yaw: 0, roomId: "" };
   if (kind === "human") track.count = 1;
   if (kind === "room") track.roomId = map.rooms[0]?.id ?? "";
+  if (kind === "door") {
+    const target = equipmentTargets(map).find((target) => !map.tracks.some((track) => track.kind === "door" && target.memberIds.includes(track.doorId ?? "")));
+    if (!target) throw new Error("追加できるドア・ゲートがありません。マップに設備を配置してください。");
+    Object.assign(track, { doorId: target.doorId, roomId: target.roomId, name: target.name });
+  }
   return track;
 }
 
@@ -85,7 +92,7 @@ export function newAction(map: SceneMap, track: Track, type: ActionType = ACTION
     id: makeId(),
     name: type === "unlock" ? `${roomName}解錠` : ACTION_NAMES[type],
     type,
-    position: previous ? previous.position + previous.runSeconds : 0,
+    position: Math.max(track.appearAt ?? 0, previous ? previous.position + previous.runSeconds : 0),
     runSeconds: defaultRunSeconds(type),
     ...point,
     yaw: from?.yaw ?? 0,
@@ -94,6 +101,7 @@ export function newAction(map: SceneMap, track: Track, type: ActionType = ACTION
     targetId: (type === "hide" || type === "event-end") && target ? target.targetId : makeId(),
     text: "",
     state: "meeting",
+    ...(type === "door-open" ? { doorId: track.doorId } : {}),
   };
 }
 
@@ -239,9 +247,11 @@ function validateMap(map: unknown, identifier: (id: unknown, label: string) => v
   }
   const doors = has(map, "floorPlan") ? validateFloorPlanShape(map.floorPlan, rooms, identifier) : new Map<string, string>();
   if (has(map, "presentation")) validatePresentation(map.presentation);
-  validateFloorPlan(map as unknown as SceneMap);
+  const layout = map as unknown as SceneMap;
+  validateFloorPlan(layout);
 
-  const robotIds = new Set<string>();
+  const robotIds = new Set<string>(), controlledDoors = new Set<string>();
+  const openings = mergedDoors(layout);
   for (const track of map.tracks as unknown[]) {
     check(isObj(track), "track must be an object");
     identifier(track.id, "track");
@@ -257,6 +267,10 @@ function validateMap(map: unknown, identifier: (id: unknown, label: string) => v
       roomRef(track.initial.roomId, rooms, "track.initial");
       if (has(track.initial, "coordinateMode")) oneOf(track.initial.coordinateMode, ["grid", "free"], "track.initial.coordinateMode");
     }
+    if (has(track, "appearAt")) {
+      check(isActor(kind), "track.appearAt is only allowed on robot/human tracks");
+      time(track.appearAt, "track.appearAt");
+    }
     if (kind === "robot") {
       if (has(track, "robotId")) {
         check(safeId(track.robotId) && !robotIds.has(track.robotId), "track.robotId is invalid or duplicated");
@@ -266,11 +280,22 @@ function validateMap(map: unknown, identifier: (id: unknown, label: string) => v
     }
     if (kind === "human") check(Number.isInteger(track.count) && finite(track.count, 1, 10000), "track.count must be an integer in 1..10000");
     if (kind === "room") roomRef(track.roomId, rooms, "track");
+    if (kind === "door") {
+      const target = openings.find((door) => door.memberIds.includes(track.doorId as string));
+      check(target && target.roomId === track.roomId, "door track target does not resolve");
+      check(!controlledDoors.has(target.id), "door track target is duplicated");
+      controlledDoors.add(target.id);
+    } else check(!has(track, "doorId"), "track.doorId is only allowed on door tracks");
     check(Array.isArray(track.actions), "track.actions must be an array");
     total += track.actions.length;
     check(total <= 2000, "actions must total at most 2000");
     // hide/event-end close by targetId map-wide at runtime; an unresolved target is a no-op (upstream parity).
-    for (const action of track.actions as unknown[]) validateAction(action, kind, rooms, doors, identifier);
+    for (const action of track.actions as unknown[]) {
+      validateAction(action, kind, rooms, doors, identifier);
+      if (kind === "door") {
+        check(isObj(action) && action.doorId === track.doorId && action.roomId === track.roomId, "door action target differs from its track");
+      }
+    }
   }
   return total;
 }
@@ -306,8 +331,13 @@ function validateAction(
   if (has(action, "hatchStyle")) oneOf(action.hatchStyle, HATCH_STYLES, "action.hatchStyle");
   if (has(action, "hatchColor")) color(action.hatchColor, "action.hatchColor");
   if (action.type === "unlock") check(typeof action.roomId === "string" && rooms.has(action.roomId), "unlock action.roomId does not resolve");
+  if (action.type === "door-open") {
+    check(finite(action.runSeconds, 0.1, MAX_SECONDS) && finite((action.position as number) + (action.runSeconds as number), 0, MAX_SECONDS),
+      "door opening end must follow start and be within 86400 seconds");
+    check(has(action, "doorId"), "door opening target is required");
+  }
   if (has(action, "doorId")) {
-    check(action.type === "unlock", "action.doorId is only allowed on unlock");
+    check(action.type === "unlock" || action.type === "door-open", "action.doorId is only allowed on unlock or door-open");
     check(doors.get(action.doorId as string) === action.roomId, "unlock action.doorId does not resolve to a door of its room");
   }
 }

@@ -1,8 +1,8 @@
 import { boundaryEdge, furnitureCells, regionBounds, removeRegion } from "./floorPlan";
-import type { Edge } from "./grid";
+import { cellCenter, cellNeighbor, type Edge } from "./grid";
 import { defaultId, type IdFactory } from "./ids";
-import { DOOR_MAX_CELLS, DOOR_MIN_CELLS, doorWidthOk, placeElevator } from "./equipment";
-import type { Room, SceneMap } from "./types";
+import { assertDoorReferences, DOOR_MAX_CELLS, DOOR_MIN_CELLS, doorWidthOk, placeElevator } from "./equipment";
+import type { Room, SceneMap, Wall } from "./types";
 import { CELL_COUNT, CELL_MM } from "./units";
 
 export const MAX_ROOMS = 100;
@@ -17,6 +17,52 @@ function check(condition: unknown, message: string): asserts condition {
 }
 const validCells = (cells: readonly number[]) =>
   cells.every((cell) => Number.isInteger(cell) && cell >= 0 && cell < CELL_COUNT);
+
+// Generate walls on room boundaries in zoning mode (not for corridors)
+function generateBoundaryWalls(map: SceneMap, roomId: string, makeId: IdFactory = defaultId): void {
+  const room = map.rooms.find((r) => r.id === roomId);
+  if (!room || room.cells.length === 0 || room.kind === "corridor") return;
+  
+  // Initialize floorPlan if needed
+  map.floorPlan ??= { doors: [], furniture: [] };
+  map.floorPlan.walls ??= [];
+  
+  // Remove existing walls for this room to avoid duplicates/stale walls
+  map.floorPlan.walls = map.floorPlan.walls.filter((wall) => wall.roomId !== roomId);
+  
+  // Find boundary edges and create walls
+  const edges: Edge[] = ["top", "bottom", "left", "right"];
+  
+  for (const cell of room.cells) {
+    for (const edge of edges) {
+      // Check if this cell edge is a boundary (neighbor cell is not in room)
+      const neighbor = cellNeighbor(cell, edge);
+      if (neighbor < 0 || !room.cells.includes(neighbor)) {
+        const { x: cx, y: cy } = cellCenter(cell);
+        const halfMm = CELL_MM / 2;
+        
+        let x1: number, y1: number, x2: number, y2: number;
+        if (edge === "top") {
+          x1 = cx - halfMm; y1 = cy + halfMm; x2 = cx + halfMm; y2 = cy + halfMm;
+        } else if (edge === "bottom") {
+          x1 = cx - halfMm; y1 = cy - halfMm; x2 = cx + halfMm; y2 = cy - halfMm;
+        } else if (edge === "left") {
+          x1 = cx - halfMm; y1 = cy - halfMm; x2 = cx - halfMm; y2 = cy + halfMm;
+        } else {
+          x1 = cx + halfMm; y1 = cy - halfMm; x2 = cx + halfMm; y2 = cy + halfMm;
+        }
+        
+        // Add wall for this boundary edge
+        map.floorPlan.walls!.push({
+          id: makeId(),
+          roomId: room.id,
+          name: "Zoning boundary",
+          x1, y1, x2, y2,
+        });
+      }
+    }
+  }
+}
 
 export function addRegion(
   map: SceneMap, kind: "room" | "corridor" | "elevator", makeId: IdFactory = defaultId,
@@ -53,6 +99,7 @@ export function dropInvalidFixtures(map: SceneMap): { map: SceneMap; removed: nu
     const room = rooms.get(door.roomId);
     return room !== undefined && door.cell !== undefined && door.edge !== undefined && boundaryEdge(room, door.cell, door.edge);
   });
+  assertDoorReferences(result);
   return { map: result, removed: before - plan.furniture.length - plan.doors.length };
 }
 
@@ -71,17 +118,30 @@ export function paintCells(map: SceneMap, roomId: string, cells: number[], kind:
   }
   room.cells = Array.from(new Set([...room.cells, ...cells])).sort((a, b) => a - b);
   room.kind = kind;
+  
+  // Auto-generate walls at room boundaries in zoning mode
+  generateBoundaryWalls(result, roomId);
+  
   return dropInvalidFixtures(result).map;
 }
 
 export function eraseCells(map: SceneMap, cells: number[]): SceneMap {
   const erased = new Set(cells);
   const result = structuredClone(map);
+  const roomsModified: string[] = [];
   for (const room of result.rooms) {
     if (room.cells.length === 0) continue;
     const remaining = room.cells.filter((cell) => !erased.has(cell));
     check(remaining.length > 0, `「${room.name}」の最後のセルは消せません。参照保護のため領域を維持します。`);
+    // Only track rooms that actually changed
+    if (remaining.length !== room.cells.length) {
+      roomsModified.push(room.id);
+    }
     room.cells = remaining;
+  }
+  // Regenerate walls for modified rooms after cell changes
+  for (const roomId of roomsModified) {
+    generateBoundaryWalls(result, roomId);
   }
   return dropInvalidFixtures(result).map;
 }
