@@ -2,7 +2,7 @@ import "../scene/ids";
 import fs from "node:fs";
 import path from "node:path";
 import { MAX_ROBOT_MARKER_ID } from "../localization/geometry";
-import type { DeviceCapability, DeviceDescription, RobotDefinition } from "./protocol";
+import type { DeviceCapability, DeviceDescription, RobotDefinition, RobotMotionCalibration } from "./protocol";
 
 interface StoredFleet {
   version: 1;
@@ -85,6 +85,16 @@ export class RobotStore {
     this.save(next);
   }
 
+  // motion は null で未設定に戻す。
+  setMotion(robotId: string, motion: RobotMotionCalibration | null): void {
+    const next = structuredClone(this.data);
+    const robot = next.robots.find((candidate) => candidate.robotId === robotId);
+    if (!robot) throw new Error("Robot not found");
+    robot.motion = motion;
+    this.validateRobots(next);
+    this.save(next);
+  }
+
   // priority は null で未設定に戻す。footprintMm 省略時は現在の外形を維持する。
   setSettings(robotId: string, priority: number | null, footprintMm?: { w: number; d: number }): void {
     const next = structuredClone(this.data);
@@ -120,6 +130,15 @@ export class RobotStore {
         && !(Number.isInteger(robot.priority) && robot.priority >= 1 && robot.priority <= 99)) throw new Error("Invalid priority");
       if (robot.footprintMm !== undefined && !([robot.footprintMm.w, robot.footprintMm.d].every((v) => Number.isFinite(v) && v >= 60 && v <= 80))) {
         throw new Error("Invalid footprint");
+      }
+      if (robot.motion !== undefined && robot.motion !== null) {
+        const m = robot.motion;
+        const numbersOk = [m.calibratedAt, m.minDrivePwm, m.maxDrivePwm, m.speedMmS, m.minTurnPwm, m.maxTurnPwm, m.turnRateLeftDegS, m.turnRateRightDegS, m.yawOffsetDeg].every((v) => typeof v === "number" && Number.isFinite(v));
+        if (!numbersOk || m.minDrivePwm < 0 || m.maxDrivePwm > 255 || m.minDrivePwm > m.maxDrivePwm
+          || m.minTurnPwm < 0 || m.maxTurnPwm > 255 || m.minTurnPwm > m.maxTurnPwm
+          || m.speedMmS < 0 || m.turnRateLeftDegS < 0 || m.turnRateRightDegS < 0) {
+          throw new Error("Invalid motion calibration");
+        }
       }
       if (robot.cameraDeviceId !== null) {
         if (typeof robot.cameraDeviceId !== "string" || cameraIds.has(robot.cameraDeviceId)

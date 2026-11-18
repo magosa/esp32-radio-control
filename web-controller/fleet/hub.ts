@@ -10,7 +10,9 @@ import { applyExhibit, initialExhibit, parseExhibitCommand, type ExhibitSession 
 import { parseRunCommand } from "../scene/runTypes";
 import type { SceneMap } from "../scene/types";
 import { SceneRunner } from "./sceneRunner";
+import { CalibrationRunner } from "./calibration";
 import type {
+  CalibrationProgressMessage,
   ClientInboundMessage,
   ClientOutboundMessage,
   DeviceInboundMessage,
@@ -56,6 +58,7 @@ export class FleetHub {
   // シーン実行が駆動を引き継いでいる機体。終了で手動へ戻す。
   private runDevices: string[] = [];
   private lastRunPayload = "";
+  private activeCalibration: { robotId: string; runner: CalibrationRunner } | null = null;
 
   constructor(store = new RobotStore(path.join(defaultDataDir(), "fleet.json")),
     fieldStore = new FieldConfigStore(path.join(defaultDataDir(), "field.json")),
@@ -96,6 +99,10 @@ export class FleetHub {
     clearInterval(this.sweepTimer);
     if (this.poseBroadcastTimer) clearTimeout(this.poseBroadcastTimer);
     if (this.runTimer) clearInterval(this.runTimer);
+    if (this.activeCalibration) {
+      this.activeCalibration.runner.abort();
+      this.activeCalibration = null;
+    }
     this.routeEngine.stop();
     Array.from(this.streamingDeviceIds).forEach((deviceId) => this.stopStream(deviceId));
   }
@@ -296,6 +303,57 @@ export class FleetHub {
         this.sendToClient(client, { type: "operationResult", requestId: msg.requestId, ok: true });
         break;
       }
+      case "startCalibration": {
+        if (typeof msg.requestId !== "string" || typeof msg.robotId !== "string") throw new Error("Invalid calibration request");
+        const robot = this.store.getRobots().find((r) => r.robotId === msg.robotId);
+        if (!robot) throw new Error("Robot not found");
+        if (this.runner.snapshot().phase !== "idle") throw new Error("シーン実行中は校正できません");
+        if (this.activeCalibration) throw new Error("別の校正が実行中です");
+        const deviceId = robot.driveDeviceId;
+        if (!this.registry.getOnlineDeviceIds().includes(deviceId)) throw new Error("走行デバイスが未接続です");
+        if (robot.markerId === null) throw new Error("マーカーが未設定です");
+
+        const field = this.fieldStore.get();
+        const runner = new CalibrationRunner({
+          now: () => Date.now(),
+          sendDrive: (devId, cmd, sL, sR) => this.sendDriveToDevice(devId, cmd, sL, sR),
+          getPose: (rId) => {
+            const poseState = this.poses.snapshot(this.store.getRobots(), field);
+            const p = poseState.poses.find((x) => x.robotId === rId);
+            if (!p || p.xMm === undefined || p.yMm === undefined || p.headingDeg === undefined) return null;
+            return { x: p.xMm, y: p.yMm, yaw: p.headingDeg, tracking: p.tracking };
+          },
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          onProgress: (progress) => this.broadcastToClients(progress),
+        }, {
+          fieldWidthMm: field.widthMm,
+          fieldHeightMm: field.heightMm,
+        });
+
+        this.activeCalibration = { robotId: msg.robotId, runner };
+        this.sendToClient(client, { type: "operationResult", requestId: msg.requestId, ok: true });
+
+        runner.run(msg.robotId, deviceId).then((result) => {
+          this.store.setMotion(msg.robotId, result);
+          this.broadcastFleetState();
+        }).catch(() => {
+          // aborted or error handled inside runner
+        }).finally(() => {
+          if (this.activeCalibration?.robotId === msg.robotId) {
+            this.activeCalibration = null;
+          }
+        });
+        break;
+      }
+      case "abortCalibration": {
+        if (typeof msg.requestId !== "string" || typeof msg.robotId !== "string") throw new Error("Invalid abort request");
+        if (this.activeCalibration && this.activeCalibration.robotId === msg.robotId) {
+          this.activeCalibration.runner.abort();
+          this.activeCalibration = null;
+        }
+        this.sendToClient(client, { type: "operationResult", requestId: msg.requestId, ok: true });
+        break;
+      }
       case "assignCamera": {
         if (typeof msg.requestId !== "string" || typeof msg.robotId !== "string"
           || !(msg.cameraDeviceId === null || typeof msg.cameraDeviceId === "string")) throw new Error("Invalid assignment");
@@ -320,6 +378,10 @@ export class FleetHub {
         // 非常停止: シーン実行中の機体への停止は、実行も「停止中」にする。
         if (msg.cmd === "e" && (msg.targetDeviceIds === "all" || requested.some((id) => this.runDevices.includes(id)))) {
           if (this.runner.pause() === null) this.runTick();
+        }
+        if (msg.cmd === "e" && this.activeCalibration) {
+          this.activeCalibration.runner.abort();
+          this.activeCalibration = null;
         }
         // autoモード中の車両はルートエンジンが制御しているため、手動コマンドは無視する
         const targets = requested.filter((id) => msg.cmd === "e" || this.registry.getMode(id) !== "auto");
@@ -421,6 +483,9 @@ export class FleetHub {
   }
 
   private sendDriveToDevice(deviceId: string, cmd: DriveCommand, speedL: number, speedR: number): void {
+    if (cmd !== "e") {
+      console.log(`[drive] -> ${deviceId} cmd=${cmd} L=${speedL} R=${speedR}`);
+    }
     this.sendToDevice(deviceId, { type: "drive", cmd, speedL, speedR }, "drive");
   }
 

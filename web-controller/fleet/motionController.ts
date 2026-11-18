@@ -1,4 +1,4 @@
-import type { DriveCommand } from "./protocol";
+import type { DriveCommand, RobotMotionCalibration } from "./protocol";
 import { normalizeYaw, shortestTurn } from "../scene/units";
 
 export interface Pose { x: number; y: number; yaw: number }
@@ -8,6 +8,8 @@ export interface Goal extends Pose {
   rotate: boolean;
   // Planned travel speed (mm/s), distance divided by the bar length.
   speedMmS: number;
+  // Enable smooth reverse drive when goal is behind the robot.
+  allowReverse?: boolean;
 }
 
 export interface Drive { cmd: DriveCommand; speedL: number; speedR: number }
@@ -21,37 +23,77 @@ export interface Control {
 
 export const STOP: Drive = { cmd: "e", speedL: 0, speedR: 0 };
 
-// shortcut: fixed speed/PWM figures until S7 measures the real robot, then replace with the calibration.
+// Default torque limits for uncalibrated / simulated robots.
 export const DRIVE_LIMITS = { maxSpeedMmS: 200, minPwm: 80, maxPwm: 220, minTurnPwm: 80, maxTurnPwm: 200 };
-// Inside these the robot stops commanding; arrival (20 mm / 5 deg) is judged by the runner with a margin above them.
-const POS_DEAD_MM = 10;
-const YAW_DEAD_DEG = 3;
-const TURN_FIRST_DEG = 25;
-const STEER_GAIN = 2.2;
+// Inside these the robot stops commanding; arrival (20 mm / 15 deg) is judged by the runner with a margin above them.
+const POS_DEAD_MM = 20;
+const YAW_DEAD_DEG = 10;
+const TURN_FIRST_DEG = 30;
+const STEER_GAIN = 1.0;
 const SLOW_RADIUS_MM = 100;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-function spin(err: number): Drive {
-  const pwm = Math.round(clamp(60 + Math.abs(err) * 1.5, DRIVE_LIMITS.minTurnPwm, DRIVE_LIMITS.maxTurnPwm));
+function spin(err: number, limits: { minTurnPwm: number; maxTurnPwm: number; isCalibrated: boolean }): Drive {
+  const basePwm = limits.isCalibrated ? limits.minTurnPwm : 60;
+  // 小さな誤差で急加速しないよう緩やかにトルクを付与
+  const pwm = Math.round(clamp(basePwm + Math.min(10, Math.abs(err) * 0.3), limits.minTurnPwm, limits.maxTurnPwm));
+  // Hardware-verified: on this vehicle chassis, 'c' turns counter-clockwise (left, err > 0) and 'd' turns clockwise (right, err < 0)
   return { cmd: err > 0 ? "c" : "d", speedL: pwm, speedR: pwm };
 }
 
-export function control(pose: Pose, goal: Goal): Control {
+export function control(pose: Pose, goal: Goal, calibration?: RobotMotionCalibration | null): Control {
+  const effectiveYaw = calibration ? normalizeYaw(pose.yaw - calibration.yawOffsetDeg) : pose.yaw;
+  const isCalibrated = !!calibration;
+  const limits = {
+    minPwm: calibration?.minDrivePwm ?? DRIVE_LIMITS.minPwm,
+    maxPwm: calibration?.maxDrivePwm ?? DRIVE_LIMITS.maxPwm,
+    maxSpeedMmS: calibration?.speedMmS ?? DRIVE_LIMITS.maxSpeedMmS,
+    minTurnPwm: calibration?.minTurnPwm ?? DRIVE_LIMITS.minTurnPwm,
+    maxTurnPwm: calibration?.maxTurnPwm ?? DRIVE_LIMITS.maxTurnPwm,
+    isCalibrated,
+  };
+
   const dx = goal.x - pose.x, dy = goal.y - pose.y;
   const posErrMm = goal.rotate ? 0 : Math.hypot(dx, dy);
-  const yawErrDeg = shortestTurn(pose.yaw, goal.yaw);
+  const yawErrDeg = shortestTurn(effectiveYaw, goal.yaw);
   const base = { posErrMm, yawErrDeg };
   if (goal.rotate || posErrMm <= POS_DEAD_MM) {
-    return { ...base, drive: Math.abs(yawErrDeg) <= YAW_DEAD_DEG ? STOP : spin(yawErrDeg) };
+    return { ...base, drive: Math.abs(yawErrDeg) <= YAW_DEAD_DEG ? STOP : spin(yawErrDeg, limits) };
   }
+
   const bearing = normalizeYaw(Math.atan2(dy, dx) * 180 / Math.PI);
-  const bearingErr = shortestTurn(pose.yaw, bearing);
-  if (Math.abs(bearingErr) > TURN_FIRST_DEG) return { ...base, drive: spin(bearingErr) };
+  const forwardBearingErr = shortestTurn(effectiveYaw, bearing);
+
+  // allowReverse が明示的、または小距離（150mm以内）で行き過ぎて背後にある場合は後進を活用
+  const reverseCandidate = goal.allowReverse ?? (posErrMm < 150);
+  const useReverse = reverseCandidate && Math.abs(forwardBearingErr) > 90;
+  const bearingErr = useReverse
+    ? shortestTurn(effectiveYaw, normalizeYaw(bearing + 180))
+    : forwardBearingErr;
+
+  if (Math.abs(bearingErr) > TURN_FIRST_DEG) return { ...base, drive: spin(bearingErr, limits) };
+
   const speed = Math.min(goal.speedMmS, Math.max(40, posErrMm * 1.5));
   const slowed = posErrMm < SLOW_RADIUS_MM ? speed : goal.speedMmS;
-  const pwm = clamp(Math.round(slowed / DRIVE_LIMITS.maxSpeedMmS * 255), DRIVE_LIMITS.minPwm, DRIVE_LIMITS.maxPwm);
+  let pwm: number;
+  if (isCalibrated) {
+    const ratio = Math.min(1, Math.max(0, (posErrMm - POS_DEAD_MM) / (SLOW_RADIUS_MM - POS_DEAD_MM)));
+    pwm = Math.round(limits.minPwm + (limits.maxPwm - limits.minPwm) * ratio);
+  } else {
+    pwm = clamp(Math.round(slowed / DRIVE_LIMITS.maxSpeedMmS * 255), DRIVE_LIMITS.minPwm, DRIVE_LIMITS.maxPwm);
+  }
+
   const steer = bearingErr * STEER_GAIN;
-  const left = Math.round(clamp(pwm - steer, 0, 255)), right = Math.round(clamp(pwm + steer, 0, 255));
-  return { ...base, drive: { cmd: "a", speedL: left, speedR: right } };
+  const minWheel = isCalibrated ? Math.round(limits.minPwm * 0.85) : 0;
+
+  if (useReverse) {
+    const left = Math.round(clamp(pwm + steer, minWheel, limits.maxPwm));
+    const right = Math.round(clamp(pwm - steer, minWheel, limits.maxPwm));
+    return { ...base, drive: { cmd: "b", speedL: left, speedR: right } };
+  } else {
+    const left = Math.round(clamp(pwm - steer, minWheel, limits.maxPwm));
+    const right = Math.round(clamp(pwm + steer, minWheel, limits.maxPwm));
+    return { ...base, drive: { cmd: "a", speedL: left, speedR: right } };
+  }
 }

@@ -53,7 +53,21 @@ function IntField({ label, value, min, max, blankOk, disabled, hint, onCommit }:
 }
 
 export default function RobotsPage() {
-  const { status, devices, robots, assignment, assignCamera, poseState, markerAssignment, assignMarker, settingsOp, saveRobotSettings } = useFleetSocket();
+  const {
+    status,
+    devices,
+    robots,
+    assignment,
+    assignCamera,
+    poseState,
+    markerAssignment,
+    assignMarker,
+    settingsOp,
+    saveRobotSettings,
+    calibration,
+    startCalibration,
+    abortCalibration,
+  } = useFleetSocket();
   const connected = status === "connected";
   const cameras = devices.filter((device) => device.capabilities.includes("camera"));
 
@@ -115,6 +129,67 @@ export default function RobotsPage() {
         <p className={styles.trackingLine} data-tracking={tracking} role="status">
           {tracking === "tracking" ? null : <TriangleAlert aria-hidden="true" />}測位: {TRACKING_LABEL[tracking]}
         </p>
+
+        {(() => {
+          const isCalibrating = calibration?.robotId === robot.robotId && calibration.step !== "done" && calibration.step !== "aborted";
+          const motion = robot.motion;
+          const isExpired = motion ? Date.now() - motion.calibratedAt > 24 * 3600 * 1000 : false;
+          const canCalibrate = online && robot.markerId !== null && tracking === "tracking" && (!calibration || calibration.step === "done" || calibration.step === "aborted");
+
+          return (
+            <div className={styles.calibrationBox}>
+              <div className={styles.calibrationHeader}>
+                <span>走行特性（校正）</span>
+                {isCalibrating ? (
+                  <button type="button" className={`${styles.calibrationBtn} ${styles.abortBtn}`} onClick={() => abortCalibration(robot.robotId)}>
+                    校正中止
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className={styles.calibrationBtn}
+                    disabled={!canCalibrate}
+                    title={!online ? "未接続" : robot.markerId === null ? "マーカー未設定" : tracking !== "tracking" ? "未測位" : "校正を開始します"}
+                    onClick={() => startCalibration(robot.robotId)}
+                  >
+                    {motion ? "再校正" : "校正開始"}
+                  </button>
+                )}
+              </div>
+
+              {isCalibrating && (
+                <div className={styles.calibrationProgress} role="status">
+                  <span>{calibration.message} ({calibration.progressPct}%)</span>
+                  <div className={styles.calibrationBar}>
+                    <div className={styles.calibrationFill} style={{ width: `${calibration.progressPct}%` }} />
+                  </div>
+                </div>
+              )}
+
+              {calibration?.robotId === robot.robotId && calibration.error && (
+                <small role="alert" style={{ color: "#ef4444" }}>{calibration.error}</small>
+              )}
+
+              {!isCalibrating && motion && (
+                <div className={styles.calibrationDetails}>
+                  <div>直進: {motion.speedMmS} mm/s (PWM {motion.minDrivePwm}〜{motion.maxDrivePwm})</div>
+                  <div>オフセット: {motion.yawOffsetDeg}°</div>
+                  <div>旋回(左): {motion.turnRateLeftDegS}°/s</div>
+                  <div>旋回(右): {motion.turnRateRightDegS}°/s</div>
+                  {isExpired && (
+                    <div style={{ gridColumn: "1 / -1", color: "#f59e0b", display: "flex", alignItems: "center", gap: 4 }}>
+                      <TriangleAlert size={14} /> 24時間以上経過したため再校正を推奨
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!isCalibrating && !motion && (
+                <small style={{ color: "var(--muted)" }}>未校正（固定規定値で動作中）</small>
+              )}
+            </div>
+          );
+        })()}
       </section>;
     })}
   </div>;

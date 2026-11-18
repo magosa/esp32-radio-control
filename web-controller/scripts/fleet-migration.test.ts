@@ -173,3 +173,38 @@ test("assignment errors preserve streams, unassignment stops them, and device id
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("robot motion calibration persists and validates bounds", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-motion-"));
+  try {
+    const filePath = path.join(directory, "fleet.json");
+    const store = new RobotStore(filePath);
+    store.register({ deviceId: "drive-1", name: "Robot 1", fw: "test", capabilities: ["drive"] });
+
+    const validMotion = {
+      calibratedAt: 1700000000000,
+      minDrivePwm: 80,
+      maxDrivePwm: 220,
+      speedMmS: 120.5,
+      minTurnPwm: 85,
+      maxTurnPwm: 200,
+      turnRateLeftDegS: 95.2,
+      turnRateRightDegS: 92.1,
+      yawOffsetDeg: -2.5,
+    };
+
+    store.setMotion("robot-drive-1", validMotion);
+    const reloaded = new RobotStore(filePath).getRobots()[0];
+    assert.deepEqual(reloaded.motion, validMotion);
+
+    // clear motion
+    store.setMotion("robot-drive-1", null);
+    assert.equal(new RobotStore(filePath).getRobots()[0].motion, null);
+
+    // validation rejects invalid bounds
+    assert.throws(() => store.setMotion("robot-drive-1", { ...validMotion, minDrivePwm: 300 }), /Invalid motion calibration/);
+    assert.throws(() => store.setMotion("robot-drive-1", { ...validMotion, speedMmS: -10 }), /Invalid motion calibration/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

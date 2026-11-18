@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type {
+  CalibrationProgressMessage,
   ClientInboundMessage,
   ClientOutboundMessage,
   DisplayLayoutMode,
@@ -65,6 +66,8 @@ function useFleetSocketConnection() {
   const [runState, setRunState] = useState<SceneRunStateMessage | null>(null);
   const [runOp, setRunOp] = useState<PendingOperation | null>(null);
   const [settingsOp, setSettingsOp] = useState<(PendingOperation & { robotId: string }) | null>(null);
+  const [calibration, setCalibration] = useState<CalibrationProgressMessage | null>(null);
+  const [calibrationOp, setCalibrationOp] = useState<PendingOperation | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const assignmentSequence = useRef(0);
 
@@ -121,6 +124,10 @@ function useFleetSocketConnection() {
           ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "操作に失敗しました" } : previous);
         setSettingsOp((previous) => previous?.requestId === msg.requestId
           ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "保存に失敗しました" } : previous);
+        setCalibrationOp((previous) => previous?.requestId === msg.requestId
+          ? { ...previous, pending: false, done: msg.ok, error: msg.ok ? undefined : msg.error || "校正の操作に失敗しました" } : previous);
+      } else if (msg.type === "calibrationProgress") {
+        setCalibration(msg);
       } else if (msg.type === "exhibitState") {
         setExhibit({ session: msg.session, offsetMs: msg.serverNow - Date.now() });
       } else if (msg.type === "sceneRunState") {
@@ -226,6 +233,18 @@ function useFleetSocketConnection() {
     setRunOp({ requestId, pending: sent, error: sent ? undefined : "ハブ未接続" });
   }, [send]);
 
+  const startCalibration = useCallback((robotId: string) => {
+    const requestId = `${Date.now()}-${++assignmentSequence.current}`;
+    const sent = send({ type: "startCalibration", requestId, robotId });
+    setCalibrationOp({ requestId, pending: sent, error: sent ? undefined : "ハブ未接続" });
+  }, [send]);
+
+  const abortCalibration = useCallback((robotId: string) => {
+    const requestId = `${Date.now()}-${++assignmentSequence.current}`;
+    const sent = send({ type: "abortCalibration", requestId, robotId });
+    setCalibrationOp({ requestId, pending: sent, error: sent ? undefined : "ハブ未接続" });
+  }, [send]);
+
   const sendCommand = useCallback(
     (targetDeviceIds: string[] | "all", cmd: DriveCommand, speedL: number, speedR: number) => {
       send({ type: "clientCommand", targetDeviceIds, cmd, speedL, speedR });
@@ -314,6 +333,10 @@ function useFleetSocketConnection() {
     sendRun,
     settingsOp,
     saveRobotSettings,
+    calibration,
+    calibrationOp,
+    startCalibration,
+    abortCalibration,
     routeStatus,
     availableRoutes,
     images,

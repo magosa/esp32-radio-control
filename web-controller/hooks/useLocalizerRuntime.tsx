@@ -27,7 +27,7 @@ export interface CameraOption {
 }
 
 const ROBOT_MARKER_SIZE_MM = 40;
-const FRAME_TIMEOUT_MS = 3000;
+const FRAME_TIMEOUT_MS = 10000;
 // Hubが別の測位を優先して拒否(close 1013)した場合の再試行回数。半開き接続の失効待ちを見込む。
 const MAX_REJECTIONS = 5;
 const CSV_ROW_LIMIT = 100000;
@@ -241,11 +241,19 @@ function useLocalizerRuntimeState() {
       };
       const next = () => {
         if (generation !== state.generation) return;
+        let delivered = false;
+        const trigger = (metadata?: VideoFrameCallbackMetadata) => {
+          if (delivered) return;
+          delivered = true;
+          onFrame(metadata);
+        };
         if (video.requestVideoFrameCallback) {
-          state.frameCallback = video.requestVideoFrameCallback((_now, metadata) => onFrame(metadata));
+          state.frameCallback = video.requestVideoFrameCallback((_now, metadata) => trigger(metadata));
+          // ウィンドウ背面化などでrequestVideoFrameCallbackが停止した場合のフォールバック
+          state.pollTimer = window.setTimeout(() => trigger(undefined), 120);
         } else {
           state.pollTimer = window.setTimeout(() => {
-            if (video.currentTime !== state.lastVideoTime) { state.lastVideoTime = video.currentTime; onFrame(undefined); } else next();
+            if (video.currentTime !== state.lastVideoTime) { state.lastVideoTime = video.currentTime; trigger(undefined); } else next();
           }, 50);
         }
       };

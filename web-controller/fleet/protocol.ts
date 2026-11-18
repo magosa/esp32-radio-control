@@ -14,6 +14,18 @@ export interface DeviceDescription {
   capabilities: DeviceCapability[];
 }
 
+export interface RobotMotionCalibration {
+  calibratedAt: number;
+  minDrivePwm: number;
+  maxDrivePwm: number;
+  speedMmS: number;
+  minTurnPwm: number;
+  maxTurnPwm: number;
+  turnRateLeftDegS: number;
+  turnRateRightDegS: number;
+  yawOffsetDeg: number;
+}
+
 export interface RobotDefinition {
   robotId: string;
   driveDeviceId: string;
@@ -26,6 +38,8 @@ export interface RobotDefinition {
   priority?: number | null;
   // 上から見た外形(mm, 60〜80)。表示と記録だけに使い、安全判定の半径は全台60mm固定。
   footprintMm?: { w: number; d: number };
+  // 実機校正済みの運動特性。未校正時はundefinedまたはnull。
+  motion?: RobotMotionCalibration | null;
 }
 
 // ロボット顔の表情ID (esp32_rc_car.ino の enum ExpressionId と同期させること)
@@ -242,6 +256,9 @@ export type ClientInboundMessage =
   | { type: "assignMarker"; requestId: string; robotId: string; markerId: number | null; markerHeightMm?: number }
   | { type: "setRobotSettings"; requestId: string; robotId: string; priority: number | null; footprintMm?: { w: number; d: number } }
   | { type: "setFieldConfig"; requestId: string; config: FieldConfig }
+  // 実機運動校正の開始・中止
+  | { type: "startCalibration"; requestId: string; robotId: string }
+  | { type: "abortCalibration"; requestId: string; robotId: string }
   // 展示画面へ配信するシーンと時刻の操作。command の検証は Hub が行う。
   | { type: "exhibitCommand"; requestId: string; command: unknown }
   // シーン実行の操作。command の検証は Hub が行う。
@@ -276,8 +293,20 @@ export interface OperationResultMessage {
   error?: string;
 }
 
+export type CalibrationStep = "idle" | "preparing" | "forward" | "turnLeft" | "turnRight" | "done" | "aborted";
+
+export interface CalibrationProgressMessage {
+  type: "calibrationProgress";
+  robotId: string;
+  step: CalibrationStep;
+  progressPct: number;
+  message: string;
+  calibration?: RobotMotionCalibration;
+  error?: string;
+}
+
 export type ClientOutboundMessage = FleetStateMessage | RouteStatusMessage | ImageFrameBroadcastMessage | OperationResultMessage | PoseStateMessage
-  | ExhibitStateMessage | SceneRunStateMessage;
+  | ExhibitStateMessage | SceneRunStateMessage | CalibrationProgressMessage;
 
 // 終了(完了・中止)したときだけ result が入る。
 export interface SceneRunStateMessage {

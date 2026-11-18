@@ -372,3 +372,65 @@
 .toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; border: 1px solid currentColor; border-radius: var(--card-radius); background: linear-gradient(var(--warning), var(--warning)), var(--surface-strong); color: var(--warning-ink); font-size: var(--text-body); box-shadow: var(--shadow); }
 .toast span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .toast .iconButton { flex-shrink: 0; color: inherit; }
+
+.calibrationBox {
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--surface-raised, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.calibrationHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+.calibrationDetails {
+  font-size: var(--text-meta);
+  color: var(--muted);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.calibrationProgress {
+  font-size: var(--text-meta);
+  color: var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.calibrationBar {
+  width: 100%;
+  height: 6px;
+  background: var(--border-subtle);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.calibrationFill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+.calibrationBtn {
+  min-height: 32px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border-subtle);
+  color: inherit;
+  font-size: var(--text-meta);
+  cursor: pointer;
+}
+.calibrationBtn:hover:not(:disabled) {
+  background: var(--select-active);
+  color: var(--accent);
+}
+.abortBtn {
+  color: #ef4444;
+}
+
