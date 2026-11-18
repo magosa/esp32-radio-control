@@ -113,7 +113,7 @@ async function runTest() {
         console.log(`   [アラート]: ${alerts.join(", ")}`);
       }
 
-      if (statusText.includes("完了") || statusText.includes("finished")) {
+      if ((statusText.includes("完了") && !statusText.includes("待ち")) || statusText.includes("finished")) {
         console.log("🎉 シーン走行が正常に完了しました！");
         break;
       }

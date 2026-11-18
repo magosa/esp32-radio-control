@@ -297,23 +297,28 @@ export class SceneRunner {
           drive = STOP;
         } else if (bot.spinStartedAt === null) {
           bot.spinStartedAt = now;
-        } else if (now - bot.spinStartedAt >= 75) {
-          // 1回の旋回パルスを出したら、停止して180msカメラ更新を待つ
-          bot.spinStartedAt = null;
-          bot.spinPauseUntil = now + 180;
-          drive = STOP;
+        } else {
+          // 角度誤差が大きい（> 45°）ときはスッと回すため 130ms、近くなったら 75ms パルス
+          const pulseDuration = (bot.yawErr !== null && bot.yawErr > 45) ? 130 : 75;
+          if (now - bot.spinStartedAt >= pulseDuration) {
+            // 1回の旋回パルスを出したら、停止して180msカメラ更新を待つ
+            bot.spinStartedAt = null;
+            bot.spinPauseUntil = now + 180;
+            drive = STOP;
+          }
         }
       } else if (isLinear) {
         bot.spinStartedAt = null;
-        // 初期位置合わせ中、または目標まで 120mm 以内のアプローチ時はパルス制御でオーバーシュートを防ぐ
-        const needsPulse = this.positioning.active || (bot.posErr !== null && bot.posErr <= 120);
+        // 目標まで 60mm 以内のアプローチ時はパルス制御でオーバーシュートを防ぐ
+        // 60mm より離れているときは通常の連続駆動で巡航する
+        const needsPulse = bot.posErr !== null && bot.posErr <= 60;
         if (needsPulse) {
           if (bot.drivePauseUntil !== null && now < bot.drivePauseUntil) {
             // 直前の直進後の慣性整定およびカメラフレーム更新待ち
             drive = STOP;
           } else if (bot.drivePulseStartedAt === null) {
             bot.drivePulseStartedAt = now;
-          } else if (now - bot.drivePulseStartedAt >= 90) {
+          } else if (now - bot.drivePulseStartedAt >= 100) {
             // 1回の直進パルスを出したら、停止して180msカメラ更新を待つ
             bot.drivePulseStartedAt = null;
             bot.drivePauseUntil = now + 180;
@@ -321,6 +326,7 @@ export class SceneRunner {
           }
         } else {
           bot.drivePulseStartedAt = null;
+          bot.drivePauseUntil = null;
         }
       } else {
         bot.spinStartedAt = null;

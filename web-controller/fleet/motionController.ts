@@ -65,8 +65,9 @@ export function control(pose: Pose, goal: Goal, calibration?: RobotMotionCalibra
   const bearing = normalizeYaw(Math.atan2(dy, dx) * 180 / Math.PI);
   const forwardBearingErr = shortestTurn(effectiveYaw, bearing);
 
-  // allowReverse が明示的、または小距離（150mm以内）で行き過ぎて背後にある場合は後進を活用
-  const reverseCandidate = goal.allowReverse ?? (posErrMm < 150);
+  // 後進は近距離（80mm以内）で行き過ぎて背後にある場合の戻り微調整に限定
+  // 長距離（>80mm）は目標方向へ回頭して前進する
+  const reverseCandidate = goal.allowReverse ? (posErrMm <= 80) : false;
   const useReverse = reverseCandidate && Math.abs(forwardBearingErr) > 90;
   const bearingErr = useReverse
     ? shortestTurn(effectiveYaw, normalizeYaw(bearing + 180))
