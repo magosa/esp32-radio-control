@@ -36,8 +36,9 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 function spin(err: number, limits: { minTurnPwm: number; maxTurnPwm: number; isCalibrated: boolean }): Drive {
   const basePwm = limits.isCalibrated ? limits.minTurnPwm : 60;
-  // 小さな誤差で急加速しないよう緩やかにトルクを付与
-  const pwm = Math.round(clamp(basePwm + Math.min(10, Math.abs(err) * 0.3), limits.minTurnPwm, limits.maxTurnPwm));
+  // 小さな誤差で急加速しないよう、35°以内は最小旋回PWMに抑え、大角度のみ緩やかにトルクを付与
+  const extra = Math.abs(err) <= 35 ? 0 : Math.min(10, (Math.abs(err) - 35) * 0.25);
+  const pwm = Math.round(clamp(basePwm + extra, limits.minTurnPwm, limits.maxTurnPwm));
   // Hardware-verified: on this vehicle chassis, 'c' turns counter-clockwise (left, err > 0) and 'd' turns clockwise (right, err < 0)
   return { cmd: err > 0 ? "c" : "d", speedL: pwm, speedR: pwm };
 }
@@ -67,13 +68,14 @@ export function control(pose: Pose, goal: Goal, calibration?: RobotMotionCalibra
 
   // 後進は近距離（80mm以内）で行き過ぎて背後にある場合の戻り微調整に限定
   // 長距離（>80mm）は目標方向へ回頭して前進する
-  const reverseCandidate = goal.allowReverse ? (posErrMm <= 80) : false;
+  const reverseCandidate = (goal.allowReverse ?? true) && posErrMm <= 80;
   const useReverse = reverseCandidate && Math.abs(forwardBearingErr) > 90;
   const bearingErr = useReverse
     ? shortestTurn(effectiveYaw, normalizeYaw(bearing + 180))
     : forwardBearingErr;
 
-  if (Math.abs(bearingErr) > TURN_FIRST_DEG) return { ...base, drive: spin(bearingErr, limits) };
+  const turnFirstDeg = isCalibrated ? 22 : TURN_FIRST_DEG;
+  if (Math.abs(bearingErr) > turnFirstDeg) return { ...base, drive: spin(bearingErr, limits) };
 
   const speed = Math.min(goal.speedMmS, Math.max(40, posErrMm * 1.5));
   const slowed = posErrMm < SLOW_RADIUS_MM ? speed : goal.speedMmS;
@@ -85,8 +87,9 @@ export function control(pose: Pose, goal: Goal, calibration?: RobotMotionCalibra
     pwm = clamp(Math.round(slowed / DRIVE_LIMITS.maxSpeedMmS * 255), DRIVE_LIMITS.minPwm, DRIVE_LIMITS.maxPwm);
   }
 
-  const steer = bearingErr * STEER_GAIN;
-  const minWheel = isCalibrated ? Math.round(limits.minPwm * 0.85) : 0;
+  const steerGain = isCalibrated ? 0.5 : STEER_GAIN;
+  const steer = bearingErr * steerGain;
+  const minWheel = isCalibrated ? Math.round(limits.minPwm * 0.94) : 0;
 
   if (useReverse) {
     const left = Math.round(clamp(pwm + steer, minWheel, limits.maxPwm));

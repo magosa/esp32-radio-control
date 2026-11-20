@@ -69,7 +69,10 @@ function useLocalizerRuntimeState() {
   const [isLocalHost, setIsLocalHost] = useState(false);
 
   const configRef = useRef({ robots, field: poseState?.field });
-  configRef.current = { robots, field: poseState?.field };
+  configRef.current = {
+    robots: robots.length ? robots : configRef.current.robots,
+    field: poseState?.field ?? configRef.current.field,
+  };
   const selectedRef = useRef(selectedCamera);
   selectedRef.current = selectedCamera;
   const videoRef = useRef<HTMLVideoElement | null>(null);

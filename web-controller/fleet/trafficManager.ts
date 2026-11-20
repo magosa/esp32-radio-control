@@ -108,7 +108,7 @@ export function decide(a: Mover, b: Mover, aCanYield: boolean, bCanYield: boolea
 
 // The priority robot has gone by once it is clear of the yielder and past it along its heading, or has stopped.
 export function hasPassed(priority: Mover, yielder: Mover): boolean {
-  if (!priority.goal) return distance(priority, yielder) >= CONFLICT_MM;
+  if (!priority.goal) return distance(priority, yielder) >= SAFETY_RADIUS_MM * 2;
   const ahead = (yielder.x - priority.x) * (priority.goal.x - priority.x) + (yielder.y - priority.y) * (priority.goal.y - priority.y);
   return ahead < 0 && distance(priority, yielder) >= PASSED_MM;
 }

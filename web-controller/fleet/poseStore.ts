@@ -4,8 +4,8 @@ import type {
   PoseStateMessage, RobotDefinition, RobotPoseState,
 } from "./protocol";
 
-// 最新フレームがこの時間届かなければstale(座標を使わない)。周期の実測後に再設定する暫定値。
-export const POSE_STALE_MS = 500;
+// 最新フレームがこの時間届かなければstale(座標を使わない)。ブラウザ背面時のフレーム間隔を考慮し1500msに設定。
+export const POSE_STALE_MS = 1500;
 // 外れ値ゲート: 直前の有効姿勢から「最大速度×経過時間＋余裕」を超える移動を棄却する。
 export const OUTLIER_MAX_SPEED_MMPS = 500;
 const OUTLIER_MARGIN_MM = 30;
@@ -146,7 +146,7 @@ export class PoseStore {
 
   private localizerState(frameAgeMs: number | null): LocalizerState {
     const span = this.frameTimes.length > 1 ? this.frameTimes[this.frameTimes.length - 1] - this.frameTimes[0] : 0;
-    const active = frameAgeMs !== null && frameAgeMs <= 1000 && span > 0;
+    const active = frameAgeMs !== null && frameAgeMs <= POSE_STALE_MS && span > 0;
     return { connected: this.connected, running: this.running, camera: this.camera,
       referenceCount: this.referenceCount, referenceIds: this.referenceIds, extrinsicsOk: this.extrinsicsOk, frameAgeMs,
       fps: active ? (this.frameTimes.length - 1) / (span / 1000) : null,

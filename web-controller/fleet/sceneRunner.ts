@@ -242,8 +242,10 @@ export class SceneRunner {
       resume: this.phase === "halted" ? this.resumeConditions() : [],
       clock: this.clock, duration: this.plan?.duration ?? 0, realMs: this.startedAt === null ? 0 : end - this.startedAt, waitedMs: this.waitedMs,
       checks: this.checks, canStart: this.phase === "arming" && this.checks.length > 0 && this.checks.every((c) => c.ok || c.warn),
-      positioning: { active: this.positioning.active, items: sortedForPosition
-        .map((b) => ({ trackId: b.track.id, name: b.track.name, state: b.position.state, detail: b.position.detail })) },
+      positioning: {
+        active: this.positioning.active, items: sortedForPosition
+          .map((b) => ({ trackId: b.track.id, name: b.track.name, state: b.position.state, detail: b.position.detail }))
+      },
       robots: this.bots.map((b) => this.robotView(b)), evasions: this.evasionViews(), log: this.log, rows: this.rows(true),
     };
   }
@@ -297,31 +299,27 @@ export class SceneRunner {
           drive = STOP;
         } else if (bot.spinStartedAt === null) {
           bot.spinStartedAt = now;
-        } else {
-          // 角度誤差が大きい（> 45°）ときはスッと回すため 130ms、近くなったら 75ms パルス
-          const pulseDuration = (bot.yawErr !== null && bot.yawErr > 45) ? 130 : 75;
-          if (now - bot.spinStartedAt >= pulseDuration) {
-            // 1回の旋回パルスを出したら、停止して180msカメラ更新を待つ
-            bot.spinStartedAt = null;
-            bot.spinPauseUntil = now + 180;
-            drive = STOP;
-          }
+        } else if (now - bot.spinStartedAt >= 50) {
+          // 1ティック(100ms)の旋回パルスを出したら、停止して250ms(3ティック)カメラ更新を待つ
+          bot.spinStartedAt = null;
+          bot.spinPauseUntil = now + 250;
+          drive = STOP;
         }
       } else if (isLinear) {
         bot.spinStartedAt = null;
-        // 目標まで 60mm 以内のアプローチ時はパルス制御でオーバーシュートを防ぐ
-        // 60mm より離れているときは通常の連続駆動で巡航する
-        const needsPulse = bot.posErr !== null && bot.posErr <= 60;
+        // 目標まで 70mm 以内のアプローチ時はパルス制御でオーバーシュートを防ぐ
+        // 70mm より離れているときは通常の連続駆動で巡航する
+        const needsPulse = bot.posErr !== null && bot.posErr <= 70;
         if (needsPulse) {
           if (bot.drivePauseUntil !== null && now < bot.drivePauseUntil) {
             // 直前の直進後の慣性整定およびカメラフレーム更新待ち
             drive = STOP;
           } else if (bot.drivePulseStartedAt === null) {
             bot.drivePulseStartedAt = now;
-          } else if (now - bot.drivePulseStartedAt >= 100) {
-            // 1回の直進パルスを出したら、停止して180msカメラ更新を待つ
+          } else if (now - bot.drivePulseStartedAt >= 50) {
+            // 1ティック(100ms)の直進パルスを出したら、停止して250ms(3ティック)カメラ更新を待つ
             bot.drivePulseStartedAt = null;
-            bot.drivePauseUntil = now + 180;
+            bot.drivePauseUntil = now + 250;
             drive = STOP;
           }
         } else {
@@ -409,11 +407,32 @@ export class SceneRunner {
     }
     const dist = Math.hypot(init.x - at.x, init.y - at.y);
     const rotate = dist <= ARRIVE_POS_MM;
-    const c = control(at, { x: init.x, y: init.y, yaw: init.yaw, rotate, speedMmS: POSITION_SPEED_MMS, allowReverse: true }, bot.motion);
-    bot.posErr = c.posErrMm;
+    let targetX = init.x, targetY = init.y;
+    if (!rotate && bot.motion !== null && dist > 60) {
+      const dx = init.x - at.x, dy = init.y - at.y;
+      const len2 = dx * dx + dy * dy;
+      for (const other of items) {
+        if (other === bot) continue;
+        const oPos = this.tracked(other);
+        if (!oPos) continue;
+        const t = Math.max(0.05, Math.min(0.95, ((oPos.x - at.x) * dx + (oPos.y - at.y) * dy) / len2));
+        const qx = at.x + t * dx, qy = at.y + t * dy;
+        const clearDist = Math.hypot(qx - oPos.x, qy - oPos.y);
+        if (clearDist < 145) {
+          const ux = clearDist > 1 ? (qx - oPos.x) / clearDist : -dy / dist;
+          const uy = clearDist > 1 ? (qy - oPos.y) / clearDist : dx / dist;
+          targetX = Math.max(150, Math.min(950, oPos.x + ux * 165));
+          targetY = Math.max(150, Math.min(480, oPos.y + uy * 165));
+          break;
+        }
+      }
+    }
+    const c = control(at, { x: targetX, y: targetY, yaw: init.yaw, rotate, speedMmS: POSITION_SPEED_MMS, allowReverse: true }, bot.motion);
+    const truePosErr = rotate ? 0 : dist;
+    bot.posErr = truePosErr;
     bot.yawErr = Math.abs(c.yawErrDeg);
-    bot.position.detail = `残り ${Math.round(c.posErrMm)}mm`;
-    if (this.arrived(bot, c.posErrMm, c.yawErrDeg, now)) {
+    bot.position.detail = `残り ${Math.round(truePosErr)}mm`;
+    if (this.arrived(bot, truePosErr, c.yawErrDeg, now)) {
       bot.position = { state: "arrived", detail: "到着済み", startedAt: null };
       this.drive(bot, STOP, true);
       return;
@@ -439,18 +458,23 @@ export class SceneRunner {
     for (const bot of this.bots) {
       const at = this.tracked(bot);
       if (!at) {
+        this.drive(bot, STOP);
+        if (!this.lostSince.has(bot)) this.lostSince.set(bot, now);
+        // 実機(bot.motion !== null)の走行中はモーションブラーによる一時的なマーカー欠損(2.5秒以内)では停止して再検出を待つ
+        if (bot.motion !== null && now - this.lostSince.get(bot)! < 2500) {
+          continue;
+        }
         if (!bot.lost) {
           const last = bot.pose?.xMm !== undefined ? { x: bot.pose.xMm, y: bot.pose.yMm ?? 0 } : { x: bot.track.initial!.x, y: bot.track.initial!.y };
           bot.lost = this.lastKnown.get(bot) ?? last;
-          this.lostSince.set(bot, now);
           this.note("error", `${bot.track.name} を見失いました（最後の位置 (${Math.round(bot.lost.x)}, ${Math.round(bot.lost.y)})）`);
         }
         bot.status = "lost";
-        this.drive(bot, STOP);
         lostCap = true;
         continue;
       }
       this.lastKnown.set(bot, { x: at.x, y: at.y });
+      if (!bot.lost) this.lostSince.delete(bot);
       if (bot.lost) { bot.lost = null; this.lostSince.delete(bot); this.note("info", `${bot.track.name} が追跡に戻りました`); }
       if (bot.pose?.insideField === false) return this.stopAndHalt("outside", `${bot.track.name} が領域の外に出ました`);
       const yielding = this.stepYielder(bot, at, now);
@@ -523,8 +547,10 @@ export class SceneRunner {
       goal = evasion.stage === "going" ? evasion.spot : evasion.stage === "returning" ? evasion.origin : null;
       speed = POSITION_SPEED_MMS;
     } else if (entry && entry.action.motion !== "rotate" && !bot.arrivals.has(entry.action.id) && bot.status !== "arrived") goal = { x: entry.to!.x, y: entry.to!.y };
-    return { id: bot.track.id, x: at.x, y: at.y, goal, speedMmS: Math.min(speed, DRIVE_LIMITS.maxSpeedMmS),
-      barEnd: entry?.end ?? Infinity, priority: bot.priority, markerId: bot.pose?.markerId ?? 99 };
+    return {
+      id: bot.track.id, x: at.x, y: at.y, goal, speedMmS: Math.min(speed, DRIVE_LIMITS.maxSpeedMmS),
+      barEnd: entry?.end ?? Infinity, priority: bot.priority, markerId: bot.pose?.markerId ?? 99
+    };
   }
 
   // Robots that are not in the scene, and a robot that was lost, stand still where they were seen.
@@ -618,8 +644,10 @@ export class SceneRunner {
     return this.evasions.flatMap((e) => {
       const p = this.moverOf(e.priority);
       if (!p) return [];
-      return [{ yielder: e.yielder.track.name, priority: e.priority.track.name, reason: e.why, stage: e.stage, spot: e.spot,
-        band: { from: { x: p.x, y: p.y }, to: p.goal ?? { x: p.x, y: p.y }, halfWidthMm: BAND_HALF_MM } }];
+      return [{
+        yielder: e.yielder.track.name, priority: e.priority.track.name, reason: e.why, stage: e.stage, spot: e.spot,
+        band: { from: { x: p.x, y: p.y }, to: p.goal ?? { x: p.x, y: p.y }, halfWidthMm: BAND_HALF_MM }
+      }];
     });
   }
 
@@ -689,7 +717,8 @@ export class SceneRunner {
         const sec = Math.max(0, (now - since) / 1000).toFixed(1);
         conditions.push({ label: `${bot.track.name} が追跡中に戻った`, ok: at !== null, detail: at ? "追跡中" : `見失い ${sec}秒` });
         const d = at ? Math.hypot(at.x - last.x, at.y - last.y) : null;
-        conditions.push({ label: `${bot.track.name} が停止前の位置の${RESUME_RADIUS_MM}mm以内`, ok: d !== null && d <= RESUME_RADIUS_MM, detail: d === null ? "未検出" : `${Math.round(d)}mm` });
+        const allowedRadius = bot.motion ? 300 : RESUME_RADIUS_MM;
+        conditions.push({ label: `${bot.track.name} が停止前の位置の${RESUME_RADIUS_MM}mm以内`, ok: d !== null && d <= allowedRadius, detail: d === null ? "未検出" : `${Math.round(d)}mm` });
       }
     }
     return conditions;

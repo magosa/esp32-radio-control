@@ -79,11 +79,20 @@ export class FleetHub {
     this.sweepTimer = setInterval(() => {
       const timedOutSockets = this.registry.sweepOffline();
       if (timedOutSockets.length > 0) {
+        console.log(`[fleet-hub] sweepOffline timed out ${timedOutSockets.length} socket(s)`);
         if (this.registry.getAllStates().some((state) => state.status === "offline" && state.mode === "auto")) {
           this.routeEngine.stop();
         }
         this.broadcastFleetState();
         timedOutSockets.forEach((ws) => ws.terminate());
+      }
+      for (const dev of this.registry.getAllDeviceStates()) {
+        if (dev.status === "online") {
+          const ws = this.registry.getWs(dev.deviceId);
+          if (ws && ws.readyState === ws.OPEN && typeof (ws as any).ping === "function") {
+            try { (ws as any).ping(); } catch {}
+          }
+        }
       }
       this.streamingDeviceIds.forEach((deviceId) => {
         const device = this.registry.getDeviceState(deviceId);
@@ -128,6 +137,13 @@ export class FleetHub {
 
   private handleDeviceConnection(ws: WebSocket): void {
     let deviceId: string | undefined;
+    console.log("[fleet-hub] /ws/device socket connected");
+
+    if (typeof (ws as any).on === "function") {
+      ws.on("pong", () => {
+        if (deviceId) this.registry.touch(deviceId);
+      });
+    }
 
     ws.on("message", (raw) => {
       const msg = this.parseJson<DeviceInboundMessage>(raw.toString());
@@ -139,13 +155,35 @@ export class FleetHub {
         if (deviceId || !isDeviceDescription(description)) return ws.close(1008, "Invalid hello");
         try {
           this.store.register(description);
-        } catch {
+        } catch (err) {
+          console.error("[fleet-hub] Device registration failed:", err);
           return ws.close(1011, "Device registration failed");
         }
         deviceId = description.deviceId;
+        console.log(`[fleet-hub] device hello: ${deviceId} (${description.name}) fw=${description.fw}`);
         this.registry.registerHello(deviceId, description.name, ws, description.capabilities, description.fw);
         this.broadcastFleetState();
+      } else if (!deviceId && (msg.type === "telemetry" || msg.type === "heartbeat") && typeof msg.deviceId === "string") {
+        const known = this.store.getDevices().find((d) => d.deviceId === msg.deviceId);
+        if (!known) {
+          ws.close(1008, "Device identity mismatch");
+          return;
+        }
+        deviceId = known.deviceId;
+        console.log(`[fleet-hub] device auto-recovered from ${msg.type}: ${deviceId}`);
+        this.registry.registerHello(deviceId, known.name, ws, known.capabilities, known.fw);
+        if (msg.type === "telemetry" && this.registry.hasCapability(deviceId, "drive")) {
+          this.registry.updateTelemetry(msg.deviceId, {
+            cmd: msg.cmd,
+            speedL: msg.speedL,
+            speedR: msg.speedR,
+            heap: msg.heap,
+            uptimeMs: msg.uptimeMs,
+          });
+        }
+        this.broadcastFleetState();
       } else if (!deviceId || msg.deviceId !== deviceId || this.registry.getWs(deviceId) !== ws) {
+        console.warn(`[fleet-hub] Device identity mismatch: expected=${deviceId} got=${(msg as any).deviceId}`);
         ws.close(1008, "Device identity mismatch");
       } else if (msg.type === "heartbeat") {
         this.registry.touch(deviceId);
@@ -170,7 +208,8 @@ export class FleetHub {
       }
     });
 
-    ws.on("close", () => {
+    ws.on("close", (code, reason) => {
+      console.log(`[fleet-hub] /ws/device closed: deviceId=${deviceId ?? "unknown"} code=${code} reason=${reason?.toString() ?? ""}`);
       if (deviceId && this.registry.getWs(deviceId) !== ws) return;
       this.registry.markDisconnected(ws);
       if (deviceId) {
