@@ -134,9 +134,14 @@ export class RobotStore {
       if (robot.motion !== undefined && robot.motion !== null) {
         const m = robot.motion;
         const numbersOk = [m.calibratedAt, m.minDrivePwm, m.maxDrivePwm, m.speedMmS, m.minTurnPwm, m.maxTurnPwm, m.turnRateLeftDegS, m.turnRateRightDegS, m.yawOffsetDeg].every((v) => typeof v === "number" && Number.isFinite(v));
-        if (!numbersOk || m.minDrivePwm < 0 || m.maxDrivePwm > 255 || m.minDrivePwm > m.maxDrivePwm
+        const optOk = [m.leftRightTrimRatio, m.brakingDistanceMm, m.creepPulseMs, m.creepStepMm].every((v) => v === undefined || (typeof v === "number" && Number.isFinite(v)));
+        if (!numbersOk || !optOk || m.minDrivePwm < 0 || m.maxDrivePwm > 255 || m.minDrivePwm > m.maxDrivePwm
           || m.minTurnPwm < 0 || m.maxTurnPwm > 255 || m.minTurnPwm > m.maxTurnPwm
-          || m.speedMmS < 0 || m.turnRateLeftDegS < 0 || m.turnRateRightDegS < 0) {
+          || m.speedMmS < 0 || m.turnRateLeftDegS < 0 || m.turnRateRightDegS < 0
+          || (m.leftRightTrimRatio !== undefined && Math.abs(m.leftRightTrimRatio) > 0.5)
+          || (m.brakingDistanceMm !== undefined && (m.brakingDistanceMm < 0 || m.brakingDistanceMm > 300))
+          || (m.creepPulseMs !== undefined && (m.creepPulseMs < 10 || m.creepPulseMs > 500))
+          || (m.creepStepMm !== undefined && (m.creepStepMm < 0 || m.creepStepMm > 200))) {
           throw new Error("Invalid motion calibration");
         }
       }

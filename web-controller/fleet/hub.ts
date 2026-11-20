@@ -68,7 +68,7 @@ export class FleetHub {
     this.registry = new VehicleRegistry(store.getDevices());
     this.runner = new SceneRunner({
       now: () => Date.now(),
-      sendDrive: (deviceId, drive) => this.sendDriveToDevice(deviceId, drive.cmd, drive.speedL, drive.speedR),
+      sendDrive: (deviceId, drive) => this.sendDriveToDevice(deviceId, drive.cmd, drive.speedL, drive.speedR, drive.durationMs),
       onClock: (position, running) => this.followRunClock(position, running),
     });
     this.routeEngine = new RouteEngine({
@@ -521,11 +521,11 @@ export class FleetHub {
     this.sendToDevice(deviceId, { type: "setDisplayLayout", layout }, "display");
   }
 
-  private sendDriveToDevice(deviceId: string, cmd: DriveCommand, speedL: number, speedR: number): void {
+  private sendDriveToDevice(deviceId: string, cmd: DriveCommand, speedL: number, speedR: number, durationMs?: number): void {
     if (cmd !== "e") {
-      console.log(`[drive] -> ${deviceId} cmd=${cmd} L=${speedL} R=${speedR}`);
+      console.log(`[drive] -> ${deviceId} cmd=${cmd} L=${speedL} R=${speedR}${durationMs ? ` dur=${durationMs}ms` : ""}`);
     }
-    this.sendToDevice(deviceId, { type: "drive", cmd, speedL, speedR }, "drive");
+    this.sendToDevice(deviceId, { type: "drive", cmd, speedL, speedR, ...(durationMs !== undefined ? { durationMs } : {}) }, "drive");
   }
 
   private sendToDevice(deviceId: string, message: object, capability: import("./protocol").DeviceCapability): void {

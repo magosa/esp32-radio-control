@@ -24,6 +24,14 @@ export interface RobotMotionCalibration {
   turnRateLeftDegS: number;
   turnRateRightDegS: number;
   yawOffsetDeg: number;
+  // 直進時の左右モーター出力補正比（正で右車輪を強化して左曲がりを防ぐ。例: +0.04 は右+4%）
+  leftRightTrimRatio?: number;
+  // 停止指示後の惰走・制動距離 (mm)
+  brakingDistanceMm?: number;
+  // クリープ最小パルス時間 (ms)
+  creepPulseMs?: number;
+  // クリープ1パルスあたりの前進距離 (mm)
+  creepStepMm?: number;
 }
 
 export interface RobotDefinition {
@@ -105,6 +113,8 @@ export interface DriveMessage {
   cmd: DriveCommand;
   speedL: number;
   speedR: number;
+  // 指定時間が経過したらESP32側で自律的にブレーキ停止する安全タイマー(ms)
+  durationMs?: number;
 }
 
 export interface SetNameMessage {

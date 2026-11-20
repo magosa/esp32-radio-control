@@ -49,8 +49,9 @@ app.prepare().then(() => {
       socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       socket.destroy();
     } else if (pathname === "/ws/device" || pathname === "/ws/client" || pathname === "/ws/localizer") {
-      socket.setNoDelay(true);
-      socket.setKeepAlive(true, 3000);
+      const tcpSocket = socket as import("net").Socket;
+      tcpSocket.setNoDelay?.(true);
+      tcpSocket.setKeepAlive?.(true, 3000);
       if (pathname === "/ws/device") {
         console.log(`[server] upgrade /ws/device from ${req.socket.remoteAddress}:${req.socket.remotePort}`);
       }

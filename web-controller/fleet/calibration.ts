@@ -97,11 +97,13 @@ export class CalibrationRunner {
         throw new Error(msg);
       }
 
-      // 2. Forward step: minDrivePwm, speedMmS, yawOffsetDeg
-      emit("forward", 25, "前進走行と速度・ヨーオフセットを測定中…");
+      // 2. Forward step: minDrivePwm, speedMmS, yawOffsetDeg, leftRightTrimRatio, brakingDistanceMm, creepStepMm
+      emit("forward", 25, "前進走行・最小クリープ量・左右ドリフト・制動距離を測定中…");
       
-      // 動き出しPWMの探索
+      // 動き出しPWM（およびクリープ1ステップ移動量）の探索
       let minDrivePwm = 120;
+      let creepStepMm = 12;
+      const creepPulseMs = 70;
       let moved = false;
       for (const pwm of [90, 110, 130, 150, 170]) {
         checkAborted();
@@ -114,13 +116,14 @@ export class CalibrationRunner {
         const dist = Math.hypot(after.x - before.x, after.y - before.y);
         if (dist >= 5) {
           minDrivePwm = pwm;
+          creepStepMm = Math.round(Math.max(4, Math.min(40, dist * (creepPulseMs / 250))) * 10) / 10;
           moved = true;
           break;
         }
       }
       if (!moved) minDrivePwm = 130;
 
-      // 基準PWMでの前進測定
+      // 基準PWMでの前進測定（および停止コマンド直後〜完全整定までの制動距離測定）
       const fwdPwm = 190;
       const fwdDurationMs = 700;
       const fwdBefore = getValidPose();
@@ -128,20 +131,26 @@ export class CalibrationRunner {
       this.deps.sendDrive(deviceId, "a", fwdPwm, fwdPwm);
       await this.deps.sleep(fwdDurationMs);
       stop();
+      const atStopCmd = getValidPose();
       await this.deps.sleep(300);
       const fwdAfter = getValidPose();
       const fwdActualDt = Math.max(0.1, (this.deps.now() - fwdStart) / 1000);
       const dx = fwdAfter.x - fwdBefore.x;
       const dy = fwdAfter.y - fwdBefore.y;
       const fwdDist = Math.hypot(dx, dy);
+      const brakingDistanceMm = Math.round(Math.max(0, Math.min(150, Math.hypot(fwdAfter.x - atStopCmd.x, fwdAfter.y - atStopCmd.y))) * 10) / 10;
 
       // 直進速度 (mm/s)
       const speedMmS = Math.round(Math.max(10, (fwdDist / fwdActualDt) * 10)) / 10;
-      // 進行ベクトルとマーカーyawの差（ヨーオフセット）
+      // 進行ベクトルとマーカーyawの差（ヨーオフセット）および直進中のヨー角変化（左右モーター差によるドリフト）
       let yawOffsetDeg = 0;
+      let leftRightTrimRatio = 0;
       if (fwdDist >= 15) {
         const moveBearing = normalizeYaw(Math.atan2(dy, dx) * (180 / Math.PI));
         yawOffsetDeg = Math.round(shortestTurn(moveBearing, fwdBefore.yaw) * 10) / 10;
+        // 前進中の機首向きの変化量 (正=反時計回り=左へ曲がった -> 左モーターを弱める/右を強める負のトリム、または正の右ブースト)
+        const yawDriftDeg = shortestTurn(fwdBefore.yaw, fwdAfter.yaw);
+        leftRightTrimRatio = Math.round(Math.max(-0.25, Math.min(0.25, -yawDriftDeg * 0.004)) * 1000) / 1000;
       }
 
       // 3. Left Turn: minTurnPwm, turnRateLeftDegS
@@ -203,6 +212,10 @@ export class CalibrationRunner {
         turnRateLeftDegS,
         turnRateRightDegS,
         yawOffsetDeg,
+        leftRightTrimRatio,
+        brakingDistanceMm,
+        creepPulseMs,
+        creepStepMm,
       };
 
       emit("done", 100, "校正完了", result);
