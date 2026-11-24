@@ -2,13 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Download, FilePlus2, Upload } from "lucide-react";
-import { MAX_FILE_BYTES, TOO_LARGE_MESSAGE, fileNameFor, parseSceneFile, replaceProject } from "@/scene/sceneFile";
+import { MapBody } from "@/components/mapLayers";
+import { VIEW_BOX } from "@/scene/mapView";
+import { MAX_MAPS } from "@/scene/mapTabsLogic";
+import { MAX_FILE_BYTES, TOO_LARGE_MESSAGE, appendSceneMaps, fileNameFor, parseSceneFile, replaceProject } from "@/scene/sceneFile";
 import { createProject, projectForSave } from "@/scene/model";
 import type { Commit } from "@/scene/sceneSession";
 import type { SceneProject } from "@/scene/types";
 import consoleStyles from "../console.module.css";
 import type { Confirm } from "./editorTypes";
 import styles from "./dialog.module.css";
+import mapStyles from "./mapTabs.module.css";
 
 export interface FileActionsProps {
   project: SceneProject;
@@ -20,7 +24,15 @@ export interface FileActionsProps {
 export function FileActions({ project, commit, confirm, saveSignal = 0 }: FileActionsProps) {
   const input = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [importProject, setImportProject] = useState<SceneProject | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [importError, setImportError] = useState<string | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
   const lastSignal = useRef(saveSignal);
+
+  useEffect(() => {
+    if (importProject && dialog.current && !dialog.current.open) dialog.current.showModal();
+  }, [importProject]);
 
   const save = useCallback(() => {
     try {
@@ -72,7 +84,23 @@ export function FileActions({ project, commit, confirm, saveSignal = 0 }: FileAc
     }
     const parsed = parseSceneFile(text);
     if (!parsed.ok) { setError(parsed.error); return; }
-    setError(commit((draft) => replaceProject(draft, parsed.project), "JSON読込"));
+    setError(null);
+    setSelected([]);
+    setImportError(null);
+    setImportProject(parsed.project);
+  };
+
+  const closeImport = () => {
+    dialog.current?.close();
+    setImportProject(null);
+  };
+
+  const addMaps = () => {
+    if (!importProject) return;
+    const maps = importProject.maps.filter((map) => selected.includes(map.id));
+    const failure = commit((draft) => appendSceneMaps(draft, maps), "JSONからマップを追加");
+    if (failure) { setImportError(failure); return; }
+    closeImport();
   };
 
   return <>
@@ -87,5 +115,33 @@ export function FileActions({ project, commit, confirm, saveSignal = 0 }: FileAc
     </button>
     <input ref={input} type="file" accept=".json,application/json" hidden onChange={open} />
     {error && <p className={styles.fileError} role="alert">{error}</p>}
+    {importProject && <dialog ref={dialog} className={`${mapStyles.dialog} ${mapStyles.wideDialog}`}
+      aria-labelledby="import-maps-title" onCancel={(event) => { event.preventDefault(); closeImport(); }}>
+      <h2 id="import-maps-title">JSONからマップを追加</h2>
+      <p>追加するマップを選択してください。シーケンスも一緒に追加され、既存のマップは変更されません。</p>
+      <p>マップは最大{MAX_MAPS}枚です（現在 {project.maps.length}枚、選択中 {selected.length}枚）。同名のマップも別のマップとして追加します。</p>
+      <fieldset className={mapStyles.choices}>
+        <legend>追加するマップ</legend>
+        {importProject.maps.map((map) => <label key={map.id} className={mapStyles.choice} data-selected={selected.includes(map.id)}>
+          <input type="checkbox" checked={selected.includes(map.id)} onChange={(event) => {
+            const checked = event.target.checked;
+            setSelected((previous) => checked ? [...previous, map.id] : previous.filter((id) => id !== map.id));
+            setImportError(null);
+          }} />
+          <svg className={mapStyles.thumbnail} viewBox={VIEW_BOX} aria-hidden="true" data-map-preview={map.id}>
+            <MapBody map={{ ...map, presentation: undefined }} scene={{ actors: [], displays: [], events: [], doors: [] }}
+              time={0} scale={0.25} showPaths={false} showRoomLabels />
+          </svg>
+          <span>{map.name}<br /><small>行 {map.tracks.length}件・動作 {map.tracks.reduce((count, track) => count + track.actions.length, 0)}件</small></span>
+        </label>)}
+      </fieldset>
+      {selected.length + project.maps.length > MAX_MAPS && <p className={mapStyles.error} role="alert">追加後のマップ数が上限を超えます。選択を減らしてください。</p>}
+      {importError && <p className={mapStyles.error} role="alert">{importError}</p>}
+      <div className={mapStyles.actions}>
+        <button type="button" className={consoleStyles.secondary} onClick={closeImport}>キャンセル</button>
+        <button type="button" className={consoleStyles.primary} onClick={addMaps}
+          disabled={selected.length === 0 || selected.length + project.maps.length > MAX_MAPS}>選択したマップを追加</button>
+      </div>
+    </dialog>}
   </>;
 }
