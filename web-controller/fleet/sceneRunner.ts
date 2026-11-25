@@ -92,6 +92,8 @@ interface Bot {
   dynamicTrimRatio: number;
   // 走行中のリアルタイム自動補正で逐次学習する実速度スケール（電池消耗時は <1.0）
   dynamicSpeedScale: number;
+  // 直前のパルスで静止摩擦に負けて動かなかった場合の自動出力ブースト (PWM, 0〜35)
+  stallBoostPwm: number;
   // 直前の駆動パルス開始時の姿勢と予測移動量（整定完了後に実移動量と比較して自動学習する）
   pendingObservation: PulseObservation | null;
 }
@@ -153,7 +155,7 @@ export class SceneRunner {
     this.bots = map.tracks.filter((t) => t.kind === "robot" && !t.muted && t.initial).map((track) => ({
       track, arrivals: new Map(), waited: new Map(), within: null, stuck: null, lost: null, lastDrive: null, lastSentAt: 0,
       spinStartedAt: null, spinPauseUntil: null, drivePulseStartedAt: null, drivePauseUntil: null, positionLostAt: null, aligningYaw: false,
-      consecutiveLinearSteps: 0, dynamicTrimRatio: 0, dynamicSpeedScale: 1.0, pendingObservation: null,
+      consecutiveLinearSteps: 0, dynamicTrimRatio: 0, dynamicSpeedScale: 1.0, stallBoostPwm: 0, pendingObservation: null,
       position: { state: "waiting", detail: "", startedAt: null }, status: "idle", posErr: null, yawErr: null, pose: null, priority: null, goalEntry: null, motion: null,
       moves: this.plan!.entries.filter((e) => e.track === track && e.action.type === "move" && !e.blocked && e.outcome === "success" && e.start !== null)
         .sort((a, b) => a.start! - b.start!),
@@ -308,6 +310,7 @@ export class SceneRunner {
       consecutiveLinearSteps: bot.consecutiveLinearSteps,
       dynamicTrimRatio: bot.dynamicTrimRatio,
       dynamicSpeedScale: bot.dynamicSpeedScale,
+      stallBoostPwm: bot.stallBoostPwm,
       cameraLatencyMs: latency,
       field: field ? { widthMm: field.widthMm, heightMm: field.heightMm } : undefined,
     };
@@ -319,8 +322,23 @@ export class SceneRunner {
     if (!obs || !bot.motion) return;
     bot.pendingObservation = null;
 
+    if (obs.cmd === "c" || obs.cmd === "d") {
+      const turnedDeg = Math.abs(shortestTurn(obs.startYaw, at.yaw));
+      if (turnedDeg < 2.0) {
+        bot.stallBoostPwm = Math.min(35, bot.stallBoostPwm + 10);
+      } else {
+        bot.stallBoostPwm = Math.max(0, bot.stallBoostPwm - 4);
+      }
+      return;
+    }
+
     if (obs.cmd === "a" || obs.cmd === "b") {
       const actualMm = Math.hypot(at.x - obs.startX, at.y - obs.startY);
+      if (actualMm < 2.5) {
+        bot.stallBoostPwm = Math.min(35, bot.stallBoostPwm + 10);
+      } else {
+        bot.stallBoostPwm = Math.max(0, bot.stallBoostPwm - 4);
+      }
       if (obs.expectedMm >= 10) {
         const ratio = Math.max(0.5, Math.min(1.6, actualMm / obs.expectedMm));
         // 指数移動平均(EMA)で電池消耗や路面摩擦に伴う実速度スケールを更新
@@ -350,16 +368,29 @@ export class SceneRunner {
     if (isCalibrated) {
       const at = this.tracked(bot);
       const latencyWait = Math.min(200, Math.max(80, this.input?.poses.localizer.latencyMs ?? 100));
-      const settleMs = 260 + latencyWait; // 慣性停止＋最新カメラフレーム更新を確実に待つ
+      // 細かすぎる位置補正を廃止し、ソフトストップ＋自然停止＋カメラフレーム安定まで400〜500msゆったり待つ
+      const settleMs = Math.max(420, 320 + latencyWait);
 
       if (isTurn) {
         bot.consecutiveLinearSteps = 0;
         bot.drivePulseStartedAt = null;
+        const spinWindowMs = Math.max(55, Math.min(180, rawDrive.durationMs ?? 90));
         if (bot.spinPauseUntil !== null && now < bot.spinPauseUntil) {
           drive = STOP;
         } else if (bot.spinStartedAt === null) {
+          if (at) this.evaluateSettledObservation(bot, at);
           bot.spinStartedAt = now;
-        } else if (now - bot.spinStartedAt >= 50) {
+          if (at) {
+            bot.pendingObservation = {
+              cmd: rawDrive.cmd,
+              startX: at.x,
+              startY: at.y,
+              startYaw: at.yaw,
+              durationMs: spinWindowMs,
+              expectedMm: 0,
+            };
+          }
+        } else if (now - bot.spinStartedAt >= spinWindowMs) {
           bot.spinStartedAt = null;
           bot.spinPauseUntil = now + settleMs;
           drive = STOP;
@@ -581,7 +612,7 @@ export class SceneRunner {
       bot.goalEntry = entry;
       if (!entry) { bot.status = "arrived"; bot.within = null; bot.posErr = bot.yawErr = null; this.drive(bot, STOP); continue; }
       const rawGoal = entry.to!;
-      // 実機の場合は目標点が外周の危険領域にあっても、予測停止位置が絶対防衛ライン(90mm)を超えない内側（外周から115mm）に安全クランプする
+      // 実機の場合は目標点が外周の危険領域にあっても、ソフトストップ自然停止距離を含めて絶対防衛ライン(130mm)を超えない内側（外周から155mm）に安全クランプする
       const safeTargetMargin = GEOFENCE_SAFE_MARGIN_MM + 25;
       const goalX = bot.motion !== null && field ? Math.max(safeTargetMargin, Math.min(field.widthMm - safeTargetMargin, rawGoal.x)) : rawGoal.x;
       const goalY = bot.motion !== null && field ? Math.max(safeTargetMargin, Math.min(field.heightMm - safeTargetMargin, rawGoal.y)) : rawGoal.y;

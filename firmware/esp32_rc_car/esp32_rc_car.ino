@@ -248,13 +248,28 @@ char deviceId[16] = "unknown";        // MACアドレス丁E桁由来 (侁E "rc-
 char deviceDisplayName[32] = "";      // 任意設定�E表示吁E(未設定時はdeviceIdを使用)
 
 char currentCommand = 'e';
+char activeDirCmd = 'e';               // 現在ハードウェアに出力中の方向 ('e'=完全停止)
+char pendingCommand = 'e';             // 逆転保護インターロック待機後に実行する次コマンド
 int currentSpeedL = 0;
 int currentSpeedR = 0;
+int targetSpeedL = 0;
+int targetSpeedR = 0;
+int pendingSpeedL = 0;
+int pendingSpeedR = 0;
+unsigned long commandDeadlineMs = 0;   // durationMs指定時のハードウェア自律停止期限 (0=無期限)
+unsigned long pendingDurationMs = 0;   // 逆転保護待機後に適用するdurationMs
+unsigned long deadtimeUntilMs = 0;     // 逆転保護インターロックの完全停止待機期限 (0=待機なし)
+unsigned long lastSlewStepMs = 0;      // ソフトスタート・ソフトストップ用スルーレート更新時刻
+const unsigned long SLEW_INTERVAL_MS = 10;
+const int SLEW_UP_STEP_PWM = 14;       // 10msあたりの最大PWM上昇幅（穏やかなソフトスタート）
+const int SLEW_DOWN_STEP_PWM = 24;     // 10msあたりの最大PWM下降幅（ギアと回路を傷めないソフトストップ）
+const int MIN_KICK_PWM = 115;          // ソフトスタート開始フロアPWM / ソフトストップ解放閾値
+const unsigned long DIRECTION_DEADTIME_MS = 160; // 回転方向切替時の完全フリーラン保護待機時間(ms)
 volatile bool isDeviceConnected = false;
 char lastRawBuffer[24] = "NONE";
 
 unsigned long lastPacketTime = 0;
-const unsigned long FAILSAFE_TIMEOUT_MS = 1500;       // 1.5秒途絶で緊急停止
+const unsigned long FAILSAFE_TIMEOUT_MS = 600;        // 0.6秒途絶でソフトストップ停止
 const unsigned long ZOMBIE_TIMEOUT_MS   = 10000;      // 10秒途絶で接続リセチE��
 
 unsigned long lastDisplayTime = 0;
@@ -310,60 +325,110 @@ void writePWM(int pin, int channel, int value) {
 // ----------------------------------------------------------------------------
 void applyMotorControl(char cmd, int speedL, int speedR) {
   // EXPR_SLEEPY判定用: 'e'(停止)に入った瞬間�E時刻のみ記録し、以後�E連続停止時間として参�Eする、E
-  static char prevCmdForIdle = '\0';
+  unsigned long now = millis();
+
   if (cmd == 'e') {
-    if (prevCmdForIdle != 'e') {
-      idleStartTime = millis();
+    if (currentCommand != 'e') {
+      idleStartTime = now;
       nextIdleExpressionAt = 0;
       idleExpressionChoice = EXPR_NEUTRAL;
     }
-  } else {
-    idleStartTime = 0;
+    currentCommand = 'e';
+    pendingCommand = 'e';
+    pendingDurationMs = 0;
+    commandDeadlineMs = 0;
+    targetSpeedL = 0;
+    targetSpeedR = 0;
+    if (currentSpeedL == 0 && currentSpeedR == 0) {
+      activeDirCmd = 'e';
+      digitalWrite(PIN_IN1, LOW);
+      digitalWrite(PIN_IN2, LOW);
+      digitalWrite(PIN_IN3, LOW);
+      digitalWrite(PIN_IN4, LOW);
+      writePWM(PIN_ENA, PWM_CH_RIGHT, 0);
+      writePWM(PIN_ENB, PWM_CH_LEFT, 0);
+    }
+    return;
   }
-  prevCmdForIdle = cmd;
 
-  currentCommand = cmd;
-  currentSpeedL = speedL;
-  currentSpeedR = speedR;
+  idleStartTime = 0;
+  int clampedL = constrain(speedL, 0, 255);
+  int clampedR = constrain(speedR, 0, 255);
 
-  switch (cmd) {
-    case 'a': // 前進 (Forward)
+  // Direction change interlock: soft-stop to 0 and wait DIRECTION_DEADTIME_MS before reversing
+  if ((activeDirCmd != 'e' && activeDirCmd != cmd) || deadtimeUntilMs > 0) {
+    pendingCommand = cmd;
+    pendingSpeedL = clampedL;
+    pendingSpeedR = clampedR;
+    targetSpeedL = 0;
+    targetSpeedR = 0;
+    commandDeadlineMs = 0;
+    if (currentSpeedL == 0 && currentSpeedR == 0 && deadtimeUntilMs == 0) {
+      activeDirCmd = 'e';
+      digitalWrite(PIN_IN1, LOW);
+      digitalWrite(PIN_IN2, LOW);
+      digitalWrite(PIN_IN3, LOW);
+      digitalWrite(PIN_IN4, LOW);
+      writePWM(PIN_ENA, PWM_CH_RIGHT, 0);
+      writePWM(PIN_ENB, PWM_CH_LEFT, 0);
+      deadtimeUntilMs = now + DIRECTION_DEADTIME_MS;
+    }
+    return;
+  }
+
+  pendingCommand = 'e';
+  targetSpeedL = clampedL;
+  targetSpeedR = clampedR;
+
+  if (activeDirCmd == 'e') {
+    activeDirCmd = cmd;
+    currentCommand = cmd;
+    currentSpeedL = min(targetSpeedL, MIN_KICK_PWM);
+    currentSpeedR = min(targetSpeedR, MIN_KICK_PWM);
+    lastSlewStepMs = now;
+  } else {
+    currentCommand = cmd;
+    return;
+  }
+
+  switch (activeDirCmd) {
+    case 'a': // Forward
       digitalWrite(PIN_IN1, LOW);
       digitalWrite(PIN_IN2, HIGH);
       digitalWrite(PIN_IN3, LOW);
       digitalWrite(PIN_IN4, HIGH);
-      writePWM(PIN_ENA, PWM_CH_RIGHT, speedR);
-      writePWM(PIN_ENB, PWM_CH_LEFT, speedL);
+      writePWM(PIN_ENA, PWM_CH_RIGHT, currentSpeedR);
+      writePWM(PIN_ENB, PWM_CH_LEFT, currentSpeedL);
       break;
 
-    case 'b': // 後退 (Reverse)
+    case 'b': // Reverse
       digitalWrite(PIN_IN1, HIGH);
       digitalWrite(PIN_IN2, LOW);
       digitalWrite(PIN_IN3, HIGH);
       digitalWrite(PIN_IN4, LOW);
-      writePWM(PIN_ENA, PWM_CH_RIGHT, speedR);
-      writePWM(PIN_ENB, PWM_CH_LEFT, speedL);
+      writePWM(PIN_ENA, PWM_CH_RIGHT, currentSpeedR);
+      writePWM(PIN_ENB, PWM_CH_LEFT, currentSpeedL);
       break;
 
-    case 'c': // 右超信地旋回 (Turn Right)
+    case 'c': // Turn Right
       digitalWrite(PIN_IN1, HIGH);
       digitalWrite(PIN_IN2, LOW);
       digitalWrite(PIN_IN3, LOW);
       digitalWrite(PIN_IN4, HIGH);
-      writePWM(PIN_ENA, PWM_CH_RIGHT, speedR);
-      writePWM(PIN_ENB, PWM_CH_LEFT, speedL);
+      writePWM(PIN_ENA, PWM_CH_RIGHT, currentSpeedR);
+      writePWM(PIN_ENB, PWM_CH_LEFT, currentSpeedL);
       break;
 
-    case 'd': // 左超信地旋回 (Turn Left)
+    case 'd': // Turn Left
       digitalWrite(PIN_IN1, LOW);
       digitalWrite(PIN_IN2, HIGH);
       digitalWrite(PIN_IN3, HIGH);
       digitalWrite(PIN_IN4, LOW);
-      writePWM(PIN_ENA, PWM_CH_RIGHT, speedR);
-      writePWM(PIN_ENB, PWM_CH_LEFT, speedL);
+      writePWM(PIN_ENA, PWM_CH_RIGHT, currentSpeedR);
+      writePWM(PIN_ENB, PWM_CH_LEFT, currentSpeedL);
       break;
 
-    case 'e': // 停止 (Stop)
+    case 'e': // Free-run stop (zero load on gears and driver)
     default:
       digitalWrite(PIN_IN1, LOW);
       digitalWrite(PIN_IN2, LOW);
@@ -374,6 +439,70 @@ void applyMotorControl(char cmd, int speedL, int speedR) {
       currentSpeedL = 0;
       currentSpeedR = 0;
       break;
+  }
+}
+
+void updateMotorDynamics(unsigned long now) {
+  // 1. Hardware autonomous stop timer (durationMs) -> triggers soft-stop
+  if (currentCommand != 'e' && commandDeadlineMs > 0 && (long)(now - commandDeadlineMs) >= 0) {
+    commandDeadlineMs = 0;
+    applyMotorControl('e', 0, 0);
+    strncpy(lastRawBuffer, "PULSE_DONE", sizeof(lastRawBuffer));
+  }
+
+  // 2. Direction-change protection deadtime wait
+  if (deadtimeUntilMs > 0) {
+    if ((long)(now - deadtimeUntilMs) >= 0) {
+      deadtimeUntilMs = 0;
+      if (pendingCommand != 'e') {
+        char nextCmd = pendingCommand;
+        int nextL = pendingSpeedL;
+        int nextR = pendingSpeedR;
+        unsigned long nextDur = pendingDurationMs;
+        pendingCommand = 'e';
+        pendingDurationMs = 0;
+        applyMotorControl(nextCmd, nextL, nextR);
+        if (nextDur > 0) commandDeadlineMs = now + nextDur;
+      }
+    }
+    return;
+  }
+
+  // 3. Soft-start (ramp up) and soft-stop (ramp down to free-run release)
+  if (currentSpeedL != targetSpeedL || currentSpeedR != targetSpeedR) {
+    if (now - lastSlewStepMs >= SLEW_INTERVAL_MS) {
+      lastSlewStepMs = now;
+
+      if (currentSpeedL < targetSpeedL) {
+        currentSpeedL = min(targetSpeedL, currentSpeedL + SLEW_UP_STEP_PWM);
+      } else if (currentSpeedL > targetSpeedL) {
+        currentSpeedL = max(targetSpeedL, currentSpeedL - SLEW_DOWN_STEP_PWM);
+        if (targetSpeedL == 0 && currentSpeedL < MIN_KICK_PWM) currentSpeedL = 0;
+      }
+
+      if (currentSpeedR < targetSpeedR) {
+        currentSpeedR = min(targetSpeedR, currentSpeedR + SLEW_UP_STEP_PWM);
+      } else if (currentSpeedR > targetSpeedR) {
+        currentSpeedR = max(targetSpeedR, currentSpeedR - SLEW_DOWN_STEP_PWM);
+        if (targetSpeedR == 0 && currentSpeedR < MIN_KICK_PWM) currentSpeedR = 0;
+      }
+
+      if (currentSpeedL == 0 && currentSpeedR == 0 && targetSpeedL == 0 && targetSpeedR == 0) {
+        activeDirCmd = 'e';
+        digitalWrite(PIN_IN1, LOW);
+        digitalWrite(PIN_IN2, LOW);
+        digitalWrite(PIN_IN3, LOW);
+        digitalWrite(PIN_IN4, LOW);
+        writePWM(PIN_ENA, PWM_CH_RIGHT, 0);
+        writePWM(PIN_ENB, PWM_CH_LEFT, 0);
+        if (pendingCommand != 'e') {
+          deadtimeUntilMs = now + DIRECTION_DEADTIME_MS;
+        }
+      } else {
+        writePWM(PIN_ENA, PWM_CH_RIGHT, currentSpeedR);
+        writePWM(PIN_ENB, PWM_CH_LEFT, currentSpeedL);
+      }
+    }
   }
 }
 
@@ -1233,9 +1362,17 @@ void updateFace(FaceLayoutMode layout) {
       const char* cmdStr = doc["cmd"] | "e";
       int speedL = doc["speedL"] | 0;
       int speedR = doc["speedR"] | 0;
+      unsigned long durationMs = doc["durationMs"] | 0;
       char raw[24];
       snprintf(raw, sizeof(raw), "%s,%d,%d;", cmdStr, speedL, speedR);
       parseCommandPacketFast(raw, strlen(raw));
+      if (cmdStr[0] != 'e' && durationMs > 0) {
+        if (pendingCommand != 'e' || deadtimeUntilMs > 0) {
+          pendingDurationMs = durationMs;
+        } else {
+          commandDeadlineMs = millis() + durationMs;
+        }
+      }
     } else if (strcmp(type, "setName") == 0) {
       const char* name = doc["name"] | "";
       saveDisplayName(name);
@@ -1494,6 +1631,9 @@ void loop() {
     shockedUntil = now + SHOCKED_HOLD_MS;
     shockedFlashPending = true;
   }
+
+  // Update soft-start, soft-stop, direction-change deadtime, and durationMs timer
+  updateMotorDynamics(now);
 
 #if TRANSPORT_MODE == MODE_WEBSOCKET
   // ①b 定期チE��メトリ送信 (フリートハブ�Eの生存確認にも利用)

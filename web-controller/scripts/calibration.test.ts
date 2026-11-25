@@ -153,10 +153,10 @@ describe("CalibrationRunner", () => {
     assert.equal(creepCtrl.phase, "creep");
     assert.ok((creepCtrl.drive.durationMs ?? 100) <= 85, `creep pulse must be short, got ${creepCtrl.drive.durationMs}`);
 
-    // 3. 予測型ジオフェンス検証: フィールド端(x=105mm, 左向き180°)からさらに外周(x=20mm)へ向かおうとしても、
-    // 絶対防衛ライン(GEOFENCE_SAFE_MARGIN_MM=90mm)を超えるためコマンド送信前に緊急ブレーキ停止に置換されること
+    // 3. 予測型ジオフェンス検証: フィールド端(x=145mm, 左向き180°)からさらに外周(x=20mm)へ向かおうとしても、
+    // 絶対防衛ライン(GEOFENCE_SAFE_MARGIN_MM=130mm)を超えるためコマンド送信前にソフトストップ停止に置換されること
     const edgeCtrl = control(
-      { x: 105, y: 310, yaw: 180 },
+      { x: 145, y: 310, yaw: 180 },
       { x: 20, y: 310, yaw: 180, rotate: false, speedMmS: 120 },
       cal,
       { consecutiveLinearSteps: 2, field, cameraLatencyMs: 120 }

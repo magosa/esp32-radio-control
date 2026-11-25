@@ -29,6 +29,8 @@ export interface AdaptiveRuntimeContext {
   dynamicTrimRatio?: number;
   // 走行中のリアルタイム自動補正で学習した速度倍率（電池低下時は <1.0 -> 出力/パルス幅を自動補正）
   dynamicSpeedScale?: number;
+  // 直前のパルスで静止摩擦に負けて動かなかった場合の自動出力ブースト (PWM, 0〜35)
+  stallBoostPwm?: number;
   // カメラ測位遅延 (ms)
   cameraLatencyMs?: number;
   // フィールド寸法（予測型ジオフェンスによる飛び出し防止用）
@@ -59,12 +61,14 @@ export const STOP: Drive = { cmd: "e", speedL: 0, speedR: 0 };
 export const DRIVE_LIMITS = { maxSpeedMmS: 200, minPwm: 80, maxPwm: 220, minTurnPwm: 80, maxTurnPwm: 200 };
 
 // 予測型ジオフェンスの安全マージン（基準マーカー中心の内側からさらに確保する絶対防衛ライン）
-export const GEOFENCE_SAFE_MARGIN_MM = 90;
-export const GEOFENCE_SLOW_MARGIN_MM = 160;
+export const GEOFENCE_SAFE_MARGIN_MM = 130;
+export const GEOFENCE_SLOW_MARGIN_MM = 200;
 
-// クリープ走行および減速アプローチの境界距離
-export const CREEP_RADIUS_MM = 85;
-export const SLOW_RADIUS_MM = 180;
+// クリープ走行および早めの自然減速アプローチの境界距離
+export const CREEP_RADIUS_MM = 80;
+export const SLOW_RADIUS_MM = 200;
+// 実機の安全巡航PWM上限（急発進・過速によるオーバーランやギア負荷を構造的に防ぐ）
+export const SAFE_REAL_MAX_PWM = 170;
 
 // Inside these the robot stops commanding; arrival (20 mm / 15 deg) is judged by the runner with a margin above them.
 const POS_DEAD_MM = 20;
@@ -117,11 +121,12 @@ export function predictTrajectory(
 
   const baseSpeed = (calibration?.speedMmS ?? DRIVE_LIMITS.maxSpeedMmS) * (runtime?.dynamicSpeedScale ?? 1.0);
   const minPwm = calibration?.minDrivePwm ?? DRIVE_LIMITS.minPwm;
-  const maxPwm = calibration?.maxDrivePwm ?? DRIVE_LIMITS.maxPwm;
+  const maxPwm = Math.min(calibration?.maxDrivePwm ?? DRIVE_LIMITS.maxPwm, calibration ? SAFE_REAL_MAX_PWM : DRIVE_LIMITS.maxPwm);
   const meanPwm = (drive.speedL + drive.speedR) / 2;
   const pwmRatio = maxPwm > minPwm ? clamp((meanPwm - minPwm) / (maxPwm - minPwm), 0.25, 1.0) : 0.7;
   const estSpeedMmS = baseSpeed * (0.55 + 0.45 * pwmRatio);
-  const brakingMm = (calibration?.brakingDistanceMm ?? 22) * pwmRatio;
+  // ソフトストップ＋フリーラン自然停止時の余裕距離（実測値または安全側デフォルト45mm）
+  const brakingMm = Math.max(40, calibration?.brakingDistanceMm ?? 45) * (0.5 + 0.5 * pwmRatio);
   const travelMm = estSpeedMmS * activeSec + brakingMm;
   const sign = drive.cmd === "b" ? -1 : 1;
   const rad = (effectiveYaw * Math.PI) / 180;
@@ -141,7 +146,8 @@ export function predictTrajectory(
 function spin(
   err: number,
   limits: { minTurnPwm: number; maxTurnPwm: number; isCalibrated: boolean },
-  calibration?: RobotMotionCalibration | null
+  calibration?: RobotMotionCalibration | null,
+  stallBoostPwm = 0
 ): { drive: Drive; phase: DrivePhase } {
   const absErr = Math.abs(err);
   if (!limits.isCalibrated) {
@@ -151,12 +157,14 @@ function spin(
 
   // 実機の旋回：28°以内はクリープ旋回（最小旋回PWM＋短パルス）、大角度でも急加速させない
   const isCreepTurn = absErr <= 28;
-  const extra = isCreepTurn ? 0 : Math.min(8, (absErr - 28) * 0.2);
-  const pwm = Math.round(clamp(limits.minTurnPwm + extra, limits.minTurnPwm, limits.maxTurnPwm));
+  const extra = isCreepTurn ? 0 : Math.min(18, (absErr - 28) * 0.25);
+  const boost = clamp(stallBoostPwm, 0, 35);
+  const maxSafeTurnPwm = Math.min(limits.maxTurnPwm, SAFE_REAL_MAX_PWM);
+  const pwm = Math.round(clamp(limits.minTurnPwm + extra + boost, limits.minTurnPwm, maxSafeTurnPwm));
   const rate = err > 0 ? (calibration?.turnRateLeftDegS ?? 150) : (calibration?.turnRateRightDegS ?? 150);
   // 1回のパルスで目標角度の約60%だけを回す（オーバーシュート防止）
   const idealMs = (absErr * 0.6 / Math.max(40, rate)) * 1000;
-  const durationMs = Math.round(clamp(idealMs, isCreepTurn ? 45 : 65, isCreepTurn ? 80 : 140));
+  const durationMs = Math.round(clamp(idealMs, isCreepTurn ? 55 : 80, isCreepTurn ? 95 : 180));
   return {
     drive: { cmd: err > 0 ? "c" : "d", speedL: pwm, speedR: pwm, durationMs },
     phase: isCreepTurn ? "creep" : "spin",
@@ -173,7 +181,9 @@ export function control(
   const isCalibrated = !!calibration;
   const limits = {
     minPwm: calibration?.minDrivePwm ?? DRIVE_LIMITS.minPwm,
-    maxPwm: calibration?.maxDrivePwm ?? DRIVE_LIMITS.maxPwm,
+    maxPwm: isCalibrated
+      ? Math.max(calibration?.minDrivePwm ?? DRIVE_LIMITS.minPwm, Math.min(calibration?.maxDrivePwm ?? SAFE_REAL_MAX_PWM, SAFE_REAL_MAX_PWM))
+      : DRIVE_LIMITS.maxPwm,
     maxSpeedMmS: calibration?.speedMmS ?? DRIVE_LIMITS.maxSpeedMmS,
     minTurnPwm: calibration?.minTurnPwm ?? DRIVE_LIMITS.minTurnPwm,
     maxTurnPwm: calibration?.maxTurnPwm ?? DRIVE_LIMITS.maxTurnPwm,
@@ -195,7 +205,7 @@ export function control(
     if (Math.abs(yawErrDeg) <= YAW_DEAD_DEG) {
       return { ...base, drive: STOP, phase: "stop" };
     }
-    const s = spin(yawErrDeg, limits, calibration);
+    const s = spin(yawErrDeg, limits, calibration, runtime?.stallBoostPwm ?? 0);
     return { ...base, drive: s.drive, phase: s.phase };
   }
 
@@ -209,10 +219,10 @@ export function control(
     ? shortestTurn(effectiveYaw, normalizeYaw(bearing + 180))
     : forwardBearingErr;
 
-  // Stop-Turn-Go 原則：向きがずれているときは無理に走りながら急ハンドルを切らず、まずその場で正対する
-  const turnFirstDeg = isCalibrated ? (posErrMm <= CREEP_RADIUS_MM ? 26 : 18) : TURN_FIRST_DEG;
+  // Stop-Turn-Go 原則：向きが22°以上大きくずれている場合のみその場旋回で合わせ直す（細かすぎる補正をしない）
+  const turnFirstDeg = isCalibrated ? (posErrMm <= CREEP_RADIUS_MM ? 28 : 22) : TURN_FIRST_DEG;
   if (Math.abs(bearingErr) > turnFirstDeg) {
-    const s = spin(bearingErr, limits, calibration);
+    const s = spin(bearingErr, limits, calibration, runtime?.stallBoostPwm ?? 0);
     return { ...base, drive: s.drive, phase: s.phase };
   }
 
@@ -235,8 +245,8 @@ export function control(
   // ---- 実機（Calibrated）専用：ソフトスタート・クリープ・適応トリム・事前軌道予測制御 ----
   const consecutiveSteps = runtime?.consecutiveLinearSteps ?? 0;
   const speedScale = clamp(runtime?.dynamicSpeedScale ?? 1.0, 0.7, 1.35);
-  // 電池低下時(speedScale < 1.0)は必要な出力を少し補い、過속時(speedScale > 1.0)は抑える
-  const adaptiveBoost = Math.round((1.0 - speedScale) * 14);
+  // 電池低下時(speedScale < 1.0)は必要な出力を少し補い、過速時(speedScale > 1.0)は抑える。静止摩擦スタック時は stallBoostPwm を加算。
+  const adaptiveBoost = Math.round((1.0 - speedScale) * 14) + clamp(runtime?.stallBoostPwm ?? 0, 0, 35);
 
   let phase: DrivePhase;
   let targetPwm: number;
@@ -285,10 +295,11 @@ export function control(
   );
   const trimOffset = (targetPwm * totalTrimRatio) / 2;
 
-  // 直進中の微修正ステアリングは極小（±5 PWM以内）に制限し、片輪ロックによる急カーブ暴走を根絶する
-  const maxSteer = phase === "creep" ? 3 : 6;
-  const steer = clamp(bearingErr * 0.35, -maxSteer, maxSteer);
-  const minWheel = Math.round(limits.minPwm * 0.95);
+  // 15°以内の細かな角度誤差に対して過剰にハンドルを切らず、大らかな不感帯＋緩やかな微調整のみに抑える
+  const maxSteer = phase === "creep" ? 2 : 4;
+  const effectiveSteerErr = Math.abs(bearingErr) <= 6 ? 0 : bearingErr;
+  const steer = clamp(effectiveSteerErr * 0.25, -maxSteer, maxSteer);
+  const minWheel = Math.round(limits.minPwm * 0.96);
 
   let left: number;
   let right: number;

@@ -27,7 +27,7 @@ export interface CalibrationOptions {
 const DEFAULT_OPTIONS: Required<CalibrationOptions> = {
   fieldWidthMm: 1106.93,
   fieldHeightMm: 622.65,
-  edgeMarginMm: 100,
+  edgeMarginMm: 130,
   maxWaitPoseMs: 3000,
 };
 
@@ -105,13 +105,13 @@ export class CalibrationRunner {
       let creepStepMm = 12;
       const creepPulseMs = 70;
       let moved = false;
-      for (const pwm of [90, 110, 130, 150, 170]) {
+      for (const pwm of [115, 130, 145, 160, 170]) {
         checkAborted();
         const before = getValidPose();
         this.deps.sendDrive(deviceId, "a", pwm, pwm);
         await this.deps.sleep(250);
         stop();
-        await this.deps.sleep(200);
+        await this.deps.sleep(380);
         const after = getValidPose();
         const dist = Math.hypot(after.x - before.x, after.y - before.y);
         if (dist >= 5) {
@@ -121,20 +121,31 @@ export class CalibrationRunner {
           break;
         }
       }
-      if (!moved) minDrivePwm = 130;
+      if (!moved) minDrivePwm = 135;
 
       // 基準PWMでの前進測定（および停止コマンド直後〜完全整定までの制動距離測定）
-      const fwdPwm = 190;
-      const fwdDurationMs = 700;
+      const fwdPwm = 165;
+      const fwdDurationMs = 450;
       const fwdBefore = getValidPose();
+      if (
+        fwdBefore.x < opts.edgeMarginMm ||
+        fwdBefore.x > opts.fieldWidthMm - opts.edgeMarginMm ||
+        fwdBefore.y < opts.edgeMarginMm ||
+        fwdBefore.y > opts.fieldHeightMm - opts.edgeMarginMm
+      ) {
+        stop();
+        const msg = `前進測定前にフィールド端へ近づいたため安全中断しました（端から${opts.edgeMarginMm}mm以上必要）`;
+        emit("aborted", 0, msg, undefined, msg);
+        throw new Error(msg);
+      }
       const fwdStart = this.deps.now();
       this.deps.sendDrive(deviceId, "a", fwdPwm, fwdPwm);
       await this.deps.sleep(fwdDurationMs);
       stop();
-      const atStopCmd = getValidPose();
-      await this.deps.sleep(300);
-      const fwdAfter = getValidPose();
       const fwdActualDt = Math.max(0.1, (this.deps.now() - fwdStart) / 1000);
+      const atStopCmd = getValidPose();
+      await this.deps.sleep(450);
+      const fwdAfter = getValidPose();
       const dx = fwdAfter.x - fwdBefore.x;
       const dy = fwdAfter.y - fwdBefore.y;
       const fwdDist = Math.hypot(dx, dy);
@@ -157,13 +168,13 @@ export class CalibrationRunner {
       emit("turnLeft", 55, "左旋回特性を測定中…");
       let minTurnPwm = 140;
       let turned = false;
-      for (const pwm of [110, 130, 150, 170, 190]) {
+      for (const pwm of [120, 135, 150, 165]) {
         checkAborted();
         const before = getValidPose();
         this.deps.sendDrive(deviceId, "c", pwm, pwm);
         await this.deps.sleep(250);
         stop();
-        await this.deps.sleep(200);
+        await this.deps.sleep(380);
         const after = getValidPose();
         const angle = Math.abs(shortestTurn(before.yaw, after.yaw));
         if (angle >= 4) {
@@ -174,16 +185,16 @@ export class CalibrationRunner {
       }
       if (!turned) minTurnPwm = 140;
 
-      const turnPwm = 175;
-      const turnDurationMs = 500;
+      const turnPwm = 160;
+      const turnDurationMs = 450;
       const turnLeftBefore = getValidPose();
       const turnLeftStart = this.deps.now();
       this.deps.sendDrive(deviceId, "c", turnPwm, turnPwm);
       await this.deps.sleep(turnDurationMs);
       stop();
-      await this.deps.sleep(300);
-      const turnLeftAfter = getValidPose();
       const leftDt = Math.max(0.1, (this.deps.now() - turnLeftStart) / 1000);
+      await this.deps.sleep(450);
+      const turnLeftAfter = getValidPose();
       const leftAngle = Math.abs(shortestTurn(turnLeftBefore.yaw, turnLeftAfter.yaw));
       const turnRateLeftDegS = Math.round(Math.max(10, (leftAngle / leftDt) * 10)) / 10;
 
@@ -194,9 +205,9 @@ export class CalibrationRunner {
       this.deps.sendDrive(deviceId, "d", turnPwm, turnPwm);
       await this.deps.sleep(turnDurationMs);
       stop();
-      await this.deps.sleep(300);
-      const turnRightAfter = getValidPose();
       const rightDt = Math.max(0.1, (this.deps.now() - turnRightStart) / 1000);
+      await this.deps.sleep(450);
+      const turnRightAfter = getValidPose();
       const rightAngle = Math.abs(shortestTurn(turnRightBefore.yaw, turnRightAfter.yaw));
       const turnRateRightDegS = Math.round(Math.max(10, (rightAngle / rightDt) * 10)) / 10;
 
@@ -205,10 +216,10 @@ export class CalibrationRunner {
       const result: RobotMotionCalibration = {
         calibratedAt: this.deps.now(),
         minDrivePwm,
-        maxDrivePwm: 220,
+        maxDrivePwm: 170,
         speedMmS,
         minTurnPwm,
-        maxTurnPwm: 200,
+        maxTurnPwm: 165,
         turnRateLeftDegS,
         turnRateRightDegS,
         yawOffsetDeg,
