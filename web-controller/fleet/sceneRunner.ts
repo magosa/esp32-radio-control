@@ -664,12 +664,14 @@ export class SceneRunner {
       ...this.obstacles(),
     ];
     if (bot.position.startedAt === null) {
-      if (otherRobots.some((o) => Math.hypot(o.x - init.x, o.y - init.y) < CONFLICT_MM)) {
+      const posClearanceMm = bot.motion !== null ? 115 : CONFLICT_MM;
+      if (otherRobots.some((o) => Math.hypot(o.x - init.x, o.y - init.y) < posClearanceMm)) {
         return fail("初期位置付近に別のロボットがいます。手で置き直してください");
       }
       if (this.positioning.avoidWalls) {
         const detour = findDetourPath(this.safety!, at, init, otherRobots, 180)
-          ?? findDetourPath(this.safety!, at, init, otherRobots, 145);
+          ?? findDetourPath(this.safety!, at, init, otherRobots, 145)
+          ?? findDetourPath(this.safety!, at, init, otherRobots, 120);
         if (!detour) {
           return fail("壁や障害物を迂回する経路が見つかりません。「MAPの壁を迂回する」をオフにするか手で置き直してください");
         }
@@ -756,12 +758,13 @@ export class SceneRunner {
       const stepGoal = { x: targetX, y: targetY };
       const segLen = distance(at, stepGoal);
       if (segLen > 1) {
+        const posClearanceMm = bot.motion !== null ? 115 : CONFLICT_MM;
         const ahead = {
-          x: at.x + (stepGoal.x - at.x) / segLen * Math.min(segLen, CONFLICT_MM),
-          y: at.y + (stepGoal.y - at.y) / segLen * Math.min(segLen, CONFLICT_MM),
+          x: at.x + (stepGoal.x - at.x) / segLen * Math.min(segLen, posClearanceMm),
+          y: at.y + (stepGoal.y - at.y) / segLen * Math.min(segLen, posClearanceMm),
         };
-        if (otherRobots.some((o) => distance(ahead, o) < CONFLICT_MM && distance(at, o) > distance(ahead, o))) {
-          if (this.positioning.avoidWalls && bot.positionReplans < 2 && otherRobots.every((o) => distance(at, o) >= CONFLICT_MM)) {
+        if (otherRobots.some((o) => distance(ahead, o) < posClearanceMm && distance(at, o) > distance(ahead, o))) {
+          if (this.positioning.avoidWalls && bot.positionReplans < 2 && otherRobots.every((o) => distance(at, o) >= posClearanceMm)) {
             const replanned = findDetourPath(this.safety!, at, init, otherRobots, 185);
             const nextWp = replanned?.[0];
             if (replanned && nextWp && Math.hypot(nextWp.x - targetX, nextWp.y - targetY) > 15) {

@@ -65,8 +65,8 @@ export const STOP: Drive = { cmd: "e", speedL: 0, speedR: 0 };
 export const DRIVE_LIMITS = { maxSpeedMmS: 200, minPwm: 80, maxPwm: 220, minTurnPwm: 80, maxTurnPwm: 200 };
 
 // 予測型ジオフェンスの安全マージン（カメラ視野端からの見失いを防ぎつつ外周目標90mmへ到達可能な防衛ライン）
-export const GEOFENCE_SAFE_MARGIN_MM = 75;
-export const GEOFENCE_SLOW_MARGIN_MM = 120;
+export const GEOFENCE_SAFE_MARGIN_MM = 55;
+export const GEOFENCE_SLOW_MARGIN_MM = 95;
 
 // クリープ走行および早めの自然減速アプローチの境界距離
 export const CREEP_RADIUS_MM = 80;
@@ -385,7 +385,7 @@ export function control(
       // 予測停止位置が絶対防衛ラインを超える場合、連続巡航を禁止し最短クリープ短パルスで安全領域内に収まるか再試行
       const safePwm = Math.round(clamp(effectiveMinPwm + clamp(stallBoost, 0, 35), effectiveMinPwm, effectiveMaxPwm));
       const safeRampMs = Math.ceil(Math.max(0, safePwm - 115) / 14) * 10;
-      const safeDur = Math.min(70, safeRampMs + 16);
+      const safeDur = Math.min(85, safeRampMs + 28);
       const safeCreepDrive: Drive = {
         cmd,
         speedL: safePwm,
