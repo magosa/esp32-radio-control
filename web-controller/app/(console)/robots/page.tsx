@@ -188,6 +188,8 @@ export default function RobotsPage() {
                   <div>オフセット: {motion.yawOffsetDeg}°</div>
                   <div>旋回(左): {motion.turnRateLeftDegS}°/s</div>
                   <div>旋回(右): {motion.turnRateRightDegS}°/s</div>
+                  <div>左右トリム: {motion.leftRightTrimRatio !== undefined ? `${motion.leftRightTrimRatio >= 0 ? "+" : ""}${(motion.leftRightTrimRatio * 100).toFixed(1)}%` : "-"}</div>
+                  <div>制動距離: {motion.brakingDistanceMm !== undefined ? `${motion.brakingDistanceMm} mm` : "-"}</div>
                   {isExpired && (
                     <div style={{ gridColumn: "1 / -1", color: "#f59e0b", display: "flex", alignItems: "center", gap: 4 }}>
                       <TriangleAlert size={14} /> 24時間以上経過したため再校正を推奨
