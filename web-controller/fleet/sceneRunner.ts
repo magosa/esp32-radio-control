@@ -68,7 +68,7 @@ interface Bot {
   arrivals: Map<string, Arrival>;
   waited: Map<string, number>;
   within: number | null;
-  stuck: { at: number; x: number; y: number; retried: boolean } | null;
+  stuck: { at: number; x: number; y: number; yaw: number; retried: boolean } | null;
   lost: { x: number; y: number } | null;
   lastDrive: Drive | null;
   lastSentAt: number;
@@ -96,6 +96,8 @@ interface Bot {
   stallBoostPwm: number;
   // 停止完了後に「新しいカメラフレーム（停止後撮影）」が到着するまで次パルスを保留する基準時刻
   pauseWaitFreshAfter: number | null;
+  // 連続巡航(cont=true)中の静止摩擦スタック監視用チェックポイント
+  contCheck: { at: number; x: number; y: number } | null;
   // 直前の駆動パルス開始時の姿勢と予測移動量（整定完了後に実移動量と比較して自動学習する）
   pendingObservation: PulseObservation | null;
 }
@@ -157,7 +159,7 @@ export class SceneRunner {
     this.bots = map.tracks.filter((t) => t.kind === "robot" && !t.muted && t.initial).map((track) => ({
       track, arrivals: new Map(), waited: new Map(), within: null, stuck: null, lost: null, lastDrive: null, lastSentAt: 0,
       spinStartedAt: null, spinPauseUntil: null, drivePulseStartedAt: null, drivePauseUntil: null, positionLostAt: null, aligningYaw: false,
-      consecutiveLinearSteps: 0, dynamicTrimRatio: 0, dynamicSpeedScale: 1.0, stallBoostPwm: 0, pauseWaitFreshAfter: null, pendingObservation: null,
+      consecutiveLinearSteps: 0, dynamicTrimRatio: 0, dynamicSpeedScale: 1.0, stallBoostPwm: 0, pauseWaitFreshAfter: null, contCheck: null, pendingObservation: null,
       position: { state: "waiting", detail: "", startedAt: null }, status: "idle", posErr: null, yawErr: null, pose: null, priority: null, goalEntry: null, motion: null,
       moves: this.plan!.entries.filter((e) => e.track === track && e.action.type === "move" && !e.blocked && e.outcome === "success" && e.start !== null)
         .sort((a, b) => a.start! - b.start!),
@@ -314,6 +316,7 @@ export class SceneRunner {
       dynamicSpeedScale: bot.dynamicSpeedScale,
       stallBoostPwm: bot.stallBoostPwm,
       cameraLatencyMs: latency,
+      cameraFps: this.input?.poses.localizer.fps ?? null,
       field: field ? { widthMm: field.widthMm, heightMm: field.heightMm } : undefined,
     };
   }
@@ -329,7 +332,8 @@ export class SceneRunner {
       if (turnedDeg < 2.0) {
         bot.stallBoostPwm = Math.min(35, bot.stallBoostPwm + 10);
       } else {
-        bot.stallBoostPwm = Math.max(0, bot.stallBoostPwm - 4);
+        // 旋回成功時は緩やかに減衰させ、再スタックのノコギリ波を防ぐ
+        bot.stallBoostPwm = Math.max(0, bot.stallBoostPwm - 5);
       }
       return;
     }
@@ -339,7 +343,7 @@ export class SceneRunner {
       if (actualMm < 2.5) {
         bot.stallBoostPwm = Math.min(35, bot.stallBoostPwm + 10);
       } else {
-        bot.stallBoostPwm = Math.max(0, bot.stallBoostPwm - 4);
+        bot.stallBoostPwm = Math.max(0, bot.stallBoostPwm - 5);
       }
       if (obs.expectedMm >= 10) {
         const ratio = Math.max(0.5, Math.min(1.6, actualMm / obs.expectedMm));
@@ -347,10 +351,10 @@ export class SceneRunner {
         bot.dynamicSpeedScale = Math.max(0.7, Math.min(1.35, bot.dynamicSpeedScale * 0.75 + ratio * 0.25));
       }
       if (actualMm >= 18) {
-        // 直進パルス中に発生したヨー角ドリフトから左右モーターの回転差トリムを自動学習
+        // +Y下向き座標系では前進時に L > R で yaw 増加(+)となるため、yawDrift > 0 のときは右輪強化(trimDelta > 0)が正
         const yawDrift = shortestTurn(obs.startYaw, at.yaw);
         const sign = obs.cmd === "b" ? -1 : 1;
-        const trimDelta = -sign * yawDrift * 0.0015;
+        const trimDelta = sign * yawDrift * 0.0015;
         bot.dynamicTrimRatio = Math.max(-0.15, Math.min(0.15, bot.dynamicTrimRatio + trimDelta));
       }
     }
@@ -373,6 +377,14 @@ export class SceneRunner {
       // 細かすぎる位置補正を廃止し、ソフトストップ＋自然停止＋カメラフレーム安定まで400〜500msゆったり待つ
       const settleMs = Math.max(420, 320 + latencyWait);
 
+      // 連続巡航(continuous)からクリープ・旋回へ切り替わる瞬間は、必ず一度ソフトストップ＋整定待ちを挟む
+      const wasContinuous = !!bot.lastDrive?.continuous && (bot.lastDrive.cmd === "a" || bot.lastDrive.cmd === "b");
+      if (wasContinuous && !rawDrive.continuous && (isLinear || isTurn)) {
+        bot.drivePauseUntil = now + settleMs;
+        bot.spinPauseUntil = now + settleMs;
+        bot.pauseWaitFreshAfter = now + 80;
+      }
+
       // 低FPS時でも「停止後に撮影された新しいカメラフレーム」が届くまで次パルスを待つ（最大1100msで安全解放）
       const poseCapturedAt = bot.pose?.ageMs !== undefined ? now - bot.pose.ageMs : now;
       const waitingForFreshFrame =
@@ -381,9 +393,13 @@ export class SceneRunner {
         now < bot.pauseWaitFreshAfter + 1100;
 
       if (isTurn) {
+        if (bot.lastDrive && (bot.lastDrive.cmd === "a" || bot.lastDrive.cmd === "b")) {
+          bot.stallBoostPwm = 0; // 直進から旋回への切替時はブースト持ち越しをクリア
+        }
+        bot.contCheck = null;
         bot.consecutiveLinearSteps = 0;
         bot.drivePulseStartedAt = null;
-        const spinWindowMs = Math.max(70, Math.min(180, rawDrive.durationMs ?? 90));
+        const spinWindowMs = Math.max(70, Math.min(230, rawDrive.durationMs ?? 100));
         if ((bot.spinPauseUntil !== null && now < bot.spinPauseUntil) || waitingForFreshFrame) {
           drive = STOP;
         } else if (bot.spinStartedAt === null) {
@@ -406,9 +422,42 @@ export class SceneRunner {
           bot.pauseWaitFreshAfter = now + 80;
           drive = STOP;
         }
-      } else if (isLinear) {
+      } else if (isLinear && rawDrive.continuous) {
+        // 案A：遠距離(>100mm)かつ高FPS・安全領域内の連続巡航（完全停止を挟まず滑らかに走行、durationMs=400msで自律安全保護）
+        if (bot.lastDrive && (bot.lastDrive.cmd === "c" || bot.lastDrive.cmd === "d")) {
+          bot.stallBoostPwm = 0; // 旋回から巡航への切替時は旋回ブーストを持ち越さない
+          bot.contCheck = null;
+        }
         bot.spinStartedAt = null;
-        const pulseWindowMs = Math.max(70, Math.min(160, (rawDrive.durationMs ?? 100) - 10));
+        bot.drivePulseStartedAt = null;
+        bot.drivePauseUntil = null;
+        bot.pauseWaitFreshAfter = null;
+        // 連続巡航中も450msごとの移動量を監視し、静止摩擦で止まっていたら自動で stallBoostPwm を加算する
+        if (at) {
+          if (!bot.contCheck) {
+            bot.contCheck = { at: now, x: at.x, y: at.y };
+          } else if (now - bot.contCheck.at >= 450) {
+            const moved = Math.hypot(at.x - bot.contCheck.x, at.y - bot.contCheck.y);
+            if (moved < 5) {
+              bot.stallBoostPwm = Math.min(35, bot.stallBoostPwm + 10);
+            } else {
+              bot.stallBoostPwm = Math.max(0, bot.stallBoostPwm - 5);
+            }
+            bot.contCheck = { at: now, x: at.x, y: at.y };
+          }
+        }
+        // 経過時間ベースでソフトスタートを段階解除（1ティックで即フルPWMに跳ね上がらないようにする）
+        if (!bot.lastDrive?.continuous || now - bot.lastSentAt >= 200) {
+          bot.consecutiveLinearSteps += 1;
+        }
+        drive = rawDrive;
+      } else if (isLinear) {
+        bot.contCheck = null;
+        if (bot.lastDrive && (bot.lastDrive.cmd === "c" || bot.lastDrive.cmd === "d")) {
+          bot.stallBoostPwm = 0; // 旋回から直進・クリープへの切替時は旋回ブーストを持ち越さない
+        }
+        bot.spinStartedAt = null;
+        const pulseWindowMs = Math.max(70, Math.min(420, (rawDrive.durationMs ?? 100) - 10));
         if ((bot.drivePauseUntil !== null && now < bot.drivePauseUntil) || waitingForFreshFrame) {
           drive = STOP;
         } else if (bot.drivePulseStartedAt === null) {
@@ -438,11 +487,13 @@ export class SceneRunner {
       } else {
         bot.spinStartedAt = null;
         bot.drivePulseStartedAt = null;
+        bot.contCheck = null;
         bot.consecutiveLinearSteps = 0;
       }
     }
 
-    if (!force && sameDrive(bot.lastDrive, drive) && now - bot.lastSentAt < RESEND_MS) return;
+    const resendLimit = drive.continuous ? Math.min(RESEND_MS, 180) : RESEND_MS;
+    if (!force && sameDrive(bot.lastDrive, drive) && now - bot.lastSentAt < resendLimit) return;
     bot.lastDrive = drive;
     bot.lastSentAt = now;
     this.deps.sendDrive(deviceId, drive);
@@ -969,19 +1020,24 @@ export class SceneRunner {
   }
 
   // First stuck: log and try again. Second: report it.
-  private stuckTwice(bot: Bot, drive: Drive, at: { x: number; y: number }, now: number): boolean {
-    if (drive.cmd !== "a" && drive.cmd !== "b") { bot.stuck = null; return false; }
-    // 目標まで近傍（40mm以内）のときは微小調整中のためスタック誤判定しない
-    if (bot.posErr !== null && bot.posErr <= 40) { bot.stuck = null; return false; }
-    if (!bot.stuck) { bot.stuck = { at: now, x: at.x, y: at.y, retried: false }; return false; }
-    if (now - bot.stuck.at < STUCK_WINDOW_MS) return false;
+  private stuckTwice(bot: Bot, drive: Drive, at: { x: number; y: number; yaw?: number }, now: number): boolean {
+    if (drive.cmd === "e") { bot.stuck = null; return false; }
+    const isTurnCmd = drive.cmd === "c" || drive.cmd === "d";
+    const isNearOrTurn = isTurnCmd || (bot.posErr !== null && bot.posErr <= 40);
+    const windowMs = isNearOrTurn ? Math.round(STUCK_WINDOW_MS * 1.5) : STUCK_WINDOW_MS;
+    const curYaw = at.yaw ?? 0;
+    if (!bot.stuck) { bot.stuck = { at: now, x: at.x, y: at.y, yaw: curYaw, retried: false }; return false; }
+    if (now - bot.stuck.at < windowMs) return false;
     const moved = Math.hypot(at.x - bot.stuck.x, at.y - bot.stuck.y);
-    if (moved >= STUCK_MIN_MM) { bot.stuck = { at: now, x: at.x, y: at.y, retried: bot.stuck.retried }; return false; }
+    const turned = Math.abs(shortestTurn(bot.stuck.yaw, curYaw));
+    const progressed = isTurnCmd ? turned >= 4 : moved >= (isNearOrTurn ? 3 : STUCK_MIN_MM);
+    if (progressed) { bot.stuck = { at: now, x: at.x, y: at.y, yaw: curYaw, retried: bot.stuck.retried }; return false; }
     if (bot.stuck.retried) return true;
     this.note("warn", `${bot.track.name} が進みません。1回だけやり直します`);
-    // スタック再試行時は一時的に速度スケールを下げて出力ブーストを効かせる
+    // スタック再試行時は速度スケール調整＋スタックブーストを効かせる
     bot.dynamicSpeedScale = Math.max(0.7, bot.dynamicSpeedScale - 0.15);
-    bot.stuck = { at: now, x: at.x, y: at.y, retried: true };
+    bot.stallBoostPwm = Math.min(35, bot.stallBoostPwm + 15);
+    bot.stuck = { at: now, x: at.x, y: at.y, yaw: curYaw, retried: true };
     return false;
   }
 

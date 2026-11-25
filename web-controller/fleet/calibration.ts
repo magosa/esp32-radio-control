@@ -105,23 +105,23 @@ export class CalibrationRunner {
       let creepStepMm = 12;
       const creepPulseMs = 70;
       let moved = false;
-      for (const pwm of [115, 130, 145, 160, 170]) {
+      for (const pwm of [130, 145, 155, 165]) {
         checkAborted();
         const before = getValidPose();
         this.deps.sendDrive(deviceId, "a", pwm, pwm);
-        await this.deps.sleep(250);
+        await this.deps.sleep(180);
         stop();
         await this.deps.sleep(380);
         const after = getValidPose();
         const dist = Math.hypot(after.x - before.x, after.y - before.y);
         if (dist >= 5) {
           minDrivePwm = pwm;
-          creepStepMm = Math.round(Math.max(4, Math.min(40, dist * (creepPulseMs / 250))) * 10) / 10;
+          creepStepMm = Math.round(Math.max(4, Math.min(40, dist * (creepPulseMs / 180))) * 10) / 10;
           moved = true;
           break;
         }
       }
-      if (!moved) minDrivePwm = 135;
+      if (!moved) minDrivePwm = 145;
 
       // 基準PWMでの前進測定（および停止コマンド直後〜完全整定までの制動距離測定）
       const fwdPwm = 165;
@@ -159,9 +159,9 @@ export class CalibrationRunner {
       if (fwdDist >= 15) {
         const moveBearing = normalizeYaw(Math.atan2(dy, dx) * (180 / Math.PI));
         yawOffsetDeg = Math.round(shortestTurn(moveBearing, fwdBefore.yaw) * 10) / 10;
-        // 前進中の機首向きの変化量 (正=反時計回り=左へ曲がった -> 左モーターを弱める/右を強める負のトリム、または正の右ブースト)
+        // +Y下向き座標系では前進時に L > R で yawDriftDeg > 0 となるため、右輪強化(正のトリム)が負帰還として正しい
         const yawDriftDeg = shortestTurn(fwdBefore.yaw, fwdAfter.yaw);
-        leftRightTrimRatio = Math.round(Math.max(-0.25, Math.min(0.25, -yawDriftDeg * 0.004)) * 1000) / 1000;
+        leftRightTrimRatio = Math.round(Math.max(-0.25, Math.min(0.25, yawDriftDeg * 0.004)) * 1000) / 1000;
       }
 
       // 3. Left & Right Turn minTurnPwm probe (左右両方向で動き出しPWMを検証し、大きい方を採用)

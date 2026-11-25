@@ -79,7 +79,8 @@ function useLocalizerRuntimeState() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const run = useRef({
     generation: 0, starting: false, stream: null as MediaStream | null, ws: null as WebSocket | null,
-    wsTimer: 0 as number, rejections: 0, frameCallback: 0, pollTimer: 0 as number, watchdog: 0 as number, frameId: 0,
+    wsTimer: 0 as number, rejections: 0, frameCallback: 0, pollTimer: 0 as number, bgWorker: null as Worker | null,
+    watchdog: 0 as number, frameId: 0,
     lastFrameAt: 0, lastVideoTime: -1, recording: false, rows: [] as string[], width: 0, height: 0,
     camera: "", wakeLock: null as WakeLockSentinel | null,
   });
@@ -103,6 +104,10 @@ function useLocalizerRuntimeState() {
     if (state.frameCallback && videoRef.current?.cancelVideoFrameCallback) videoRef.current.cancelVideoFrameCallback(state.frameCallback);
     state.frameCallback = 0;
     clearTimeout(state.pollTimer);
+    if (state.bgWorker) {
+      state.bgWorker.terminate();
+      state.bgWorker = null;
+    }
     clearInterval(state.watchdog);
     clearTimeout(state.wsTimer);
     state.stream?.getTracks().forEach((track) => track.stop());
@@ -175,7 +180,7 @@ function useLocalizerRuntimeState() {
       const detector = await loadDetector();
       if (generation !== state.generation) return;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: {
-        width: { ideal: 1920 }, height: { ideal: 1080 },
+        width: { ideal: 1280 }, height: { ideal: 720 },
         ...(selectedRef.current ? { deviceId: { exact: selectedRef.current } } : {}),
       } });
       if (generation !== state.generation) { stream.getTracks().forEach((track) => track.stop()); return; }
@@ -242,18 +247,43 @@ function useLocalizerRuntimeState() {
           setRecordedRows(state.rows.length);
         }
       };
+      // バックグラウンドタブでもChromeの1Hzタイマー制限を受けないようWeb Workerでフォールバックタイマーを駆動する
+      let bgWorker: Worker | null = null;
+      try {
+        const blob = new Blob([
+          "let t=null;onmessage=(e)=>{if(t!==null){clearTimeout(t);t=null;}if(e.data>0){t=setTimeout(()=>{t=null;postMessage(0);},e.data);}};"
+        ], { type: "application/javascript" });
+        const url = URL.createObjectURL(blob);
+        bgWorker = new Worker(url);
+        URL.revokeObjectURL(url);
+        state.bgWorker = bgWorker;
+      } catch {
+        bgWorker = null;
+      }
+
       const next = () => {
         if (generation !== state.generation) return;
         let delivered = false;
         const trigger = (metadata?: VideoFrameCallbackMetadata) => {
           if (delivered) return;
           delivered = true;
+          if (bgWorker) bgWorker.postMessage(0);
           onFrame(metadata);
         };
         if (video.requestVideoFrameCallback) {
           state.frameCallback = video.requestVideoFrameCallback((_now, metadata) => trigger(metadata));
-          // ウィンドウ背面化などでrequestVideoFrameCallbackが停止した場合のフォールバック
-          state.pollTimer = window.setTimeout(() => trigger(undefined), 120);
+          // ウィンドウ背面化(/run画面を前面表示時など)でrequestVideoFrameCallbackが停止した場合もWeb Worker経由でフルFPSを維持
+          if (bgWorker) {
+            bgWorker.onmessage = () => trigger(undefined);
+            bgWorker.postMessage(90);
+          } else {
+            state.pollTimer = window.setTimeout(() => trigger(undefined), 120);
+          }
+        } else if (bgWorker) {
+          bgWorker.onmessage = () => {
+            if (video.currentTime !== state.lastVideoTime) { state.lastVideoTime = video.currentTime; trigger(undefined); } else next();
+          };
+          bgWorker.postMessage(50);
         } else {
           state.pollTimer = window.setTimeout(() => {
             if (video.currentTime !== state.lastVideoTime) { state.lastVideoTime = video.currentTime; trigger(undefined); } else next();
