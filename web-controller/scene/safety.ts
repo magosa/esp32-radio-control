@@ -1,7 +1,7 @@
-import { cellAt, cellNeighbor, snapToEditGrid, type Edge } from "./grid";
+import { cellAt, cellCenter, cellColRow, cellIndex, cellNeighbor, snapToEditGrid, type Edge } from "./grid";
 import { buildNavigation, type SceneNavigation } from "./navigation";
 import type { SceneMap } from "./types";
-import { AREA_HEIGHT_MM, AREA_WIDTH_MM, CELL_MM, HUMAN_RADIUS_MM, SAFETY_RADIUS_MM, type EditGridMm } from "./units";
+import { AREA_HEIGHT_MM, AREA_WIDTH_MM, CELL_COUNT, CELL_MM, COLUMNS, HUMAN_RADIUS_MM, ROWS, SAFETY_RADIUS_MM, type EditGridMm } from "./units";
 
 export interface Point {
   x: number;
@@ -149,6 +149,140 @@ export function pathProblem(safety: Safety, from: Point, to: Point, kind: ActorK
     if (!safety.navigation.cells[cell]?.traversable) return "移動経路に通行不可・未定義のグリッドがあります。";
   }
   return "";
+}
+
+// 初期位置への移動用: MAP上の壁・家具・通行不可領域および他のロボットを迂回する経路をA*で探索し、
+// 見通し線（Line-of-Sight）で不要な経由点を間引いた経由点リスト（末尾が to）を返す。到達不可なら null。
+export function findDetourPath(
+  safety: Safety,
+  from: Point,
+  to: Point,
+  others: readonly Point[] = [],
+  robotClearanceMm = 145,
+): Point[] | null {
+  const segmentClear = (a: Point, b: Point): boolean =>
+    pathProblem(safety, a, b, "robot") === "" &&
+    others.every((o) => pointDistance(o, a, b) >= robotClearanceMm - EPS);
+
+  if (segmentClear(from, to)) return [to];
+
+  const radius = safety.robotRadius;
+  const safe = new Uint8Array(CELL_COUNT);
+  for (let cell = 0; cell < CELL_COUNT; cell++) {
+    if (!safety.navigation.cells[cell]?.traversable) continue;
+    const p = cellCenter(cell);
+    if (p.x < radius || p.x > AREA_WIDTH_MM - radius || p.y < radius || p.y > AREA_HEIGHT_MM - radius) continue;
+    let ok = true;
+    for (const wall of safety.navigation.walls) {
+      if (pointDistance(p, { x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 }) < radius - EPS) { ok = false; break; }
+    }
+    if (!ok) continue;
+    for (const obs of safety.navigation.obstacles) {
+      if (rectangleDistance(p, p, obs) < radius - EPS) { ok = false; break; }
+    }
+    if (!ok) continue;
+    for (const o of others) {
+      if (Math.hypot(p.x - o.x, p.y - o.y) < robotClearanceMm - EPS) { ok = false; break; }
+    }
+    if (ok) safe[cell] = 1;
+  }
+
+  const nearestSafeCell = (p: Point, maxDistMm: number): number => {
+    const direct = cellAt(p.x, p.y);
+    if (direct >= 0 && safe[direct]) return direct;
+    let best = -1, bestD = maxDistMm;
+    for (let cell = 0; cell < CELL_COUNT; cell++) {
+      if (!safe[cell]) continue;
+      const c = cellCenter(cell);
+      const d = Math.hypot(c.x - p.x, c.y - p.y);
+      if (d < bestD) { bestD = d; best = cell; }
+    }
+    return best;
+  };
+
+  const startCell = nearestSafeCell(from, 200);
+  const goalCell = nearestSafeCell(to, 60);
+  if (startCell < 0 || goalCell < 0) return null;
+
+  const gScore = new Float64Array(CELL_COUNT).fill(Infinity);
+  const fScore = new Float64Array(CELL_COUNT).fill(Infinity);
+  const cameFrom = new Int32Array(CELL_COUNT).fill(-1);
+  const closed = new Uint8Array(CELL_COUNT);
+  const goalCR = cellColRow(goalCell);
+  const heuristic = (cell: number) => {
+    const { col, row } = cellColRow(cell);
+    return Math.hypot(col - goalCR.col, row - goalCR.row);
+  };
+
+  gScore[startCell] = 0;
+  fScore[startCell] = heuristic(startCell);
+  const open: number[] = [startCell];
+  const inOpen = new Uint8Array(CELL_COUNT);
+  inOpen[startCell] = 1;
+
+  const dirs: readonly [number, number, number][] = [
+    [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
+    [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2],
+  ];
+
+  let found = false;
+  while (open.length > 0) {
+    let bestIdx = 0;
+    for (let i = 1; i < open.length; i++) {
+      if (fScore[open[i]] < fScore[open[bestIdx]]) bestIdx = i;
+    }
+    const current = open[bestIdx];
+    open[bestIdx] = open[open.length - 1];
+    open.pop();
+    inOpen[current] = 0;
+    if (current === goalCell) { found = true; break; }
+    closed[current] = 1;
+
+    const { col, row } = cellColRow(current);
+    for (const [dc, dr, cost] of dirs) {
+      const nc = col + dc, nr = row + dr;
+      if (nc < 0 || nc >= COLUMNS || nr < 0 || nr >= ROWS) continue;
+      const next = cellIndex(nc, nr);
+      if (next < 0 || closed[next] || !safe[next]) continue;
+      if (dc !== 0 && dr !== 0) {
+        const adj1 = cellIndex(col + dc, row);
+        const adj2 = cellIndex(col, row + dr);
+        if (adj1 < 0 || adj2 < 0 || !safe[adj1] || !safe[adj2]) continue;
+      }
+      const tentative = gScore[current] + cost;
+      if (tentative < gScore[next]) {
+        cameFrom[next] = current;
+        gScore[next] = tentative;
+        fScore[next] = tentative + heuristic(next);
+        if (!inOpen[next]) {
+          open.push(next);
+          inOpen[next] = 1;
+        }
+      }
+    }
+  }
+
+  if (!found) return null;
+
+  const rawCells: number[] = [];
+  for (let cur = goalCell; cur !== -1; cur = cameFrom[cur]) rawCells.push(cur);
+  rawCells.reverse();
+
+  const rawPoints: Point[] = [from, ...rawCells.map(cellCenter), to];
+  const smoothed: Point[] = [];
+  let idx = 0;
+  while (idx < rawPoints.length - 1) {
+    let nextIdx = idx + 1;
+    for (let j = rawPoints.length - 1; j > idx + 1; j--) {
+      if (segmentClear(rawPoints[idx], rawPoints[j])) {
+        nextIdx = j;
+        break;
+      }
+    }
+    smoothed.push(rawPoints[nextIdx]);
+    idx = nextIdx;
+  }
+  return smoothed.length > 0 ? smoothed : [to];
 }
 
 // Splitting at cell borders keeps short zone crossings independent of sampling.

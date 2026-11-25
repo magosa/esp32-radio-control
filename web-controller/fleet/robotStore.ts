@@ -55,8 +55,9 @@ export class RobotStore {
   register(device: DeviceDescription): void {
     if (!isDeviceDescription(device)) throw new Error("Invalid device description");
     const next = structuredClone(this.data);
-    next.devices = next.devices.filter((known) => known.deviceId !== device.deviceId);
-    next.devices.push(structuredClone(device));
+    const idx = next.devices.findIndex((known) => known.deviceId === device.deviceId);
+    if (idx >= 0) next.devices[idx] = structuredClone(device);
+    else next.devices.push(structuredClone(device));
     if (device.capabilities.includes("drive") && !next.robots.some((robot) => robot.driveDeviceId === device.deviceId)) {
       next.robots.push({ robotId: `robot-${device.deviceId}`, driveDeviceId: device.deviceId, cameraDeviceId: null,
         markerId: null, markerHeightMm: DEFAULT_MARKER_HEIGHT_MM });
@@ -95,13 +96,14 @@ export class RobotStore {
     this.save(next);
   }
 
-  // priority は null で未設定に戻す。footprintMm 省略時は現在の外形を維持する。
-  setSettings(robotId: string, priority: number | null, footprintMm?: { w: number; d: number }): void {
+  // priority は null で未設定に戻す。footprintMm / sceneSlot 省略時は現在の設定を維持する。
+  setSettings(robotId: string, priority: number | null, footprintMm?: { w: number; d: number }, sceneSlot?: number | null): void {
     const next = structuredClone(this.data);
     const robot = next.robots.find((candidate) => candidate.robotId === robotId);
     if (!robot) throw new Error("Robot not found");
     robot.priority = priority;
     if (footprintMm !== undefined) robot.footprintMm = footprintMm;
+    if (sceneSlot !== undefined) robot.sceneSlot = sceneSlot;
     this.validateRobots(next);
     this.save(next);
   }
@@ -111,6 +113,7 @@ export class RobotStore {
     const driveIds = new Set<string>();
     const cameraIds = new Set<string>();
     const markerIds = new Set<number>();
+    const sceneSlots = new Set<number>();
     for (const robot of data.robots) {
       if (!robot || typeof robot.robotId !== "string" || !robot.robotId || robotIds.has(robot.robotId)
         || typeof robot.driveDeviceId !== "string" || driveIds.has(robot.driveDeviceId)
@@ -123,6 +126,11 @@ export class RobotStore {
         if (!Number.isInteger(robot.markerId) || robot.markerId < 0 || robot.markerId > MAX_MARKER_ID
           || markerIds.has(robot.markerId)) throw new Error("Marker ID invalid or already assigned");
         markerIds.add(robot.markerId);
+      }
+      if (robot.sceneSlot !== undefined && robot.sceneSlot !== null) {
+        if (!Number.isInteger(robot.sceneSlot) || robot.sceneSlot < 1 || robot.sceneSlot > MAX_MARKER_ID + 1
+          || sceneSlots.has(robot.sceneSlot)) throw new Error("Scene slot invalid or already assigned");
+        sceneSlots.add(robot.sceneSlot);
       }
       if (robot.markerHeightMm !== undefined && !(Number.isFinite(robot.markerHeightMm)
         && robot.markerHeightMm > 0 && robot.markerHeightMm <= MAX_MARKER_HEIGHT_MM)) throw new Error("Invalid marker height");

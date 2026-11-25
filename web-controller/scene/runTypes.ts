@@ -6,7 +6,7 @@ export type HaltKind = "operator" | "lost" | "stuck" | "outside" | "localizer" |
 
 export type RunCommand =
   | { type: "prepare"; mapId: string }
-  | { type: "position" }
+  | { type: "position"; avoidWalls?: boolean }
   | { type: "start" }
   | { type: "pause" }
   | { type: "resume" }
@@ -140,7 +140,10 @@ export function parseRunCommand(value: unknown): RunCommand | null {
   switch (item.type) {
     case "prepare":
       return typeof item.mapId === "string" && item.mapId.length > 0 && item.mapId.length <= 100 ? { type: "prepare", mapId: item.mapId } : null;
-    case "position": case "start": case "pause": case "resume": case "abort": case "reset":
+    case "position":
+      return item.avoidWalls === undefined || typeof item.avoidWalls === "boolean"
+        ? { type: "position", ...(typeof item.avoidWalls === "boolean" ? { avoidWalls: item.avoidWalls } : {}) } : null;
+    case "start": case "pause": case "resume": case "abort": case "reset":
       return { type: item.type };
     case "setWaitTimeout":
       return typeof item.seconds === "number" && Number.isFinite(item.seconds) && item.seconds >= 5 && item.seconds <= 300

@@ -274,3 +274,87 @@ test("positioning sorts by priority before markerId, reports initial mismatches 
   assert.equal(r.command({ type: "setWaitTimeout", seconds: 45 }).ok, true);
   assert.equal(r.state().waitTimeoutSec, 45);
 });
+
+test("sceneSlot on /robots binds imported scenes without track.robotId and rejects duplicate slots", (context) => {
+  const trackNoId = (id: string, y: number, actions: unknown[]) => ({
+    id, kind: "robot", name: id, color: "#8d9bff", muted: false, locked: false, robotRole: "cleaning",
+    initial: { x: 110, y, yaw: 0, roomId: "r" }, actions,
+  });
+  const scene = sceneOf([
+    trackNoId("ロボット 1", 110, [move("m1", 1, 6, 410, 110)]),
+    trackNoId("ロボット 2", 310, [move("m2", 1, 6, 410, 310)]),
+  ]);
+  const r = rig(context, scene, [{ x: 110, y: 310 }, { x: 110, y: 110 }]);
+  const reply = () => r.operator.messages.filter((m) => m.type === "operationResult").at(-1)!;
+  // Assign robot-d1 to slot 1 (ロボット 1) and robot-d0 to slot 2 (ロボット 2)
+  r.operator.receive({ type: "setRobotSettings", requestId: "sl1", robotId: "robot-d1", priority: null, sceneSlot: 1 });
+  assert.equal(reply().ok, true);
+  r.operator.receive({ type: "setRobotSettings", requestId: "sl-dup", robotId: "robot-d0", priority: null, sceneSlot: 1 });
+  assert.equal(reply().ok, false, "duplicate sceneSlot must be rejected");
+  r.operator.receive({ type: "setRobotSettings", requestId: "sl2", robotId: "robot-d0", priority: null, sceneSlot: 2 });
+  assert.equal(reply().ok, true);
+
+  assert.equal(r.command({ type: "prepare", mapId: "m1" }).ok, true);
+  r.step();
+  const s = r.state();
+  assert.equal(s.robots[0].robotId, "robot-d1");
+  assert.equal(s.robots[1].robotId, "robot-d0");
+  assert.equal(s.robots[0].tracking, "tracking");
+  assert.equal(s.robots[1].tracking, "tracking");
+  assert.equal(s.excludedRobots?.length ?? 0, 0);
+  assert.equal(s.canStart, true);
+});
+
+test("positioning detours around map walls by default (avoidWalls=true)", (context) => {
+  const cells: number[] = [];
+  for (let r = 0; r < 31; r++) {
+    for (let c = 0; c < 55; c++) {
+      if (c >= 16 && c <= 20 && r <= 17) continue;
+      cells.push(r * 55 + c);
+    }
+  }
+  const detourMap: SceneMap = {
+    id: "m1", name: "detour-wall", editGridMm: 20, doorMode: "story",
+    floorPlan: { doors: [], furniture: [], walls: [] },
+    rooms: [{ id: "r1", name: "Main", color: "#58d8ca", kind: "room", material: "tile", cells }],
+    tracks: [robot("A", "robot-d0", 160, [move("m1", 1, 6, 220, 160)])],
+  } as SceneMap;
+  const r = rig(context, detourMap, [{ x: 600, y: 160 }]);
+  assert.equal(r.command({ type: "prepare", mapId: "m1" }).ok, true);
+  r.step();
+  assert.equal(r.command({ type: "position", avoidWalls: true }).ok, true);
+  let maxY = 0;
+  for (let i = 0; i < 400 && r.state().positioning.active; i++) {
+    r.step();
+    maxY = Math.max(maxY, r.sims[0].y);
+  }
+  assert.equal(r.state().positioning.items[0].state, "arrived");
+  assert.equal(r.state().canStart, true);
+  assert.ok(maxY > 380, `expected detour above y=380, maxY=${maxY}`);
+});
+
+test("positioning fails on sealed wall when avoidWalls=true, and succeeds directly when avoidWalls=false", (context) => {
+  const leftRoomCells = Array.from({ length: 31 }, (_, r) => Array.from({ length: 15 }, (_, c) => r * 55 + c)).flat();
+  const rightRoomCells = Array.from({ length: 31 }, (_, r) => Array.from({ length: 20 }, (_, c) => r * 55 + (25 + c))).flat();
+  const sealedMap: SceneMap = {
+    id: "m1", name: "sealed", editGridMm: 20, doorMode: "story",
+    floorPlan: { doors: [], furniture: [], walls: [] },
+    rooms: [
+      { id: "r1", name: "Left", color: "#58d8ca", kind: "room", material: "tile", cells: leftRoomCells },
+      { id: "r2", name: "Right", color: "#8d9bff", kind: "room", material: "tile", cells: rightRoomCells },
+    ],
+    tracks: [robot("A", "robot-d0", 200, [move("m1", 1, 6, 220, 200)])],
+  } as SceneMap;
+  const r = rig(context, sealedMap, [{ x: 650, y: 200 }]);
+  assert.equal(r.command({ type: "prepare", mapId: "m1" }).ok, true);
+  r.step();
+  // avoidWalls=true fails safely on sealed wall
+  assert.equal(r.command({ type: "position", avoidWalls: true }).ok, true);
+  r.step();
+  assert.equal(r.state().positioning.items[0].state, "failed");
+  // avoidWalls=false ignores virtual map wall and arrives cleanly
+  assert.equal(r.command({ type: "position", avoidWalls: false }).ok, true);
+  const done = r.until((s) => !s.positioning.active, 200);
+  assert.equal(done.positioning.items[0].state, "arrived");
+  assert.equal(done.canStart, true);
+});

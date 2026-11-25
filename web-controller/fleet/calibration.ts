@@ -206,7 +206,8 @@ export class CalibrationRunner {
       const minTurnPwm = turnedRight ? Math.max(minTurnLeft, minTurnRight) : Math.max(minTurnLeft, 145);
 
       const turnPwm = 160;
-      const turnDurationMs = 450;
+      // 高速旋回機体(350〜450°/s)でも180°折り返しエイリアシングを起こさない260ms測定
+      const turnDurationMs = 260;
       const turnLeftBefore = getValidPose();
       const turnLeftStart = this.deps.now();
       this.deps.sendDrive(deviceId, "c", turnPwm, turnPwm);

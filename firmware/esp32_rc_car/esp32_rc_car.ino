@@ -327,7 +327,7 @@ void applyMotorControl(char cmd, int speedL, int speedR) {
   // EXPR_SLEEPY判定用: 'e'(停止)に入った瞬間�E時刻のみ記録し、以後�E連続停止時間として参�Eする、E
   unsigned long now = millis();
 
-  if (cmd == 'e') {
+  if (cmd == 'e' || (speedL <= 0 && speedR <= 0)) {
     if (currentCommand != 'e') {
       idleStartTime = now;
       nextIdleExpressionAt = 0;
@@ -443,9 +443,11 @@ void applyMotorControl(char cmd, int speedL, int speedR) {
 }
 
 void updateMotorDynamics(unsigned long now) {
-  // 1. Hardware autonomous stop timer (durationMs) -> triggers soft-stop
+  // 1. Hardware autonomous stop timer (durationMs) -> immediate free-run cutoff (no extra soft-stop tail, no active short-braking)
   if (currentCommand != 'e' && commandDeadlineMs > 0 && (long)(now - commandDeadlineMs) >= 0) {
     commandDeadlineMs = 0;
+    currentSpeedL = 0;
+    currentSpeedR = 0;
     applyMotorControl('e', 0, 0);
     strncpy(lastRawBuffer, "PULSE_DONE", sizeof(lastRawBuffer));
   }
@@ -1287,6 +1289,8 @@ void updateFace(FaceLayoutMode layout) {
   WebSocketsClient webSocket;
   Preferences preferences;
   unsigned long lastTelemetryTime = 0;
+  unsigned long lastServerActivityMs = 0;
+  int consecutiveSendFailures = 0;
   const unsigned long TELEMETRY_INTERVAL_MS = 1000; // フェイルセーフ�E生存確認も兼ねめE
 
   void saveDisplayName(const char* name) {
@@ -1297,20 +1301,39 @@ void updateFace(FaceLayoutMode layout) {
     preferences.end();
   }
 
+  void forceWebSocketReconnect(const char* reason) {
+    isDeviceConnected = false;
+    consecutiveSendFailures = 0;
+    applyMotorControl('e', 0, 0);
+    strncpy(lastRawBuffer, reason, sizeof(lastRawBuffer) - 1);
+    lastRawBuffer[sizeof(lastRawBuffer) - 1] = '\0';
+    Serial.printf("[WARN] Forcing WebSocket disconnect (%s)\n", reason);
+    if (xSemaphoreTakeRecursive(wsMutex, portMAX_DELAY)) {
+      webSocket.disconnect();
+      xSemaphoreGiveRecursive(wsMutex);
+    }
+  }
+
   void sendHello() {
     StaticJsonDocument<256> doc;
     doc["type"] = "hello";
     doc["deviceId"] = deviceId;
     doc["name"] = effectiveDisplayName();
-    doc["fw"] = "4.1.0";
+    doc["fw"] = "4.2.0";
     JsonArray capabilities = doc.createNestedArray("capabilities");
     capabilities.add("drive");
     capabilities.add("display");
     char buf[256];
     size_t n = serializeJson(doc, buf, sizeof(buf));
+    bool ok = false;
     if (xSemaphoreTakeRecursive(wsMutex, portMAX_DELAY)) {
-      webSocket.sendTXT(buf, n);
+      ok = webSocket.sendTXT(buf, n);
       xSemaphoreGiveRecursive(wsMutex);
+    }
+    if (ok) {
+      consecutiveSendFailures = 0;
+    } else if (++consecutiveSendFailures >= 3) {
+      forceWebSocketReconnect("HELLO_FAIL");
     }
   }
 
@@ -1318,16 +1341,23 @@ void updateFace(FaceLayoutMode layout) {
     StaticJsonDocument<160> doc;
     doc["type"] = "telemetry";
     doc["deviceId"] = deviceId;
-    doc["cmd"] = String(currentCommand);
+    char cmdBuf[2] = { currentCommand, '\0' };
+    doc["cmd"] = cmdBuf;
     doc["speedL"] = currentSpeedL;
     doc["speedR"] = currentSpeedR;
     doc["heap"] = ESP.getFreeHeap();
     doc["uptimeMs"] = millis();
     char buf[160];
     size_t n = serializeJson(doc, buf, sizeof(buf));
+    bool ok = false;
     if (xSemaphoreTakeRecursive(wsMutex, portMAX_DELAY)) {
-      webSocket.sendTXT(buf, n);
+      ok = webSocket.sendTXT(buf, n);
       xSemaphoreGiveRecursive(wsMutex);
+    }
+    if (ok) {
+      consecutiveSendFailures = 0;
+    } else if (++consecutiveSendFailures >= 3) {
+      forceWebSocketReconnect("SEND_FAIL");
     }
   }
 
@@ -1356,6 +1386,7 @@ void updateFace(FaceLayoutMode layout) {
     if (deserializeJson(doc, payload, length) != DeserializationError::Ok) return;
 
     lastPacketTime = millis();
+    lastServerActivityMs = lastPacketTime;
     const char* type = doc["type"] | "";
 
     if (strcmp(type, "drive") == 0) {
@@ -1366,11 +1397,11 @@ void updateFace(FaceLayoutMode layout) {
       char raw[24];
       snprintf(raw, sizeof(raw), "%s,%d,%d;", cmdStr, speedL, speedR);
       parseCommandPacketFast(raw, strlen(raw));
-      if (cmdStr[0] != 'e' && durationMs > 0) {
+      if (cmdStr[0] != 'e' && (speedL > 0 || speedR > 0)) {
         if (pendingCommand != 'e' || deadtimeUntilMs > 0) {
           pendingDurationMs = durationMs;
         } else {
-          commandDeadlineMs = millis() + durationMs;
+          commandDeadlineMs = (durationMs > 0) ? (millis() + durationMs) : 0;
         }
       }
     } else if (strcmp(type, "setName") == 0) {
@@ -1399,18 +1430,30 @@ void updateFace(FaceLayoutMode layout) {
     switch (type) {
       case WStype_CONNECTED:
         isDeviceConnected = true;
+        consecutiveSendFailures = 0;
         lastPacketTime = millis();
+        lastServerActivityMs = lastPacketTime;
         Serial.println(F("[INFO] Fleet Hub Connected"));
         sendHello();
         break;
       case WStype_DISCONNECTED:
         isDeviceConnected = false;
+        consecutiveSendFailures = 0;
         Serial.println(F("[INFO] Fleet Hub Disconnected -> Auto Reset to STOP"));
         applyMotorControl('e', 0, 0);
         strncpy(lastRawBuffer, "DISCONNECT", sizeof(lastRawBuffer));
         break;
       case WStype_TEXT:
         handleWebSocketMessage(payload, length);
+        break;
+      case WStype_PING:
+      case WStype_PONG:
+        lastServerActivityMs = millis();
+        break;
+      case WStype_ERROR:
+        if (isDeviceConnected) {
+          forceWebSocketReconnect("WS_ERROR");
+        }
         break;
       default:
         break;
@@ -1546,6 +1589,7 @@ void setup() {
   webSocket.begin(FLEET_HUB_HOST, FLEET_HUB_PORT, "/ws/device");
   webSocket.onEvent(onWebSocketEvent);
   webSocket.setReconnectInterval(3000);
+  webSocket.enableHeartbeat(3000, 2000, 2);
 
   Serial.printf("[INFO] Fleet WebSocket client started: %s -> %s:%d (FreeHeap: %lu bytes)\n",
                 deviceId, FLEET_HUB_HOST, FLEET_HUB_PORT, ESP.getFreeHeap());
@@ -1616,10 +1660,15 @@ void loop() {
   unsigned long now = millis();
 
 #if TRANSPORT_MODE == MODE_WEBSOCKET
-  if (WiFi.status() != WL_CONNECTED && now - lastWifiReconnectAttempt >= WIFI_RECONNECT_INTERVAL_MS) {
-    lastWifiReconnectAttempt = now;
-    Serial.println(F("[WARN] Wi-Fi disconnected; retrying"));
-    WiFi.reconnect();
+  if (WiFi.status() != WL_CONNECTED) {
+    if (isDeviceConnected) {
+      forceWebSocketReconnect("WIFI_LOST");
+    }
+    if (now - lastWifiReconnectAttempt >= WIFI_RECONNECT_INTERVAL_MS) {
+      lastWifiReconnectAttempt = now;
+      Serial.println(F("[WARN] Wi-Fi disconnected; retrying"));
+      WiFi.reconnect();
+    }
   }
 #endif
 
@@ -1640,6 +1689,9 @@ void loop() {
   if (isDeviceConnected && (now - lastTelemetryTime > TELEMETRY_INTERVAL_MS)) {
     lastTelemetryTime = now;
     sendTelemetry();
+  }
+  if (isDeviceConnected && (now - lastServerActivityMs > ZOMBIE_TIMEOUT_MS)) {
+    forceWebSocketReconnect("ZOMBIE_WS");
   }
 #endif
 

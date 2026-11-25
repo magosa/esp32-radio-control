@@ -69,12 +69,14 @@ export function findEvasion(safety: Safety, yielder: Mover, priority: Mover, oth
   candidates.sort((a, b) => a.d - b.d || a.p.x - b.p.x || a.p.y - b.p.y);
   for (const { p } of candidates) {
     if (pathProblem(safety, p, p) || pathProblem(safety, yielder, p)) continue;
-    // Do not slide through the priority robot on the way out.
+    // Do not slide closer to the priority robot on the way out.
+    const startDist = distance(yielder, priority);
+    const minClear = Math.min(CONFLICT_MM, Math.max(0, startDist - 1));
     const steps = Math.ceil(distance(yielder, p) / GRID_MM);
     let clear = true;
     for (let i = 1; i <= steps && clear; i++) {
       const q = { x: yielder.x + (p.x - yielder.x) * i / steps, y: yielder.y + (p.y - yielder.y) * i / steps };
-      if (distance(q, priority) < CONFLICT_MM) clear = false;
+      if (distance(q, priority) < minClear) clear = false;
     }
     if (clear) return p;
   }

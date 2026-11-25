@@ -55,9 +55,14 @@ export class VehicleRegistry {
 
   touch(deviceId: string): void {
     const record = this.vehicles.get(deviceId);
-    if (!record) return;
+    if (!record || !record.ws || record.ws.readyState !== record.ws.OPEN) return;
     record.state.lastSeen = Date.now();
     record.state.status = "online";
+  }
+
+  setName(deviceId: string, name: string): void {
+    const record = this.vehicles.get(deviceId);
+    if (record) record.state.name = name;
   }
 
   hasCapability(deviceId: string, capability: DeviceCapability): boolean {
@@ -72,6 +77,7 @@ export class VehicleRegistry {
     for (const record of Array.from(this.vehicles.values())) {
       if (record.ws === ws) {
         record.state.status = "offline";
+        record.ws = undefined;
       }
     }
   }
@@ -84,7 +90,8 @@ export class VehicleRegistry {
       if (record.state.status === "online" && now - record.state.lastSeen > OFFLINE_TIMEOUT_MS) {
         record.state.status = "offline";
         const ws = record.ws;
-        if (ws && ws.readyState === ws.OPEN) timedOutSockets.push(ws);
+        record.ws = undefined;
+        if (ws && (ws.readyState === ws.OPEN || ws.readyState === ws.CLOSING)) timedOutSockets.push(ws);
       }
     }
     return timedOutSockets;

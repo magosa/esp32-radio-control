@@ -83,8 +83,15 @@ export class FleetHub {
         if (this.registry.getAllStates().some((state) => state.status === "offline" && state.mode === "auto")) {
           this.routeEngine.stop();
         }
+        if (this.activeCalibration) {
+          const calRobot = this.store.getRobots().find((r) => r.robotId === this.activeCalibration?.robotId);
+          if (calRobot && this.registry.getDeviceState(calRobot.driveDeviceId)?.status !== "online") {
+            this.activeCalibration.runner.abort();
+            this.activeCalibration = null;
+          }
+        }
         this.broadcastFleetState();
-        timedOutSockets.forEach((ws) => ws.terminate());
+        timedOutSockets.forEach((ws) => { try { ws.terminate(); } catch {} });
       }
       for (const dev of this.registry.getAllDeviceStates()) {
         if (dev.status === "online") {
@@ -140,8 +147,24 @@ export class FleetHub {
     console.log("[fleet-hub] /ws/device socket connected");
 
     if (typeof (ws as any).on === "function") {
+      ws.on("error", (err) => {
+        console.warn(`[fleet-hub] /ws/device socket error (${deviceId ?? "unknown"}):`, err instanceof Error ? err.message : err);
+        try { ws.terminate(); } catch {}
+      });
+    }
+
+    // hello/telemetry が届かない半開き・未認証ソケットが居座ってESP32の再接続を妨げるのを防ぐ
+    const handshakeTimer = setTimeout(() => {
+      if (!deviceId) {
+        console.warn("[fleet-hub] /ws/device handshake timeout; terminating unauthenticated socket");
+        try { ws.terminate(); } catch { try { ws.close(); } catch {} }
+      }
+    }, 10000);
+    handshakeTimer.unref?.();
+
+    if (typeof (ws as any).on === "function") {
       ws.on("pong", () => {
-        if (deviceId) this.registry.touch(deviceId);
+        if (deviceId && this.registry.getWs(deviceId) === ws) this.registry.touch(deviceId);
       });
     }
 
@@ -160,8 +183,10 @@ export class FleetHub {
           return ws.close(1011, "Device registration failed");
         }
         deviceId = description.deviceId;
+        clearTimeout(handshakeTimer);
         console.log(`[fleet-hub] device hello: ${deviceId} (${description.name}) fw=${description.fw}`);
         this.registry.registerHello(deviceId, description.name, ws, description.capabilities, description.fw);
+        if (this.runDevices.includes(deviceId)) this.registry.setMode(deviceId, "auto");
         this.broadcastFleetState();
       } else if (!deviceId && (msg.type === "telemetry" || msg.type === "heartbeat") && typeof msg.deviceId === "string") {
         const known = this.store.getDevices().find((d) => d.deviceId === msg.deviceId);
@@ -170,8 +195,10 @@ export class FleetHub {
           return;
         }
         deviceId = known.deviceId;
+        clearTimeout(handshakeTimer);
         console.log(`[fleet-hub] device auto-recovered from ${msg.type}: ${deviceId}`);
         this.registry.registerHello(deviceId, known.name, ws, known.capabilities, known.fw);
+        if (this.runDevices.includes(deviceId)) this.registry.setMode(deviceId, "auto");
         if (msg.type === "telemetry" && this.registry.hasCapability(deviceId, "drive")) {
           this.registry.updateTelemetry(msg.deviceId, {
             cmd: msg.cmd,
@@ -209,18 +236,29 @@ export class FleetHub {
     });
 
     ws.on("close", (code, reason) => {
+      clearTimeout(handshakeTimer);
       console.log(`[fleet-hub] /ws/device closed: deviceId=${deviceId ?? "unknown"} code=${code} reason=${reason?.toString() ?? ""}`);
       if (deviceId && this.registry.getWs(deviceId) !== ws) return;
       this.registry.markDisconnected(ws);
       if (deviceId) {
         this.streamingDeviceIds.delete(deviceId);
         if (this.registry.hasCapability(deviceId, "drive") && this.routeEngine.isRunning()) this.routeEngine.stop();
+        if (this.activeCalibration) {
+          const calRobot = this.store.getRobots().find((r) => r.robotId === this.activeCalibration?.robotId);
+          if (calRobot?.driveDeviceId === deviceId) {
+            this.activeCalibration.runner.abort();
+            this.activeCalibration = null;
+          }
+        }
       }
       this.broadcastFleetState();
     });
   }
 
   private handleClientConnection(ws: WebSocket): void {
+    if (typeof (ws as any).on === "function") {
+      ws.on("error", () => { try { ws.terminate(); } catch {} });
+    }
     this.clients.add(ws);
     this.sendToClient(ws, this.getFleetState());
     this.sendToClient(ws, this.getPoseState());
@@ -245,6 +283,9 @@ export class FleetHub {
   }
 
   private handleLocalizerConnection(ws: WebSocket): void {
+    if (typeof (ws as any).on === "function") {
+      ws.on("error", () => { try { ws.terminate(); } catch {} });
+    }
     // 俯瞰カメラは1つ。先着を優先し、稼働中(直近に受信あり)の間は新規接続を拒否する。
     // 疑似の測位や別タブが実カメラを奪うのを防ぎ、無言の半開き接続だけ置き換えられる。
     const current = this.localizerWs;
@@ -328,9 +369,11 @@ export class FleetHub {
       }
       case "setRobotSettings": {
         const footprint = msg.footprintMm;
+        const sceneSlot = msg.sceneSlot;
         if (typeof msg.requestId !== "string" || typeof msg.robotId !== "string" || !(msg.priority === null || Number.isInteger(msg.priority))
-          || !(footprint === undefined || (typeof footprint === "object" && footprint !== null))) throw new Error("Invalid robot settings");
-        this.store.setSettings(msg.robotId, msg.priority, footprint);
+          || !(footprint === undefined || (typeof footprint === "object" && footprint !== null))
+          || !(sceneSlot === undefined || sceneSlot === null || Number.isInteger(sceneSlot))) throw new Error("Invalid robot settings");
+        this.store.setSettings(msg.robotId, msg.priority, footprint, sceneSlot);
         this.broadcastFleetState();
         this.sendToClient(client, { type: "operationResult", requestId: msg.requestId, ok: true });
         break;
@@ -442,9 +485,14 @@ export class FleetHub {
       }
       case "setVehicleName": {
         if (typeof msg.name !== "string" || !msg.name.trim() || msg.name.length > 31) throw new Error("Invalid name");
+        const trimmed = msg.name.trim();
         const ws = this.registry.getWs(msg.deviceId);
         if (ws && ws.readyState === ws.OPEN) {
-          ws.send(JSON.stringify({ type: "setName", name: msg.name }));
+          ws.send(JSON.stringify({ type: "setName", name: trimmed }));
+          this.registry.setName(msg.deviceId, trimmed);
+          const known = this.store.getDevices().find((d) => d.deviceId === msg.deviceId);
+          if (known) this.store.register({ ...known, name: trimmed });
+          this.broadcastFleetState();
         }
         break;
       }
@@ -574,7 +622,7 @@ export class FleetHub {
         if (!failure) this.runMapId = map.id;
         break;
       }
-      case "position": failure = this.runner.position(); break;
+      case "position": failure = this.runner.position(command.avoidWalls); break;
       case "start": failure = this.runner.start(); break;
       case "pause": failure = this.runner.pause(); break;
       case "resume": failure = this.runner.resume(); break;
@@ -660,7 +708,7 @@ export class FleetHub {
   }
 
   private sendToClient(ws: WebSocket, msg: ClientOutboundMessage): void {
-    ws.send(JSON.stringify(msg));
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
   }
 
   private parseJson<T>(text: string): T | null {

@@ -9,6 +9,7 @@ import { TRACKING_LABEL } from "../tracking";
 import styles from "../console.module.css";
 
 const MARKER_IDS = Array.from({ length: MAX_ROBOTS }, (_, id) => id);
+const SCENE_SLOTS = Array.from({ length: MAX_ROBOTS }, (_, index) => index + 1);
 
 function MarkerHeight({ robot, disabled, onCommit }: { robot: RobotState; disabled: boolean; onCommit: (height: number) => void }) {
   const [draft, setDraft] = useState(String(robot.markerHeightMm));
@@ -115,6 +116,17 @@ export default function RobotsPage() {
         {robotMarker && <p className={styles.assignmentStatus} role={robotMarker.error ? "alert" : "status"}>
           {robotMarker.pending ? "保存中…" : robotMarker.error || "保存しました"}
         </p>}
+        <label>シーン担当（ロボット番号）<select aria-label={`${robot.name}のシーン担当`} value={robot.sceneSlot ?? ""}
+          disabled={!connected || !!settingsOp?.pending}
+          onChange={(event) => saveRobotSettings(robot.robotId, robot.priority ?? null, undefined, event.target.value === "" ? null : Number(event.target.value))}>
+          <option value="">未設定</option>
+          {SCENE_SLOTS.map((slot) => {
+            const owner = robots.find((candidate) => candidate.sceneSlot === slot);
+            return <option key={slot} value={slot} disabled={!!owner && owner.robotId !== robot.robotId}>
+              ロボット {slot}{owner && owner.robotId !== robot.robotId ? ` · ${owner.name}に割当済み` : ""}
+            </option>;
+          })}
+        </select></label>
         <IntField label="優先順位" value={robot.priority ?? null} min={1} max={99} blankOk disabled={!connected || !!settingsOp?.pending}
           hint="小さいほど優先。空欄は後ろ" onCommit={(value) => saveRobotSettings(robot.robotId, value)} />
         <IntField label="外形 幅 (mm)" value={robot.footprintMm?.w ?? 80} min={60} max={80} disabled={!connected || !!settingsOp?.pending}

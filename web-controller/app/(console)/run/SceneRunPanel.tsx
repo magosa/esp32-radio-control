@@ -101,6 +101,7 @@ export function SceneRunPanel() {
   const { status, runState, runOp, sendRun } = useFleetSocket();
   const { project } = useSceneProject();
   const [mapId, setMapId] = useState("");
+  const [avoidWalls, setAvoidWalls] = useState(true);
   const run = runState?.state ?? idleSnapshot();
   const connected = status === "connected";
   const selected = run.mapId ?? mapId;
@@ -181,9 +182,13 @@ export function SceneRunPanel() {
             </table>}
         </section>
         <section className={styles.card} aria-label="初期位置への移動">
-          <h3>初期位置へ自動で動かす（1台ずつ順番に、直線で）</h3>
-          <div className={styles.actions} style={{ marginLeft: 0, marginBottom: 8 }}>
-            <button type="button" className={consoleStyles.secondary} disabled={run.positioning.active} onClick={() => sendRun({ type: "position" })}>初期位置へ移動</button>
+          <h3>初期位置へ自動で動かす（1台ずつ順番に）</h3>
+          <div className={styles.actions} style={{ marginLeft: 0, marginBottom: 8, flexWrap: "wrap" }}>
+            <button type="button" className={consoleStyles.secondary} disabled={run.positioning.active} onClick={() => sendRun({ type: "position", avoidWalls })}>初期位置へ移動</button>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" checked={avoidWalls} disabled={run.positioning.active} onChange={(event) => setAvoidWalls(event.target.checked)} />
+              MAPの壁を迂回する
+            </label>
             {run.positioning.active && <span className={styles.phase} data-phase="waiting">初期位置へ移動中 {arrivedPositionCount}/{run.positioning.items.length}</span>}
             <span>全台が到着判定を満たすと「開始」が有効になります</span>
           </div>

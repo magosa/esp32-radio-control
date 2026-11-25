@@ -143,7 +143,7 @@ describe("CalibrationRunner", () => {
     // 左右トリム(leftRightTrimRatio = +0.05)により右モーターが左モーターより強く出力されること
     assert.ok(step3.drive.speedR > step3.drive.speedL, `trim should boost right wheel: L=${step3.drive.speedL}, R=${step3.drive.speedR}`);
 
-    // 2. クリープモード検証: 目標まで50mmの近距離では極短パルス(<=85ms)＋最小駆動PWM付近のcreepフェーズになること
+    // 2. クリープモード検証: 目標まで50mmの近距離では短パルス(<=95ms、ランプアップ込み)＋最小駆動PWM付近のcreepフェーズになること
     const creepCtrl = control(
       { x: 550, y: 310, yaw: 0 },
       { x: 600, y: 310, yaw: 0, rotate: false, speedMmS: 120 },
@@ -151,12 +151,12 @@ describe("CalibrationRunner", () => {
       { consecutiveLinearSteps: 4, field }
     );
     assert.equal(creepCtrl.phase, "creep");
-    assert.ok((creepCtrl.drive.durationMs ?? 100) <= 85, `creep pulse must be short, got ${creepCtrl.drive.durationMs}`);
+    assert.ok((creepCtrl.drive.durationMs ?? 100) <= 95, `creep pulse must be short, got ${creepCtrl.drive.durationMs}`);
 
-    // 3. 予測型ジオフェンス検証: フィールド端(x=145mm, 左向き180°)からさらに外周(x=20mm)へ向かおうとしても、
-    // 絶対防衛ライン(GEOFENCE_SAFE_MARGIN_MM=130mm)を超えるためコマンド送信前にソフトストップ停止に置換されること
+    // 3. 予測型ジオフェンス検証: フィールド端(GEOFENCE_SAFE_MARGIN_MM+15mm, 左向き180°)からさらに外周(x=20mm)へ向かおうとしても、
+    // 絶対防衛ライン(GEOFENCE_SAFE_MARGIN_MM)を超えるためコマンド送信前にソフトストップ停止に置換されること
     const edgeCtrl = control(
-      { x: 145, y: 310, yaw: 180 },
+      { x: GEOFENCE_SAFE_MARGIN_MM + 15, y: 310, yaw: 180 },
       { x: 20, y: 310, yaw: 180, rotate: false, speedMmS: 120 },
       cal,
       { consecutiveLinearSteps: 2, field, cameraLatencyMs: 120 }

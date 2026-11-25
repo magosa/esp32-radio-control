@@ -95,9 +95,14 @@ function useFleetSocketConnection() {
         setMarkerAssignment((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。保存状態を確認してください" } : previous);
         setFieldSave((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。保存状態を確認してください" } : previous);
         setExhibitOp((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。状態を確認してください" } : previous);
+        setRunOp((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。状態を確認してください" } : previous);
+        setSettingsOp((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。保存状態を確認してください" } : previous);
+        setCalibrationOp((previous) => previous?.pending ? { ...previous, pending: false, error: "接続が切れました。状態を確認してください" } : previous);
         setExhibit(null);
         setPoseState(null);
         setRunState(null);
+        setRouteStatus(null);
+        setCalibration(null);
         reconnectTimer = setTimeout(connect, 2000);
       };
       ws.onerror = () => { if (!disposed) setStatus("error"); };
@@ -188,6 +193,27 @@ function useFleetSocketConnection() {
     return () => clearTimeout(timer);
   }, [exhibitOp]);
 
+  useEffect(() => {
+    if (!runOp?.pending) return;
+    const timer = setTimeout(() => setRunOp((previous) => previous?.pending
+      ? { ...previous, pending: false, error: "結果を確認できませんでした。接続を確認してください" } : previous), 8000);
+    return () => clearTimeout(timer);
+  }, [runOp]);
+
+  useEffect(() => {
+    if (!settingsOp?.pending) return;
+    const timer = setTimeout(() => setSettingsOp((previous) => previous?.pending
+      ? { ...previous, pending: false, error: "保存結果を確認できませんでした。接続を確認してください" } : previous), 8000);
+    return () => clearTimeout(timer);
+  }, [settingsOp]);
+
+  useEffect(() => {
+    if (!calibrationOp?.pending) return;
+    const timer = setTimeout(() => setCalibrationOp((previous) => previous?.pending
+      ? { ...previous, pending: false, error: "結果を確認できませんでした。接続を確認してください" } : previous), 8000);
+    return () => clearTimeout(timer);
+  }, [calibrationOp]);
+
   const send = useCallback((msg: ClientInboundMessage) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -221,9 +247,9 @@ function useFleetSocketConnection() {
     setExhibitOp({ requestId, pending: sent, error: sent ? undefined : "ハブ未接続" });
   }, [send]);
 
-  const saveRobotSettings = useCallback((robotId: string, priority: number | null, footprintMm?: { w: number; d: number }) => {
+  const saveRobotSettings = useCallback((robotId: string, priority: number | null, footprintMm?: { w: number; d: number }, sceneSlot?: number | null) => {
     const requestId = `${Date.now()}-${++assignmentSequence.current}`;
-    const sent = send({ type: "setRobotSettings", requestId, robotId, priority, footprintMm });
+    const sent = send({ type: "setRobotSettings", requestId, robotId, priority, footprintMm, sceneSlot });
     setSettingsOp({ requestId, robotId, pending: sent, error: sent ? undefined : "ハブ未接続" });
   }, [send]);
 

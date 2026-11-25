@@ -20,8 +20,11 @@ let activeHub: FleetHub | null = null;
 for (const signal of ["SIGINT", "SIGTERM", "SIGBREAK"] as const) {
   process.on(signal, () => {
     try { activeHub?.dispose(); } catch {}
-    try { activeWss?.clients.forEach((ws) => { try { ws.close(1001, "Restarting"); ws.terminate(); } catch {} }); } catch {}
-    process.exit(0);
+    try { activeWss?.clients.forEach((ws) => { try { ws.close(1001, "Restarting"); } catch {} }); } catch {}
+    setTimeout(() => {
+      try { activeWss?.clients.forEach((ws) => { try { ws.terminate(); } catch {} }); } catch {}
+      process.exit(0);
+    }, 150).unref?.();
   });
 }
 process.on("exit", () => sceneStore.close());
@@ -44,7 +47,14 @@ app.prepare().then(() => {
   hub.attach(wss);
 
   server.on("upgrade", (req, socket, head) => {
-    const pathname = new URL(req.url ?? "", "http://localhost").pathname;
+    socket.on("error", () => { try { socket.destroy(); } catch {} });
+    let pathname: string;
+    try {
+      pathname = new URL(req.url ?? "", "http://localhost").pathname;
+    } catch {
+      socket.destroy();
+      return;
+    }
     if (pathname === "/ws/localizer" && !isTrustedLocalizerRequest(req, port, process.env.FLEET_LOCALIZER_ALLOW_REMOTE === "1")) {
       socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       socket.destroy();
@@ -65,13 +75,5 @@ app.prepare().then(() => {
 
   server.listen(port, () => {
     console.log(`[fleet-hub] ready on http://localhost:${port} (ws: /ws/device, /ws/client, /ws/localizer)`);
-    import("node:dgram").then(({ createSocket }) => {
-      const udp = createSocket("udp4");
-      const msg = Buffer.from([0]);
-      for (const ip of ["172.22.112.112", "172.22.112.133"]) {
-        udp.send(msg, 33333, ip);
-      }
-      setTimeout(() => { try { udp.close(); } catch {} }, 500);
-    });
   });
 });

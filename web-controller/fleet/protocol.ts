@@ -44,6 +44,8 @@ export interface RobotDefinition {
   markerHeightMm: number;
   // シーン実行で道を譲る順(小さいほど優先、null は後ろ)。
   priority?: number | null;
+  // シーン内のロボット行（ロボット 1, 2, ...）に割り当てる担当番号(1〜8)。未設定はnull。
+  sceneSlot?: number | null;
   // 上から見た外形(mm, 60〜80)。表示と記録だけに使い、安全判定の半径は全台60mm固定。
   footprintMm?: { w: number; d: number };
   // 実機校正済みの運動特性。未校正時はundefinedまたはnull。
@@ -158,7 +160,8 @@ export type DeviceOutboundMessage =
   | StreamStartMessage
   | StreamStopMessage
   | SetExpressionMessage
-  | SetDisplayLayoutMessage;
+  | SetDisplayLayoutMessage
+  | { type: "ping" };
 
 // ---- 車両状態(フリートレジストリの1台分) ----
 
@@ -264,7 +267,7 @@ export type ClientInboundMessage =
   | ClientDisplayLayoutRequestMessage
   | { type: "assignCamera"; requestId: string; robotId: string; cameraDeviceId: string | null }
   | { type: "assignMarker"; requestId: string; robotId: string; markerId: number | null; markerHeightMm?: number }
-  | { type: "setRobotSettings"; requestId: string; robotId: string; priority: number | null; footprintMm?: { w: number; d: number } }
+  | { type: "setRobotSettings"; requestId: string; robotId: string; priority: number | null; footprintMm?: { w: number; d: number }; sceneSlot?: number | null }
   | { type: "setFieldConfig"; requestId: string; config: FieldConfig }
   // 実機運動校正の開始・中止
   | { type: "startCalibration"; requestId: string; robotId: string }

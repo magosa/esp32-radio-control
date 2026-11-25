@@ -64,9 +64,9 @@ export const STOP: Drive = { cmd: "e", speedL: 0, speedR: 0 };
 // Default torque limits for uncalibrated / simulated robots.
 export const DRIVE_LIMITS = { maxSpeedMmS: 200, minPwm: 80, maxPwm: 220, minTurnPwm: 80, maxTurnPwm: 200 };
 
-// 予測型ジオフェンスの安全マージン（基準マーカー中心の内側からさらに確保する絶対防衛ライン）
-export const GEOFENCE_SAFE_MARGIN_MM = 130;
-export const GEOFENCE_SLOW_MARGIN_MM = 170;
+// 予測型ジオフェンスの安全マージン（カメラ視野端からの見失いを防ぎつつ外周目標90mmへ到達可能な防衛ライン）
+export const GEOFENCE_SAFE_MARGIN_MM = 75;
+export const GEOFENCE_SLOW_MARGIN_MM = 120;
 
 // クリープ走行および早めの自然減速アプローチの境界距離
 export const CREEP_RADIUS_MM = 80;
@@ -74,7 +74,7 @@ export const SLOW_RADIUS_MM = 200;
 // 実機の安全巡航PWM上限（急発進・過速によるオーバーランやギア負荷を構造的に防ぐ）
 export const SAFE_REAL_MAX_PWM = 170;
 // 静止摩擦スタック検知時(stallBoostPwm > 0)のみ段階的に許容する上限PWM（ESP32ソフトスタート保護あり）
-export const STALL_BOOST_MAX_PWM = 185;
+export const STALL_BOOST_MAX_PWM = 215;
 
 // Inside these the robot stops commanding; arrival (20 mm / 15 deg) is judged by the runner with a margin above them.
 const POS_DEAD_MM = 20;
@@ -106,10 +106,18 @@ export function predictTrajectory(
     return { endX: pose.x, endY: pose.y, endYaw: effectiveYaw, travelMm: 0, insideSafeZone, insideSlowZone };
   }
 
-  const pulseSec = (drive.durationMs ?? 100) / 1000;
-  // ハードウェア側durationMsタイマーがない場合も想定し、カメラ遅延の半分を安全余裕として加算
-  const latencySec = Math.min(0.25, Math.max(0, (runtime?.cameraLatencyMs ?? 90) / 1000) * 0.35);
-  const activeSec = pulseSec + latencySec;
+  const pulseSec = drive.continuous
+    ? Math.min(0.20, (drive.durationMs ?? 200) / 1000)
+    : (drive.durationMs ?? 100) / 1000;
+  // 連続巡航(continuous)はサーバーからの停止指示遅延を加算。単発タイマー駆動(!continuous)はESP32側ハードウェアタイマーで自律停止するため遅延加算せずソフトスタート分を差し引く
+  const meanPwmForRamp = (drive.speedL + drive.speedR) / 2;
+  const rampSec = drive.continuous ? 0 : (Math.ceil(Math.max(0, meanPwmForRamp - 115) / 14) * 10) / 1000;
+  const latencySec = drive.continuous
+    ? Math.min(0.25, Math.max(0, (runtime?.cameraLatencyMs ?? 90) / 1000) * 0.35)
+    : 0;
+  const activeSec = drive.continuous
+    ? pulseSec + latencySec
+    : Math.max(0.02, pulseSec - rampSec * 0.5);
 
   if (drive.cmd === "c" || drive.cmd === "d") {
     const rate = drive.cmd === "c"
@@ -162,21 +170,21 @@ function spin(
     return { drive: { cmd: err > 0 ? "c" : "d", speedL: pwm, speedR: pwm }, phase: "spin" };
   }
 
-  // 実機の旋回：28°以内はクリープ旋回（最小旋回PWM＋短パルス）、大角度でも急加速させない
-  const isCreepTurn = absErr <= 28;
-  const extra = isCreepTurn ? 0 : Math.min(18, (absErr - 28) * 0.25);
-  const boost = clamp(stallBoostPwm, 0, 35);
-  // 通常は maxTurnPwm(<=170) 上限、スタック検知時(boost>0)のみ最大185まで段階ブーストを許可して静止摩擦突破を保証
-  const maxSafeTurnPwm = boost > 0 ? STALL_BOOST_MAX_PWM : Math.min(limits.maxTurnPwm, SAFE_REAL_MAX_PWM);
-  const pwm = Math.round(clamp(limits.minTurnPwm + extra + boost, limits.minTurnPwm, maxSafeTurnPwm));
+  // 実機の旋回：ESP32ソフトスタート(115PWMから10ms毎に+14PWM)の立ち上がり時間を加算し、
+  // 校正済みminTurnPwmと角速度から連続的にホールド時間(14〜110ms)を算出して微調整時のオーバーシュートを防ぐ
+  const isCreepTurn = absErr <= 30;
+  const extra = isCreepTurn ? 0 : Math.min(12, (absErr - 30) * 0.16);
+  const boost = clamp(stallBoostPwm, 0, 50);
+  const effectiveMinTurnPwm = Math.max(125, limits.minTurnPwm);
+  const maxSafeTurnPwm = boost > 0 ? Math.min(STALL_BOOST_MAX_PWM, 210) : Math.max(effectiveMinTurnPwm, Math.min(limits.maxTurnPwm, SAFE_REAL_MAX_PWM));
+  const pwm = Math.round(clamp(effectiveMinTurnPwm + extra + boost, effectiveMinTurnPwm, maxSafeTurnPwm));
+  const rampUpMs = Math.ceil(Math.max(0, pwm - 115) / 14) * 10;
   const rate = err > 0 ? (calibration?.turnRateLeftDegS ?? 150) : (calibration?.turnRateRightDegS ?? 150);
-  // 1回のパルスで目標角度の約60%（大角度でも最大230ms）を回し、130°超のオーバーシュートを防ぐ
-  // スタック検知時(boost>0)はパルス時間も段階的に延長し、ソフトスタート＋Wi-Fiジッタによる空打ちを防ぐ
-  const turnFraction = absErr > 45 ? 0.62 : 0.55;
-  const idealMs = (absErr * turnFraction / Math.max(40, rate)) * 1000;
-  const stallTimeBonus = Math.min(90, Math.round(boost * 2.5));
-  const maxTurnMs = isCreepTurn ? 175 : 230;
-  const durationMs = Math.round(clamp(idealMs + stallTimeBonus, isCreepTurn ? 85 : 95, maxTurnMs));
+  const pwmSpeedFactor = pwm > effectiveMinTurnPwm ? 1 + (pwm - effectiveMinTurnPwm) / 80 : 1;
+  const turnFraction = absErr > 45 ? 0.50 : 0.40;
+  const idealHoldMs = (absErr * turnFraction / Math.max(40, rate * pwmSpeedFactor)) * 1000;
+  const holdMs = Math.round(clamp(idealHoldMs, isCreepTurn ? 24 : 32, isCreepTurn ? 65 : 175));
+  const durationMs = Math.min(220, rampUpMs + holdMs);
   return {
     drive: { cmd: err > 0 ? "c" : "d", speedL: pwm, speedR: pwm, durationMs },
     phase: isCreepTurn ? "creep" : "spin",
@@ -234,7 +242,7 @@ export function control(
   // Stop-Turn-Go 原則：向きが大きくずれている場合はその場旋回で合わせ直す。高FPS連続巡航中(>100mm)は28°まで緩やかに車線維持して不要な途中停止を防ぐ
   const highFpsForTurn = (runtime?.cameraFps ?? 0) >= 4;
   const turnFirstDeg = isCalibrated
-    ? (posErrMm <= CREEP_RADIUS_MM || (highFpsForTurn && posErrMm > 100) ? 28 : 22)
+    ? (posErrMm <= CREEP_RADIUS_MM || highFpsForTurn ? 28 : 22)
     : TURN_FIRST_DEG;
   if (Math.abs(bearingErr) > turnFirstDeg) {
     const s = spin(bearingErr, limits, calibration, runtime?.stallBoostPwm ?? 0);
@@ -257,15 +265,28 @@ export function control(
     }
   }
 
-  // ---- 実機（Calibrated）専用：連続巡航（>100mm）・低FPS長ストローク・クリープ・予測ジオフェンス制御 ----
-  const SMOOTH_CRUISE_MIN_DIST_MM = 100;
+  // ---- 実機（Calibrated）専用：連続巡航・台形減速・クリープ・予測ジオフェンス制御 ----
+  const calibratedBrakeMm = calibration?.brakingDistanceMm ?? 55;
   const consecutiveSteps = runtime?.consecutiveLinearSteps ?? 0;
   const speedScale = clamp(runtime?.dynamicSpeedScale ?? 1.0, 0.7, 1.35);
-  const stallBoost = clamp(runtime?.stallBoostPwm ?? 0, 0, 35);
-  // 通常は limits.maxPwm(<=170) 上限、スタック検知時(stallBoost > 0)のみ最大185まで段階ブーストを許可
+  // カメラ遅延・FPS・実機速度から連続巡航の解除距離を物理算出（遅延混入済みの制動距離に依存せず滑らかに減速）
+  const latencySec = clamp((runtime?.cameraLatencyMs ?? 100) / 1000, 0.06, 0.22);
+  const fpsHalfPeriodSec = runtime?.cameraFps && runtime.cameraFps > 0
+    ? clamp(0.5 / runtime.cameraFps, 0.03, 0.15)
+    : 0.06;
+  const exitSpeedMmS = limits.maxSpeedMmS * speedScale * 0.72;
+  const estPhysicalCoastMm = clamp(limits.maxSpeedMmS * 0.12, 15, 50);
+  const cruiseExitMm = clamp(
+    Math.round(exitSpeedMmS * (0.10 + latencySec + fpsHalfPeriodSec) + estPhysicalCoastMm + 15),
+    85,
+    155
+  );
+  const dynamicSlowRadiusMm = Math.max(SLOW_RADIUS_MM, cruiseExitMm + 120);
+  const stallBoost = clamp(runtime?.stallBoostPwm ?? 0, 0, 60);
+  // 通常は limits.maxPwm(<=170) 上限、スタック検知時(stallBoost > 0)のみ最大215まで段階ブーストを許可
   const effectiveMaxPwm = stallBoost > 0 ? STALL_BOOST_MAX_PWM : limits.maxPwm;
-  // 実機の静止摩擦デッドゾーン(127等)で停止しないよう、最小駆動PWMの下限を140に保護
-  const effectiveMinPwm = Math.min(limits.maxPwm, Math.max(140, limits.minPwm));
+  // 校正済み minDrivePwm を尊重しつつ、115PWMソフトスタートから確実に動き出せる最低フロア(125)を確保
+  const effectiveMinPwm = Math.min(limits.maxPwm, Math.max(125, limits.minPwm));
   // 電池低下時(speedScale < 1.0)は必要な出力を少し補い、過速時(speedScale > 1.0)は抑える。静止摩擦スタック時は stallBoost を加算。
   const adaptiveBoost = Math.round((1.0 - speedScale) * 14) + stallBoost;
   const highFps = (runtime?.cameraFps ?? 0) >= 4;
@@ -275,23 +296,27 @@ export function control(
   let durationMs: number;
   let continuous = false;
 
-  if (posErrMm <= SMOOTH_CRUISE_MIN_DIST_MM || useReverse) {
-    // ① クリープ走行領域（<= 100mm、または近距離後進微調整）：最小駆動PWM＋短パルス＋整定待ちでピタリと寄せる
+  if (posErrMm <= cruiseExitMm || useReverse) {
+    // ① クリープ走行領域（<= cruiseExitMm、または近距離後進微調整）：
+    // 静止摩擦突破フロア(28ms)＋速度正規化距離スケーリングで、40mm不感帯を飛び越えず1〜2歩で収束させる
     phase = "creep";
-    targetPwm = clamp(effectiveMinPwm + adaptiveBoost, effectiveMinPwm, effectiveMaxPwm);
-    const baseCreepMs = calibration?.creepPulseMs ?? 70;
-    const distRatio = clamp((posErrMm - POS_DEAD_MM) / (SMOOTH_CRUISE_MIN_DIST_MM - POS_DEAD_MM), 0.2, 1.0);
-    const stallTimeBonus = Math.min(25, Math.round(stallBoost * 0.7));
-    durationMs = Math.round(clamp(baseCreepMs * (0.95 + 0.45 * distRatio) + stallTimeBonus, 75, 120));
+    const creepBoost = clamp(stallBoost, 0, 35);
+    targetPwm = clamp(effectiveMinPwm + Math.round((1.0 - speedScale) * 14) + creepBoost, effectiveMinPwm, Math.min(effectiveMaxPwm, 195));
+    const rampUpMs = Math.ceil(Math.max(0, targetPwm - 115) / 14) * 10;
+    const creepEffSpeedMmS = Math.max(130, limits.maxSpeedMmS * speedScale);
+    const speedRatio = clamp(200 / creepEffSpeedMmS, 0.55, 1.15);
+    const distFrac = clamp((posErrMm - POS_DEAD_MM) / Math.max(40, cruiseExitMm - POS_DEAD_MM), 0, 1);
+    const holdMs = Math.round(clamp(18 + (16 + 30 * distFrac) * speedRatio, 28, 60));
+    durationMs = Math.min(115, rampUpMs + holdMs);
   } else if (highFps) {
-    // ② 案A：高FPS時（>= 4fps）のスムーズ連続巡航（残り > 100mm は完全停止を挟まず滑らかに走行）
+    // ② 案A：高FPS時（>= 4fps）のスムーズ連続巡航（残り > cruiseExitMm は完全停止を挟まず滑らかに走行）
     // ESP32側には安全のため 400ms の自律停止タイマーを毎回付与し、走行中リフレッシュする
-    const isApproach = posErrMm < SLOW_RADIUS_MM;
+    const isApproach = posErrMm < dynamicSlowRadiusMm;
     phase = isApproach ? "decelerate" : "cruise";
     const baseRatio = isApproach
-      ? clamp((posErrMm - SMOOTH_CRUISE_MIN_DIST_MM) / (SLOW_RADIUS_MM - SMOOTH_CRUISE_MIN_DIST_MM), 0.35, 0.85)
-      : clamp(goal.speedMmS / Math.max(60, limits.maxSpeedMmS), 0.45, 1.0);
-    const ratio = consecutiveSteps === 0 ? Math.min(0.4, baseRatio) : baseRatio;
+      ? clamp((posErrMm - cruiseExitMm) / Math.max(60, dynamicSlowRadiusMm - cruiseExitMm), 0.0, 0.65)
+      : clamp(goal.speedMmS / Math.max(60, limits.maxSpeedMmS), 0.35, 0.9);
+    const ratio = consecutiveSteps === 0 ? Math.min(0.35, baseRatio) : baseRatio;
     targetPwm = Math.round(
       clamp(effectiveMinPwm + (limits.maxPwm - effectiveMinPwm) * ratio + adaptiveBoost, effectiveMinPwm, effectiveMaxPwm)
     );
@@ -299,17 +324,17 @@ export function control(
     continuous = true;
   } else {
     // ③ 案B：低FPS時（< 4fps）の安全フィードフォワード長ストローク（残り距離の約75%を1回で運び、最大420msで自律停止）
-    const isApproach = posErrMm < SLOW_RADIUS_MM;
+    const isApproach = posErrMm < dynamicSlowRadiusMm;
     phase = isApproach ? "decelerate" : (consecutiveSteps === 0 ? "softStart" : "cruise");
     const baseRatio = isApproach
-      ? clamp((posErrMm - SMOOTH_CRUISE_MIN_DIST_MM) / (SLOW_RADIUS_MM - SMOOTH_CRUISE_MIN_DIST_MM), 0.35, 0.85)
-      : clamp(goal.speedMmS / Math.max(60, limits.maxSpeedMmS), 0.45, 1.0);
-    const ratio = consecutiveSteps === 0 ? Math.min(0.4, baseRatio) : baseRatio;
+      ? clamp((posErrMm - cruiseExitMm) / Math.max(60, dynamicSlowRadiusMm - cruiseExitMm), 0.15, 0.75)
+      : clamp(goal.speedMmS / Math.max(60, limits.maxSpeedMmS), 0.35, 0.9);
+    const ratio = consecutiveSteps === 0 ? Math.min(0.35, baseRatio) : baseRatio;
     targetPwm = Math.round(
       clamp(effectiveMinPwm + (limits.maxPwm - effectiveMinPwm) * ratio + adaptiveBoost, effectiveMinPwm, effectiveMaxPwm)
     );
     const effectiveSpeedMmS = Math.max(60, limits.maxSpeedMmS * speedScale);
-    const brakeMm = Math.max(40, calibration?.brakingDistanceMm ?? 45);
+    const brakeMm = Math.max(40, calibratedBrakeMm);
     const runnableDistMm = Math.max(25, posErrMm - brakeMm - 15);
     const ffMs = ((runnableDistMm * 0.75) / effectiveSpeedMmS) * 1000;
     durationMs = Math.round(clamp(ffMs, 140, 420));
@@ -327,7 +352,7 @@ export function control(
   const maxSteer = phase === "creep" ? 2 : (continuous ? 9 : 4);
   const effectiveSteerErr = Math.abs(bearingErr) <= 6 ? 0 : bearingErr;
   const steer = clamp(effectiveSteerErr * 0.25, -maxSteer, maxSteer);
-  const minWheel = Math.round(limits.minPwm * 0.96);
+  const minWheel = Math.max(115, effectiveMinPwm - 8);
 
   let left: number;
   let right: number;
@@ -349,16 +374,18 @@ export function control(
   if (runtime?.field) {
     const fw = runtime.field.widthMm;
     const fh = runtime.field.heightMm;
-    const centerX = fw / 2;
-    const centerY = fh / 2;
-    const currentDistFromCenter = Math.hypot(pose.x - centerX, pose.y - centerY);
-    const predictedDistFromCenter = Math.hypot(prediction.endX - centerX, prediction.endY - centerY);
-    const movingOutward = predictedDistFromCenter > currentDistFromCenter;
+    // 軸別の境界逸脱判定（長辺方向で中心距離が減りつつ壁外へ出る斜め移動も確実に検知する）
+    const movingOutward =
+      (prediction.endX < GEOFENCE_SAFE_MARGIN_MM && prediction.endX < pose.x - 1) ||
+      (prediction.endX > fw - GEOFENCE_SAFE_MARGIN_MM && prediction.endX > pose.x + 1) ||
+      (prediction.endY < GEOFENCE_SAFE_MARGIN_MM && prediction.endY < pose.y - 1) ||
+      (prediction.endY > fh - GEOFENCE_SAFE_MARGIN_MM && prediction.endY > pose.y + 1);
 
     if (!prediction.insideSafeZone && movingOutward) {
-      // 予測停止位置が絶対防衛ライン(130mm)を超える場合、連続巡航を禁止しクリープ短パルスで安全領域内に収まるか再試行
-      const safePwm = Math.round(clamp(effectiveMinPwm + clamp(stallBoost, 0, 25), effectiveMinPwm, effectiveMaxPwm));
-      const safeDur = Math.min(110, 75 + Math.round(stallBoost * 0.8));
+      // 予測停止位置が絶対防衛ラインを超える場合、連続巡航を禁止し最短クリープ短パルスで安全領域内に収まるか再試行
+      const safePwm = Math.round(clamp(effectiveMinPwm + clamp(stallBoost, 0, 35), effectiveMinPwm, effectiveMaxPwm));
+      const safeRampMs = Math.ceil(Math.max(0, safePwm - 115) / 14) * 10;
+      const safeDur = Math.min(70, safeRampMs + 16);
       const safeCreepDrive: Drive = {
         cmd,
         speedL: safePwm,

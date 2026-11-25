@@ -1,7 +1,7 @@
 import { compilePlan, type PlanEntry, type ScenePlan } from "../scene/timedPlan";
-import { createSafety, pathProblem, type Safety } from "../scene/safety";
+import { createSafety, findDetourPath, type Point, type Safety } from "../scene/safety";
 import type { SceneMap, Track } from "../scene/types";
-import { shortestTurn } from "../scene/units";
+import { normalizeYaw, shortestTurn } from "../scene/units";
 import {
   idleSnapshot, type HaltKind, type InitialMismatch, type PositionState, type RobotRunStatus, type RunCheck, type RunCondition, type RunLogEntry,
   type RunResultFile, type RunResultRow, type RunRobot, type RunSnapshot,
@@ -22,7 +22,7 @@ const STUCK_MIN_MM = 10;
 const RESUME_RADIUS_MM = 60;
 const RESUME_HOLD_MS = 1000;
 const STALE_FRAME_MS = 1500;
-const POSITION_TIMEOUT_MS = 40_000;
+const POSITION_TIMEOUT_MS = 60_000;
 const POSITION_SPEED_MMS = 80;
 const MAX_LOG = 200;
 const EPS = 1e-6;
@@ -64,6 +64,10 @@ interface PulseObservation {
 
 interface Bot {
   track: Track;
+  // シーン内のロボット行の1始まり連番（ロボット 1 -> 1, ロボット 2 -> 2 ...）
+  slot: number;
+  // track.robotId または /robots の sceneSlot から解決された実機ロボットID
+  resolvedRobotId: string | null;
   moves: PlanEntry[];
   arrivals: Map<string, Arrival>;
   waited: Map<string, number>;
@@ -73,6 +77,9 @@ interface Bot {
   lastDrive: Drive | null;
   lastSentAt: number;
   position: { state: PositionState; detail: string; startedAt: number | null };
+  // 初期位置への移動時に壁・障害物・他機体を迂回するための経由点列（末尾が init）
+  positionPath: Point[];
+  positionReplans: number;
   status: RobotRunStatus;
   posErr: number | null;
   yawErr: number | null;
@@ -98,6 +105,8 @@ interface Bot {
   pauseWaitFreshAfter: number | null;
   // 連続巡航(cont=true)中の静止摩擦スタック監視用チェックポイント
   contCheck: { at: number; x: number; y: number } | null;
+  // 直前の駆動種別（STOP挟み込み後の linear <-> turn 切替を正しく検知してブースト持ち越しをクリアする）
+  lastMotionKind: "linear" | "turn" | null;
   // 直前の駆動パルス開始時の姿勢と予測移動量（整定完了後に実移動量と比較して自動学習する）
   pendingObservation: PulseObservation | null;
 }
@@ -120,7 +129,7 @@ export class SceneRunner {
   private waitingSince: number | null = null;
   private halt: { kind: HaltKind; since: number; okSince: number | null } | null = null;
   private haltText = "";
-  private positioning = { active: false };
+  private positioning = { active: false, avoidWalls: true };
   private checks: RunCheck[] = [];
   private log: RunLogEntry[] = [];
   private input: RunnerInput | null = null;
@@ -156,11 +165,12 @@ export class SceneRunner {
     this.map = map;
     this.plan = compilePlan(map);
     this.safety = createSafety(map);
-    this.bots = map.tracks.filter((t) => t.kind === "robot" && !t.muted && t.initial).map((track) => ({
-      track, arrivals: new Map(), waited: new Map(), within: null, stuck: null, lost: null, lastDrive: null, lastSentAt: 0,
+    this.bots = map.tracks.filter((t) => t.kind === "robot" && !t.muted && t.initial).map((track, idx) => ({
+      track, slot: idx + 1, resolvedRobotId: track.robotId?.trim() || null,
+      arrivals: new Map(), waited: new Map(), within: null, stuck: null, lost: null, lastDrive: null, lastSentAt: 0,
       spinStartedAt: null, spinPauseUntil: null, drivePulseStartedAt: null, drivePauseUntil: null, positionLostAt: null, aligningYaw: false,
-      consecutiveLinearSteps: 0, dynamicTrimRatio: 0, dynamicSpeedScale: 1.0, stallBoostPwm: 0, pauseWaitFreshAfter: null, contCheck: null, pendingObservation: null,
-      position: { state: "waiting", detail: "", startedAt: null }, status: "idle", posErr: null, yawErr: null, pose: null, priority: null, goalEntry: null, motion: null,
+      consecutiveLinearSteps: 0, dynamicTrimRatio: 0, dynamicSpeedScale: 1.0, stallBoostPwm: 0, pauseWaitFreshAfter: null, contCheck: null, lastMotionKind: null, pendingObservation: null,
+      position: { state: "waiting", detail: "", startedAt: null }, positionPath: [], positionReplans: 0, status: "idle", posErr: null, yawErr: null, pose: null, priority: null, goalEntry: null, motion: null,
       moves: this.plan!.entries.filter((e) => e.track === track && e.action.type === "move" && !e.blocked && e.outcome === "success" && e.start !== null)
         .sort((a, b) => a.start! - b.start!),
     }));
@@ -170,7 +180,7 @@ export class SceneRunner {
     this.waitedMs = 0;
     this.waitingSince = null;
     this.halt = null;
-    this.positioning = { active: false };
+    this.positioning = { active: false, avoidWalls: true };
     this.log = [];
     this.evasions = [];
     this.cooldown.clear();
@@ -183,15 +193,27 @@ export class SceneRunner {
     return this.map && !this.active ? this.prepare(this.map) : "実行中はやり直せません。";
   }
 
-  position(): string | null {
+  position(avoidWalls = true): string | null {
     if (this.phase !== "arming") return "実行前の確認中だけ初期位置へ動かせます。";
-    this.positioning = { active: true };
+    this.positioning = { active: true, avoidWalls };
     for (const bot of this.bots) {
       bot.position = { state: "waiting", detail: "", startedAt: null };
+      bot.positionPath = [];
+      bot.positionReplans = 0;
+      bot.aligningYaw = false;
+      bot.within = null;
       bot.consecutiveLinearSteps = 0;
+      bot.stallBoostPwm = 0;
+      bot.spinStartedAt = null;
+      bot.spinPauseUntil = null;
+      bot.drivePulseStartedAt = null;
+      bot.drivePauseUntil = null;
+      bot.pauseWaitFreshAfter = null;
+      bot.contCheck = null;
+      bot.lastMotionKind = null;
       bot.pendingObservation = null;
     }
-    this.note("info", "初期位置への移動を始めました。");
+    this.note("info", avoidWalls ? "初期位置への移動を始めました（壁を迂回）。" : "初期位置への移動を始めました（直線移動）。");
     return null;
   }
 
@@ -199,7 +221,23 @@ export class SceneRunner {
     if (this.phase !== "arming") return "実行前の確認中だけ開始できます。";
     this.evalChecks();
     if (!this.checks.every((c) => c.ok || c.warn)) return "実行前の確認に満たない項目があります。";
-    this.positioning = { active: false };
+    this.positioning = { active: false, avoidWalls: true };
+    for (const bot of this.bots) {
+      bot.within = null;
+      bot.stuck = null;
+      bot.lost = null;
+      bot.aligningYaw = false;
+      bot.consecutiveLinearSteps = 0;
+      bot.stallBoostPwm = 0;
+      bot.spinStartedAt = null;
+      bot.spinPauseUntil = null;
+      bot.drivePulseStartedAt = null;
+      bot.drivePauseUntil = null;
+      bot.pauseWaitFreshAfter = null;
+      bot.contCheck = null;
+      bot.lastMotionKind = null;
+      bot.pendingObservation = null;
+    }
     this.phase = "running";
     this.clock = 0;
     this.startedAt = this.deps.now();
@@ -210,7 +248,7 @@ export class SceneRunner {
 
   pause(): string | null {
     if (this.phase === "arming" && this.positioning.active) {
-      this.positioning = { active: false };
+      this.positioning = { active: false, avoidWalls: true };
       this.stopAll(true);
       this.note("warn", "初期位置への移動を止めました");
       return null;
@@ -231,7 +269,7 @@ export class SceneRunner {
   abort(): string | null {
     if (this.phase === "idle" || this.phase === "finished" || this.phase === "aborted") return "実行していません。";
     this.stopAll(true);
-    this.positioning = { active: false };
+    this.positioning = { active: false, avoidWalls: true };
     this.endedAt = this.deps.now();
     this.phase = "aborted";
     this.evasions = [];
@@ -271,8 +309,10 @@ export class SceneRunner {
       resume: this.phase === "halted" ? this.resumeConditions() : [],
       clock: this.clock, duration: this.plan?.duration ?? 0, realMs: this.startedAt === null ? 0 : end - this.startedAt, waitedMs: this.waitedMs,
       checks: this.checks, canStart: this.phase === "arming" && this.checks.length > 0 && this.checks.every((c) => c.ok || c.warn),
-      positioning: { active: this.positioning.active, items: sortedForPosition
-        .map((b) => ({ trackId: b.track.id, name: b.track.name, state: b.position.state, detail: b.position.detail })) },
+      positioning: {
+        active: this.positioning.active, items: sortedForPosition
+          .map((b) => ({ trackId: b.track.id, name: b.track.name, state: b.position.state, detail: b.position.detail }))
+      },
       robots: this.bots.map((b) => this.robotView(b)), evasions: this.evasionViews(), log: this.log, rows: this.rows(true),
     };
   }
@@ -288,9 +328,30 @@ export class SceneRunner {
   }
 
   private bindPoses(input: RunnerInput): void {
+    const anySlotConfigured = input.robots.some((r) => r.sceneSlot != null);
+    const explicitIds = new Set(
+      this.bots.map((b) => b.track.robotId?.trim()).filter((id): id is string => !!id)
+    );
+    const fallbackCandidates = anySlotConfigured
+      ? []
+      : [...input.robots]
+        .filter((r) => r.markerId !== null && !explicitIds.has(r.robotId))
+        .sort((a, b) => (a.markerId ?? 99) - (b.markerId ?? 99));
+    let fallbackIdx = 0;
+
     for (const bot of this.bots) {
-      bot.pose = input.poses.poses.find((p) => p.robotId === bot.track.robotId) ?? null;
-      const robotDef = input.robots.find((r) => r.robotId === bot.track.robotId);
+      const explicit = bot.track.robotId?.trim() || null;
+      let resolvedId: string | null = explicit;
+      if (!resolvedId) {
+        if (anySlotConfigured) {
+          resolvedId = input.robots.find((r) => r.sceneSlot === bot.slot)?.robotId ?? null;
+        } else {
+          resolvedId = fallbackCandidates[fallbackIdx++]?.robotId ?? null;
+        }
+      }
+      bot.resolvedRobotId = resolvedId;
+      bot.pose = resolvedId ? input.poses.poses.find((p) => p.robotId === resolvedId) ?? null : null;
+      const robotDef = resolvedId ? input.robots.find((r) => r.robotId === resolvedId) : undefined;
       bot.priority = robotDef?.priority ?? null;
       bot.motion = robotDef?.motion ?? null;
     }
@@ -330,10 +391,14 @@ export class SceneRunner {
     if (obs.cmd === "c" || obs.cmd === "d") {
       const turnedDeg = Math.abs(shortestTurn(obs.startYaw, at.yaw));
       if (turnedDeg < 2.0) {
-        bot.stallBoostPwm = Math.min(35, bot.stallBoostPwm + 10);
+        bot.stallBoostPwm = Math.min(50, bot.stallBoostPwm + 12);
+      } else if (turnedDeg >= 25.0) {
+        // 大きく回転した後はオーバーシュート連鎖を防ぐためブーストを即座にリセット
+        bot.stallBoostPwm = 0;
+      } else if (turnedDeg >= 10.0) {
+        bot.stallBoostPwm = Math.max(0, bot.stallBoostPwm - 20);
       } else {
-        // 旋回成功時は緩やかに減衰させ、再スタックのノコギリ波を防ぐ
-        bot.stallBoostPwm = Math.max(0, bot.stallBoostPwm - 5);
+        bot.stallBoostPwm = Math.max(0, bot.stallBoostPwm - 8);
       }
       return;
     }
@@ -341,13 +406,16 @@ export class SceneRunner {
     if (obs.cmd === "a" || obs.cmd === "b") {
       const actualMm = Math.hypot(at.x - obs.startX, at.y - obs.startY);
       if (actualMm < 2.5) {
-        bot.stallBoostPwm = Math.min(35, bot.stallBoostPwm + 10);
+        bot.stallBoostPwm = Math.min(45, bot.stallBoostPwm + 12);
+      } else if (actualMm >= 12.0) {
+        // 十分に動き出せたら次回クリープでの飛び出し(+79mm等)を防ぐためブーストを即座にリセット
+        bot.stallBoostPwm = 0;
       } else {
-        bot.stallBoostPwm = Math.max(0, bot.stallBoostPwm - 5);
+        bot.stallBoostPwm = Math.max(0, bot.stallBoostPwm - 8);
       }
-      if (obs.expectedMm >= 10) {
+      if (obs.durationMs >= 150 && obs.expectedMm >= 10) {
         const ratio = Math.max(0.5, Math.min(1.6, actualMm / obs.expectedMm));
-        // 指数移動平均(EMA)で電池消耗や路面摩擦に伴う実速度スケールを更新
+        // 指数移動平均(EMA)で電池消耗や路面摩擦に伴う実速度スケールを更新（短歩クリープでは歪むため150ms以上のみ）
         bot.dynamicSpeedScale = Math.max(0.7, Math.min(1.35, bot.dynamicSpeedScale * 0.75 + ratio * 0.25));
       }
       if (actualMm >= 18) {
@@ -374,15 +442,18 @@ export class SceneRunner {
     if (isCalibrated) {
       const at = this.tracked(bot);
       const latencyWait = Math.min(200, Math.max(80, this.input?.poses.localizer.latencyMs ?? 100));
-      // 細かすぎる位置補正を廃止し、ソフトストップ＋自然停止＋カメラフレーム安定まで400〜500msゆったり待つ
-      const settleMs = Math.max(420, 320 + latencyWait);
+      // 連続巡航からの停止はソフトストップ＋惰性分を考慮、単発パルス(fw 4.2.0即時遮断)は実機停止時刻基準で最短整定
+      const cruiseSettleMs = Math.max(340, 220 + latencyWait);
+      const cruiseFreshOffsetMs = 220;
+      const pulseSettleMs = Math.max(240, 150 + latencyWait);
+      const pulseFreshOffsetMs = 150;
 
-      // 連続巡航(continuous)からクリープ・旋回へ切り替わる瞬間は、必ず一度ソフトストップ＋整定待ちを挟む
+      // 連続巡航(continuous)からクリープ・旋回・停止へ切り替わる瞬間は、必ず一度ソフトストップ＋整定待ちを挟む
       const wasContinuous = !!bot.lastDrive?.continuous && (bot.lastDrive.cmd === "a" || bot.lastDrive.cmd === "b");
-      if (wasContinuous && !rawDrive.continuous && (isLinear || isTurn)) {
-        bot.drivePauseUntil = now + settleMs;
-        bot.spinPauseUntil = now + settleMs;
-        bot.pauseWaitFreshAfter = now + 80;
+      if (wasContinuous && !rawDrive.continuous) {
+        bot.drivePauseUntil = now + cruiseSettleMs;
+        bot.spinPauseUntil = now + cruiseSettleMs;
+        bot.pauseWaitFreshAfter = now + cruiseFreshOffsetMs;
       }
 
       // 低FPS時でも「停止後に撮影された新しいカメラフレーム」が届くまで次パルスを待つ（最大1100msで安全解放）
@@ -393,19 +464,20 @@ export class SceneRunner {
         now < bot.pauseWaitFreshAfter + 1100;
 
       if (isTurn) {
-        if (bot.lastDrive && (bot.lastDrive.cmd === "a" || bot.lastDrive.cmd === "b")) {
+        if (bot.lastMotionKind === "linear") {
           bot.stallBoostPwm = 0; // 直進から旋回への切替時はブースト持ち越しをクリア
         }
         bot.contCheck = null;
         bot.consecutiveLinearSteps = 0;
         bot.drivePulseStartedAt = null;
-        const spinWindowMs = Math.max(70, Math.min(230, rawDrive.durationMs ?? 100));
+        const spinWindowMs = Math.max(40, Math.min(220, rawDrive.durationMs ?? 80));
         if ((bot.spinPauseUntil !== null && now < bot.spinPauseUntil) || waitingForFreshFrame) {
           drive = STOP;
         } else if (bot.spinStartedAt === null) {
           bot.pauseWaitFreshAfter = null;
           if (at) this.evaluateSettledObservation(bot, at);
           bot.spinStartedAt = now;
+          bot.lastMotionKind = "turn";
           if (at) {
             bot.pendingObservation = {
               cmd: rawDrive.cmd,
@@ -417,17 +489,22 @@ export class SceneRunner {
             };
           }
         } else if (now - bot.spinStartedAt >= spinWindowMs) {
+          const spinEnd = bot.spinStartedAt + spinWindowMs;
           bot.spinStartedAt = null;
-          bot.spinPauseUntil = now + settleMs;
-          bot.pauseWaitFreshAfter = now + 80;
+          bot.spinPauseUntil = spinEnd + pulseSettleMs;
+          bot.pauseWaitFreshAfter = spinEnd + pulseFreshOffsetMs;
           drive = STOP;
+        } else {
+          // 既に単発タイマー駆動を送信済みのため、途中tickで再送してESP32タイマーを再延長しない
+          return;
         }
       } else if (isLinear && rawDrive.continuous) {
         // 案A：遠距離(>100mm)かつ高FPS・安全領域内の連続巡航（完全停止を挟まず滑らかに走行、durationMs=400msで自律安全保護）
-        if (bot.lastDrive && (bot.lastDrive.cmd === "c" || bot.lastDrive.cmd === "d")) {
+        if (bot.lastMotionKind === "turn") {
           bot.stallBoostPwm = 0; // 旋回から巡航への切替時は旋回ブーストを持ち越さない
           bot.contCheck = null;
         }
+        bot.lastMotionKind = "linear";
         bot.spinStartedAt = null;
         bot.drivePulseStartedAt = null;
         bot.drivePauseUntil = null;
@@ -439,7 +516,7 @@ export class SceneRunner {
           } else if (now - bot.contCheck.at >= 450) {
             const moved = Math.hypot(at.x - bot.contCheck.x, at.y - bot.contCheck.y);
             if (moved < 5) {
-              bot.stallBoostPwm = Math.min(35, bot.stallBoostPwm + 10);
+              bot.stallBoostPwm = Math.min(60, bot.stallBoostPwm + 15);
             } else {
               bot.stallBoostPwm = Math.max(0, bot.stallBoostPwm - 5);
             }
@@ -453,11 +530,11 @@ export class SceneRunner {
         drive = rawDrive;
       } else if (isLinear) {
         bot.contCheck = null;
-        if (bot.lastDrive && (bot.lastDrive.cmd === "c" || bot.lastDrive.cmd === "d")) {
+        if (bot.lastMotionKind === "turn") {
           bot.stallBoostPwm = 0; // 旋回から直進・クリープへの切替時は旋回ブーストを持ち越さない
         }
         bot.spinStartedAt = null;
-        const pulseWindowMs = Math.max(70, Math.min(420, (rawDrive.durationMs ?? 100) - 10));
+        const pulseWindowMs = Math.max(40, Math.min(420, rawDrive.durationMs ?? 100));
         if ((bot.drivePauseUntil !== null && now < bot.drivePauseUntil) || waitingForFreshFrame) {
           drive = STOP;
         } else if (bot.drivePulseStartedAt === null) {
@@ -465,6 +542,7 @@ export class SceneRunner {
           // 整定期間＋新フレーム確認が明けたので、直前のステップの実移動量を評価してリアルタイム補正を更新
           if (at) this.evaluateSettledObservation(bot, at);
           bot.drivePulseStartedAt = now;
+          bot.lastMotionKind = "linear";
           bot.consecutiveLinearSteps += 1;
           if (at && bot.motion) {
             const durSec = (rawDrive.durationMs ?? 100) / 1000;
@@ -479,10 +557,14 @@ export class SceneRunner {
             };
           }
         } else if (now - bot.drivePulseStartedAt >= pulseWindowMs) {
+          const pulseEnd = bot.drivePulseStartedAt + pulseWindowMs;
           bot.drivePulseStartedAt = null;
-          bot.drivePauseUntil = now + settleMs;
-          bot.pauseWaitFreshAfter = now + 80;
+          bot.drivePauseUntil = pulseEnd + pulseSettleMs;
+          bot.pauseWaitFreshAfter = pulseEnd + pulseFreshOffsetMs;
           drive = STOP;
+        } else {
+          // 既に単発タイマー駆動を送信済みのため、途中tickで再送してESP32タイマーを再延長しない
+          return;
         }
       } else {
         bot.spinStartedAt = null;
@@ -508,22 +590,30 @@ export class SceneRunner {
 
   // ---- arming ----
 
+  private initialLimits(b: Bot): { posMm: number; yawDeg: number } {
+    if (b.motion !== null && b.position.state === "arrived") {
+      return { posMm: 50, yawDeg: 30 };
+    }
+    return { posMm: ARRIVE_POS_MM, yawDeg: b.motion !== null ? 22 : ARRIVE_YAW_DEG };
+  }
+
   private evalChecks(): void {
     const input = this.input;
     if (!input || !this.plan) return;
     const loc = input.poses.localizer;
     const total = this.bots.length;
     const count = (pred: (b: Bot) => boolean) => this.bots.filter(pred).length;
-    const inScene = new Set(this.bots.map((b) => b.track.robotId));
+    const inScene = new Set(this.bots.map((b) => b.resolvedRobotId).filter((id): id is string => !!id));
     const outsiders = input.poses.poses.filter((p) => p.tracking === "tracking" && !inScene.has(p.robotId));
     const atInitial = (b: Bot) => {
       const at = this.tracked(b);
       const init = b.track.initial!;
       if (!at) return false;
       b.posErr = Math.hypot(init.x - at.x, init.y - at.y);
-      b.yawErr = Math.abs(shortestTurn(at.yaw, init.yaw));
-      if (b.motion !== null && b.position.state === "arrived" && b.posErr <= 42 && b.yawErr <= 22) return true;
-      return b.posErr <= ARRIVE_POS_MM && b.yawErr <= ARRIVE_YAW_DEG;
+      const effYaw = b.motion ? normalizeYaw(at.yaw - b.motion.yawOffsetDeg) : at.yaw;
+      b.yawErr = Math.abs(shortestTurn(effYaw, init.yaw));
+      const { posMm, yawDeg } = this.initialLimits(b);
+      return b.posErr <= posMm && b.yawErr <= yawDeg;
     };
     const check = (id: string, label: string, ok: boolean, detail: string, warn = false): RunCheck => ({ id, label, ok, detail, ...(warn ? { warn } : {}) });
     this.checks = [
@@ -534,7 +624,7 @@ export class SceneRunner {
       check("tracking", "全ロボットが追跡中", total > 0 && count((b) => b.pose?.tracking === "tracking") === total, `${count((b) => b.pose?.tracking === "tracking")}/${total}`),
       check("devices", "駆動デバイスが接続中", total > 0 && count((b) => !!b.pose && input.online(b.pose.deviceId)) === total,
         `${count((b) => !!b.pose && input.online(b.pose.deviceId))}/${total}`),
-      check("initial", "全ロボットが初期位置にいる（位置20mm・向き5°）", total > 0 && count(atInitial) === total, `${count(atInitial)}/${total}`),
+      check("initial", `全ロボットが初期位置にいる（位置${ARRIVE_POS_MM}mm・向き${ARRIVE_YAW_DEG}°）`, total > 0 && count(atInitial) === total, `${count(atInitial)}/${total}`),
       check("plan", "計画にエラーがない", this.plan.errors.length === 0, this.plan.errors.length ? `${this.plan.errors.length}件: ${this.plan.errors[0]}` : "なし"),
       ...(outsiders.length ? [check("outsiders", "シーンに入っていないロボットが盤面にいます（動かない障害物として扱います）", false,
         outsiders.map((p) => p.robotId).join("、"), true)] : []),
@@ -549,13 +639,16 @@ export class SceneRunner {
     const bot = todo[0];
     for (const other of todo.slice(1)) this.drive(other, STOP);
     if (!bot) {
-      this.positioning = { active: false };
+      this.positioning = { active: false, avoidWalls: true };
       this.note("info", items.some((b) => b.position.state === "failed") ? "初期位置への移動を終えました（動かせない機体があります）" : "全ロボットが初期位置に着きました");
       return;
     }
     const at = this.tracked(bot);
     const init = bot.track.initial!;
     const fail = (detail: string) => { bot.position = { state: "failed", detail, startedAt: null }; this.drive(bot, STOP, true); this.note("warn", `${bot.track.name}: ${detail}`); };
+    if (!bot.pose?.deviceId || !this.input?.online(bot.pose.deviceId)) {
+      return fail("駆動デバイスがオフラインです。電源とWi-Fi接続を確認してください");
+    }
     if (!at) {
       if (bot.positionLostAt === null) bot.positionLostAt = now;
       const lostLimit = bot.motion !== null ? 4000 : 2000;
@@ -564,52 +657,123 @@ export class SceneRunner {
       return;
     }
     bot.positionLostAt = null;
+    const otherRobots: { x: number; y: number }[] = [
+      ...items.filter((other) => other !== bot)
+        .map((other) => this.tracked(other))
+        .filter((p): p is { x: number; y: number; yaw: number } => !!p),
+      ...this.obstacles(),
+    ];
     if (bot.position.startedAt === null) {
-      const problem = pathProblem(this.safety!, at, init, "robot");
-      if (problem) return fail(`直線で動かせません（${problem}）。手で置き直してください`);
+      if (otherRobots.some((o) => Math.hypot(o.x - init.x, o.y - init.y) < CONFLICT_MM)) {
+        return fail("初期位置付近に別のロボットがいます。手で置き直してください");
+      }
+      if (this.positioning.avoidWalls) {
+        const detour = findDetourPath(this.safety!, at, init, otherRobots, 180)
+          ?? findDetourPath(this.safety!, at, init, otherRobots, 145);
+        if (!detour) {
+          return fail("壁や障害物を迂回する経路が見つかりません。「MAPの壁を迂回する」をオフにするか手で置き直してください");
+        }
+        bot.positionPath = detour;
+      } else {
+        bot.positionPath = [init];
+      }
       bot.position = { state: "moving", detail: "", startedAt: now };
       bot.within = null;
       bot.stuck = null;
       bot.consecutiveLinearSteps = 0;
     }
-    const dist = Math.hypot(init.x - at.x, init.y - at.y);
-    if (dist <= ARRIVE_POS_MM) bot.aligningYaw = true;
-    else if (dist > 42) bot.aligningYaw = false;
-    const rotate = (bot.motion !== null && bot.aligningYaw) || dist <= ARRIVE_POS_MM;
-    let targetX = init.x, targetY = init.y;
-    if (!rotate && bot.motion !== null && dist > 60) {
-      const dx = init.x - at.x, dy = init.y - at.y;
-      const len2 = dx * dx + dy * dy;
-      for (const other of items) {
-        if (other === bot) continue;
-        const oPos = this.tracked(other);
-        if (!oPos) continue;
-        const t = Math.max(0.05, Math.min(0.95, ((oPos.x - at.x) * dx + (oPos.y - at.y) * dy) / len2));
-        const qx = at.x + t * dx, qy = at.y + t * dy;
-        const clearDist = Math.hypot(qx - oPos.x, qy - oPos.y);
-        if (clearDist < 145) {
-          const ux = clearDist > 1 ? (qx - oPos.x) / clearDist : -dy / dist;
-          const uy = clearDist > 1 ? (qy - oPos.y) / clearDist : dx / dist;
-          targetX = Math.max(150, Math.min(950, oPos.x + ux * 165));
-          targetY = Math.max(150, Math.min(480, oPos.y + uy * 165));
-          break;
+    while (
+      bot.positionPath.length > 1 &&
+      Math.hypot(bot.positionPath[0].x - at.x, bot.positionPath[0].y - at.y) <= 35
+    ) {
+      bot.positionPath.shift();
+    }
+    const isFinal = bot.positionPath.length <= 1;
+    const wp = isFinal ? init : bot.positionPath[0];
+    const distToInit = Math.hypot(init.x - at.x, init.y - at.y);
+    let targetX = wp.x, targetY = wp.y;
+    let rotate = false;
+    if (isFinal) {
+      if (distToInit <= ARRIVE_POS_MM) bot.aligningYaw = true;
+      else if (distToInit > 42) bot.aligningYaw = false;
+      rotate = (bot.motion !== null && bot.aligningYaw) || distToInit <= ARRIVE_POS_MM;
+      if (!rotate && !this.positioning.avoidWalls && distToInit > 60) {
+        const dx = init.x - at.x, dy = init.y - at.y;
+        const len2 = dx * dx + dy * dy;
+        const fieldW = this.input?.poses.field?.widthMm ?? 1100;
+        const fieldH = this.input?.poses.field?.heightMm ?? 620;
+        for (const oPos of otherRobots) {
+          const t = Math.max(0.05, Math.min(0.95, ((oPos.x - at.x) * dx + (oPos.y - at.y) * dy) / len2));
+          const qx = at.x + t * dx, qy = at.y + t * dy;
+          const clearDist = Math.hypot(qx - oPos.x, qy - oPos.y);
+          if (clearDist < 145) {
+            const ux = clearDist > 1 ? (qx - oPos.x) / clearDist : -dy / distToInit;
+            const uy = clearDist > 1 ? (qy - oPos.y) / clearDist : dx / distToInit;
+            targetX = Math.max(150, Math.min(fieldW - 150, oPos.x + ux * 165));
+            targetY = Math.max(150, Math.min(fieldH - 150, oPos.y + uy * 165));
+            break;
+          }
         }
       }
+    } else {
+      bot.aligningYaw = false;
     }
     const c = control(
       at,
-      { x: targetX, y: targetY, yaw: init.yaw, rotate, speedMmS: POSITION_SPEED_MMS, allowReverse: true },
+      { x: targetX, y: targetY, yaw: init.yaw, rotate, speedMmS: POSITION_SPEED_MMS, allowReverse: isFinal },
       bot.motion,
       this.buildRuntimeContext(bot)
     );
-    const truePosErr = rotate ? 0 : dist;
-    bot.posErr = truePosErr;
-    bot.yawErr = Math.abs(c.yawErrDeg);
-    bot.position.detail = `残り ${Math.round(truePosErr)}mm`;
-    if (this.arrived(bot, truePosErr, c.yawErrDeg, now)) {
-      bot.position = { state: "arrived", detail: "到着済み", startedAt: null };
+    const truePosErr = isFinal ? (rotate ? 0 : distToInit) : Math.hypot(targetX - at.x, targetY - at.y);
+    bot.posErr = distToInit;
+    const effYaw = bot.motion ? normalizeYaw(at.yaw - bot.motion.yawOffsetDeg) : at.yaw;
+    bot.yawErr = Math.abs(shortestTurn(effYaw, init.yaw));
+    if (isFinal && c.phase === "geofenceBrake" && distToInit <= 48) {
+      // 外周の初期位置付近でジオフェンスに阻まれた場合はその場で向き合わせへ移行してデッドロックを防ぐ
+      bot.aligningYaw = true;
       this.drive(bot, STOP, true);
       return;
+    }
+    if (isFinal) {
+      bot.position.detail = `残り ${Math.round(truePosErr)}mm`;
+      if (this.arrived(bot, truePosErr, c.yawErrDeg, now)) {
+        bot.position = { state: "arrived", detail: "到着済み", startedAt: null };
+        bot.positionPath = [];
+        this.drive(bot, STOP, true);
+        return;
+      }
+    } else {
+      let rem = Math.hypot(wp.x - at.x, wp.y - at.y);
+      for (let i = 0; i < bot.positionPath.length - 1; i++) {
+        rem += Math.hypot(
+          bot.positionPath[i + 1].x - bot.positionPath[i].x,
+          bot.positionPath[i + 1].y - bot.positionPath[i].y
+        );
+      }
+      bot.position.detail = `迂回中（残り ${Math.round(rem)}mm）`;
+    }
+    if (c.drive.cmd === "a" || c.drive.cmd === "b") {
+      const stepGoal = { x: targetX, y: targetY };
+      const segLen = distance(at, stepGoal);
+      if (segLen > 1) {
+        const ahead = {
+          x: at.x + (stepGoal.x - at.x) / segLen * Math.min(segLen, CONFLICT_MM),
+          y: at.y + (stepGoal.y - at.y) / segLen * Math.min(segLen, CONFLICT_MM),
+        };
+        if (otherRobots.some((o) => distance(ahead, o) < CONFLICT_MM && distance(at, o) > distance(ahead, o))) {
+          if (this.positioning.avoidWalls && bot.positionReplans < 2 && otherRobots.every((o) => distance(at, o) >= CONFLICT_MM)) {
+            const replanned = findDetourPath(this.safety!, at, init, otherRobots, 185);
+            const nextWp = replanned?.[0];
+            if (replanned && nextWp && Math.hypot(nextWp.x - targetX, nextWp.y - targetY) > 15) {
+              bot.positionReplans += 1;
+              bot.positionPath = replanned;
+              this.drive(bot, STOP, true);
+              return;
+            }
+          }
+          return fail("他のロボットと干渉するため移動できません。手で置き直してください");
+        }
+      }
     }
     if (now - bot.position.startedAt! > POSITION_TIMEOUT_MS) return fail("時間内に着けませんでした。手で置き直してください");
     if (this.stuckTwice(bot, c.drive, at, now)) return fail("進めません。手で置き直してください");
@@ -652,7 +816,7 @@ export class SceneRunner {
           prev.x < 150 || prev.x > field.widthMm - 150 ||
           prev.y < 150 || prev.y > field.heightMm - 150
         );
-        const graceMs = nearEdge ? 0 : 800;
+        const graceMs = nearEdge ? 350 : 800;
         if (bot.motion !== null && now - this.lostSince.get(bot)! < graceMs) {
           continue;
         }
@@ -676,8 +840,8 @@ export class SceneRunner {
       bot.goalEntry = entry;
       if (!entry) { bot.status = "arrived"; bot.within = null; bot.posErr = bot.yawErr = null; this.drive(bot, STOP); continue; }
       const rawGoal = entry.to!;
-      // 実機の場合は目標点が外周の危険領域にあっても、ソフトストップ自然停止距離を含めて絶対防衛ライン(130mm)を超えない内側（外周から155mm）に安全クランプする
-      const safeTargetMargin = GEOFENCE_SAFE_MARGIN_MM + 25;
+      // 実機の場合は目標点が外周の危険領域にあっても、絶対防衛ライン(75mm)の内側(90mm)に安全クランプする
+      const safeTargetMargin = GEOFENCE_SAFE_MARGIN_MM + 15;
       const goalX = bot.motion !== null && field ? Math.max(safeTargetMargin, Math.min(field.widthMm - safeTargetMargin, rawGoal.x)) : rawGoal.x;
       const goalY = bot.motion !== null && field ? Math.max(safeTargetMargin, Math.min(field.heightMm - safeTargetMargin, rawGoal.y)) : rawGoal.y;
       const rawDist = Math.hypot(goalX - at.x, goalY - at.y);
@@ -690,25 +854,37 @@ export class SceneRunner {
         bot.motion,
         this.buildRuntimeContext(bot)
       );
-      bot.posErr = c.posErrMm;
+      bot.posErr = entry.action.motion === "rotate" ? 0 : rawDist;
       bot.yawErr = Math.abs(c.yawErrDeg);
       if (this.arrived(bot, c.posErrMm, c.yawErrDeg, now)) {
+        const reportedPosErr = entry.action.motion === "rotate" ? 0 : rawDist;
         bot.aligningYaw = false;
+        bot.stuck = null;
         bot.consecutiveLinearSteps = 0;
-        bot.arrivals.set(entry.action.id, { at: t, posErrMm: c.posErrMm, yawErrDeg: Math.abs(c.yawErrDeg) });
-        this.note("info", `${bot.track.name} ${entry.action.name} 到着確認（位置 ${c.posErrMm.toFixed(1)}mm / 向き ${Math.abs(c.yawErrDeg).toFixed(1)}°）`);
+        bot.arrivals.set(entry.action.id, { at: t, posErrMm: reportedPosErr, yawErrDeg: Math.abs(c.yawErrDeg) });
+        this.note("info", `${bot.track.name} ${entry.action.name} 到着確認（位置 ${reportedPosErr.toFixed(1)}mm / 向き ${Math.abs(c.yawErrDeg).toFixed(1)}°）`);
         bot.status = "arrived";
         this.drive(bot, STOP, true);
         continue;
       }
-      if (c.drive.cmd === "a" && this.blocked(at, { x: goalX, y: goalY })) {
+      if ((c.drive.cmd === "a" || c.drive.cmd === "b") && this.blocked(at, { x: goalX, y: goalY })) {
         bot.status = "waiting";
         bot.stuck = null;
         this.drive(bot, STOP);
         continue;
       }
       if (c.phase === "geofenceBrake") {
-        this.note("warn", `${bot.track.name} が安全境界（外周${GEOFENCE_SAFE_MARGIN_MM}mm）に接近したため予測ブレーキで保護停止しました`);
+        // 目標まで38mm以内で安全境界に阻まれた場合は、これ以上外周へ押し出さず向き合わせへ移行してデッドロックを防ぐ
+        if (rawDist <= 38) {
+          bot.aligningYaw = true;
+          this.drive(bot, STOP, true);
+          continue;
+        }
+        const warnText = `${bot.track.name} が安全境界（外周${GEOFENCE_SAFE_MARGIN_MM}mm）に接近したため予測ブレーキで保護停止しました`;
+        const lastLog = this.log.at(-1);
+        if (!lastLog || lastLog.text !== warnText || now - lastLog.at >= 3000) {
+          this.note("warn", warnText);
+        }
         this.drive(bot, STOP, true);
         continue;
       }
@@ -757,16 +933,16 @@ export class SceneRunner {
     if (evasion) {
       goal = evasion.stage === "going" ? evasion.spot : evasion.stage === "returning" ? evasion.origin : null;
       speed = POSITION_SPEED_MMS;
-    } else if (entry && entry.action.motion !== "rotate" && !bot.arrivals.has(entry.action.id) && bot.status !== "arrived") goal = { x: entry.to!.x, y: entry.to!.y };
+    } else if (entry && entry.action.motion !== "rotate" && !bot.aligningYaw && !bot.arrivals.has(entry.action.id) && bot.status !== "arrived") goal = { x: entry.to!.x, y: entry.to!.y };
     return {
-      id: bot.track.id, x: at.x, y: at.y, goal, speedMmS: Math.min(speed, DRIVE_LIMITS.maxSpeedMmS),
+      id: bot.track.id, x: at.x, y: at.y, goal, speedMmS: Math.min(speed, bot.motion?.speedMmS ?? DRIVE_LIMITS.maxSpeedMmS),
       barEnd: entry?.end ?? Infinity, priority: bot.priority, markerId: bot.pose?.markerId ?? 99
     };
   }
 
   // Robots that are not in the scene, and a robot that was lost, stand still where they were seen.
   private obstacles(): { x: number; y: number }[] {
-    const inScene = new Set(this.bots.map((b) => b.track.robotId));
+    const inScene = new Set(this.bots.map((b) => b.resolvedRobotId).filter((id): id is string => !!id));
     const outsiders = this.input!.poses.poses.filter((p) => p.tracking === "tracking" && !inScene.has(p.robotId) && p.xMm !== undefined && p.yMm !== undefined)
       .map((p) => ({ x: p.xMm!, y: p.yMm! }));
     return [...outsiders, ...this.bots.flatMap((b) => (b.lost ? [b.lost] : []))];
@@ -808,7 +984,15 @@ export class SceneRunner {
       const botA = byId.get(a.id)!, botB = byId.get(b.id)!;
       const key = [a.id, b.id].sort().join("|");
       if (busy.has(botA) || busy.has(botB) || (this.cooldown.get(key) ?? 0) > now) continue;
-      if ((botA.motion !== null || botB.motion !== null) && (!a.goal || !b.goal) && distance(a, b) >= 125) continue;
+      if ((botA.motion !== null || botB.motion !== null) && (!a.goal || !b.goal)) {
+        const moverBot = a.goal ? a : b;
+        const stillBot = a.goal ? b : a;
+        const g = moverBot.goal!;
+        const dx = g.x - moverBot.x, dy = g.y - moverBot.y, len2 = dx * dx + dy * dy;
+        const u = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((stillBot.x - moverBot.x) * dx + (stillBot.y - moverBot.y) * dy) / len2));
+        const closestDist = Math.hypot(stillBot.x - (moverBot.x + dx * u), stillBot.y - (moverBot.y + dy * u));
+        if (closestDist >= 115) continue;
+      }
       const others = (self: Mover, other: Mover) => [...fixed, ...list.map((x) => mover(x)).filter((m) => m !== self && m !== other)];
       const spotA = findEvasion(this.safety!, a, b, others(a, b)), spotB = findEvasion(this.safety!, b, a, others(b, a));
       const decision = decide(a, b, !!spotA, !!spotB);
@@ -917,7 +1101,12 @@ export class SceneRunner {
     this.halt = null;
     this.syncPoint = null;
     if (this.bots.some((b) => b.motion !== null)) this.evasions = [];
-    for (const bot of this.bots) { bot.within = null; bot.stuck = null; bot.lost = null; bot.consecutiveLinearSteps = 0; }
+    for (const bot of this.bots) {
+      bot.within = null; bot.stuck = null; bot.lost = null; bot.consecutiveLinearSteps = 0;
+      bot.aligningYaw = false; bot.stallBoostPwm = 0; bot.spinStartedAt = null; bot.spinPauseUntil = null;
+      bot.drivePulseStartedAt = null; bot.drivePauseUntil = null; bot.pauseWaitFreshAfter = null;
+      bot.contCheck = null; bot.lastMotionKind = null; bot.pendingObservation = null;
+    }
     this.note("info", "再開");
     this.deps.onClock?.(this.clock, true);
   }
@@ -968,8 +1157,9 @@ export class SceneRunner {
     if (this.phase !== "arming") return [];
     const out: InitialMismatch[] = [];
     for (const bot of this.bots) {
-      const posOk = bot.posErr !== null && bot.posErr <= ARRIVE_POS_MM;
-      const yawOk = bot.yawErr !== null && bot.yawErr <= ARRIVE_YAW_DEG;
+      const { posMm, yawDeg } = this.initialLimits(bot);
+      const posOk = bot.posErr !== null && bot.posErr <= posMm;
+      const yawOk = bot.yawErr !== null && bot.yawErr <= yawDeg;
       if (!posOk || !yawOk) {
         out.push({ trackId: bot.track.id, name: bot.track.name, posErrMm: bot.posErr, yawErrDeg: bot.yawErr, posOk, yawOk });
       }
@@ -980,7 +1170,7 @@ export class SceneRunner {
   private excludedViews(): RunRobot[] {
     const input = this.input;
     if (!input) return [];
-    const inScene = new Set(this.bots.map((b) => b.track.robotId));
+    const inScene = new Set(this.bots.map((b) => b.resolvedRobotId).filter((id): id is string => !!id));
     return input.poses.poses
       .filter((p) => p.tracking === "tracking" && !inScene.has(p.robotId))
       .map((p): RunRobot => {
@@ -1010,8 +1200,31 @@ export class SceneRunner {
   // ---- shared ----
 
   private arrived(bot: Bot, posErr: number, yawErr: number, now: number): boolean {
-    const yawLimit = bot.motion !== null ? 22 : ARRIVE_YAW_DEG;
-    if (posErr <= ARRIVE_POS_MM && Math.abs(yawErr) <= yawLimit) {
+    if (bot.motion !== null) {
+      // 実機は駆動・旋回パルスの途中や惰性整定前（停止後の新フレーム到着前）には到着確定しない
+      const poseCapturedAt = bot.pose?.ageMs !== undefined ? now - bot.pose.ageMs : now;
+      const waitingForFreshFrame =
+        bot.pauseWaitFreshAfter !== null &&
+        poseCapturedAt < bot.pauseWaitFreshAfter &&
+        now < bot.pauseWaitFreshAfter + 1100;
+      const settling =
+        !!bot.lastDrive?.continuous ||
+        bot.spinStartedAt !== null ||
+        bot.drivePulseStartedAt !== null ||
+        (bot.spinPauseUntil !== null && now < bot.spinPauseUntil) ||
+        (bot.drivePauseUntil !== null && now < bot.drivePauseUntil) ||
+        waitingForFreshFrame;
+      if (settling) {
+        bot.within = null;
+        return false;
+      }
+      if (posErr <= ARRIVE_POS_MM && Math.abs(yawErr) <= 22) {
+        return true;
+      }
+      bot.within = null;
+      return false;
+    }
+    if (posErr <= ARRIVE_POS_MM && Math.abs(yawErr) <= ARRIVE_YAW_DEG) {
       bot.within ??= now;
       return now - bot.within >= ARRIVE_HOLD_MS;
     }
@@ -1036,7 +1249,7 @@ export class SceneRunner {
     this.note("warn", `${bot.track.name} が進みません。1回だけやり直します`);
     // スタック再試行時は速度スケール調整＋スタックブーストを効かせる
     bot.dynamicSpeedScale = Math.max(0.7, bot.dynamicSpeedScale - 0.15);
-    bot.stallBoostPwm = Math.min(35, bot.stallBoostPwm + 15);
+    bot.stallBoostPwm = Math.min(60, bot.stallBoostPwm + 20);
     bot.stuck = { at: now, x: at.x, y: at.y, yaw: curYaw, retried: true };
     return false;
   }
@@ -1063,7 +1276,7 @@ export class SceneRunner {
     const goal = this.phase === "arming" ? bot.track.initial! : entry?.to ?? null;
     const failed = bot.position.state === "failed";
     return {
-      trackId: bot.track.id, name: bot.track.name, robotId: bot.track.robotId ?? null, markerId: bot.pose?.markerId ?? null, priority: bot.priority,
+      trackId: bot.track.id, name: bot.track.name, robotId: bot.resolvedRobotId, markerId: bot.pose?.markerId ?? null, priority: bot.priority,
       tracking: bot.pose?.tracking ?? "unassigned", status: failed ? "failed" : bot.status,
       bar: this.phase === "arming" ? null : entry?.action.name ?? null, barStart: entry?.start ?? null, barEnd: entry?.end ?? null,
       posErrMm: bot.posErr, yawErrDeg: bot.yawErr,
