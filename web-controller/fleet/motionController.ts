@@ -348,10 +348,11 @@ export function control(
   );
   const trimOffset = (targetPwm * totalTrimRatio) / 2;
 
-  // 角度不感帯(±6°)を保ちつつ、連続巡航中は緩やかな車線維持(±9 PWM)、クリープ中は±2 PWMに抑制
-  const maxSteer = phase === "creep" ? 2 : (continuous ? 9 : 4);
-  const effectiveSteerErr = Math.abs(bearingErr) <= 6 ? 0 : bearingErr;
-  const steer = clamp(effectiveSteerErr * 0.25, -maxSteer, maxSteer);
+  // 角度不感帯を保ちつつ、連続巡航中は3°から滑らかに車線維持(±10 PWM)、クリープ中は±2 PWMに抑制
+  const maxSteer = phase === "creep" ? 2 : (continuous ? 10 : 4);
+  const steerDeadband = continuous ? 3 : 6;
+  const effectiveSteerErr = Math.abs(bearingErr) <= steerDeadband ? 0 : bearingErr;
+  const steer = clamp(effectiveSteerErr * (continuous ? 0.35 : 0.25), -maxSteer, maxSteer);
   const minWheel = Math.max(115, effectiveMinPwm - 8);
 
   let left: number;

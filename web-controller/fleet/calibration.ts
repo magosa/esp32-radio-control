@@ -34,7 +34,7 @@ const DEFAULT_OPTIONS: Required<CalibrationOptions> = {
 export class CalibrationRunner {
   private aborted = false;
 
-  constructor(private deps: CalibrationDeps, private options: CalibrationOptions = {}) {}
+  constructor(private deps: CalibrationDeps, private options: CalibrationOptions = {}) { }
 
   abort(): void {
     this.aborted = true;
@@ -99,7 +99,7 @@ export class CalibrationRunner {
 
       // 2. Forward step: minDrivePwm, speedMmS, yawOffsetDeg, leftRightTrimRatio, brakingDistanceMm, creepStepMm
       emit("forward", 25, "前進走行・最小クリープ量・左右ドリフト・制動距離を測定中…");
-      
+
       // 動き出しPWM（およびクリープ1ステップ移動量）の探索
       let minDrivePwm = 120;
       let creepStepMm = 12;
@@ -161,7 +161,27 @@ export class CalibrationRunner {
         yawOffsetDeg = Math.round(shortestTurn(moveBearing, fwdBefore.yaw) * 10) / 10;
         // +Y下向き座標系では前進時に L > R で yawDriftDeg > 0 となるため、右輪強化(正のトリム)が負帰還として正しい
         const yawDriftDeg = shortestTurn(fwdBefore.yaw, fwdAfter.yaw);
-        leftRightTrimRatio = Math.round(Math.max(-0.25, Math.min(0.25, yawDriftDeg * 0.004)) * 1000) / 1000;
+        const initialTrim = Math.max(-0.20, Math.min(0.20, yawDriftDeg * 0.0032));
+
+        // 2パス閉ループ検証：推定トリムを適用して後進で元の位置へ戻りつつ、残留ドリフトからトリムを精密補正する
+        checkAborted();
+        const revBefore = getValidPose();
+        const off1 = Math.round((fwdPwm * initialTrim) / 2);
+        const revL = Math.max(115, Math.min(220, fwdPwm - off1));
+        const revR = Math.max(115, Math.min(220, fwdPwm + off1));
+        this.deps.sendDrive(deviceId, "b", revL, revR);
+        await this.deps.sleep(fwdDurationMs);
+        stop();
+        await this.deps.sleep(450);
+        const revAfter = getValidPose();
+        const revDist = Math.hypot(revAfter.x - revBefore.x, revAfter.y - revBefore.y);
+        if (revDist >= 15) {
+          // 後進(cmd='b')では R > L で yaw が増加(+)するため、残留 yawDrift2 > 0 はトリム過多（減らす）、< 0 はトリム不足（増やす）
+          const revDriftDeg = shortestTurn(revBefore.yaw, revAfter.yaw);
+          leftRightTrimRatio = Math.round(Math.max(-0.25, Math.min(0.25, initialTrim - revDriftDeg * 0.0022)) * 1000) / 1000;
+        } else {
+          leftRightTrimRatio = Math.round(initialTrim * 1000) / 1000;
+        }
       }
 
       // 3. Left & Right Turn minTurnPwm probe (左右両方向で動き出しPWMを検証し、大きい方を採用)

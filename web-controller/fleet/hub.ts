@@ -72,7 +72,7 @@ export class FleetHub {
       onClock: (position, running) => this.followRunClock(position, running),
     });
     this.routeEngine = new RouteEngine({
-      sendDrive: (deviceId, cmd, speedL, speedR) => this.sendDriveToDevice(deviceId, cmd, speedL, speedR),
+      sendDrive: (deviceId, cmd, speedL, speedR) => this.sendTrimmedDriveToDevice(deviceId, cmd, speedL, speedR),
       onStatus: (status) => this.broadcastToClients({ type: "routeStatus", ...status }),
     });
 
@@ -467,7 +467,7 @@ export class FleetHub {
         }
         // autoモード中の車両はルートエンジンが制御しているため、手動コマンドは無視する
         const targets = requested.filter((id) => msg.cmd === "e" || this.registry.getMode(id) !== "auto");
-        targets.forEach((deviceId) => this.sendDriveToDevice(deviceId, msg.cmd, msg.speedL, msg.speedR));
+        targets.forEach((deviceId) => this.sendTrimmedDriveToDevice(deviceId, msg.cmd, msg.speedL, msg.speedR));
         break;
       }
       case "setMode": {
@@ -567,6 +567,22 @@ export class FleetHub {
 
   private sendDisplayLayoutToDevice(deviceId: string, layout: DisplayLayoutMode): void {
     this.sendToDevice(deviceId, { type: "setDisplayLayout", layout }, "display");
+  }
+
+  // 手動操作(/control)や簡易ルートでの直進(speedL===speedR)に、校正済み左右トリム(leftRightTrimRatio)を自動適用する
+  private sendTrimmedDriveToDevice(deviceId: string, cmd: DriveCommand, speedL: number, speedR: number): void {
+    if ((cmd === "a" || cmd === "b") && speedL === speedR && speedL > 0) {
+      const robot = this.store.getRobots().find((r) => r.driveDeviceId === deviceId);
+      const trim = robot?.motion?.leftRightTrimRatio ?? 0;
+      if (trim !== 0) {
+        const offset = Math.round((speedL * trim) / 2);
+        const adjL = Math.max(0, Math.min(255, speedL - offset));
+        const adjR = Math.max(0, Math.min(255, speedR + offset));
+        this.sendDriveToDevice(deviceId, cmd, adjL, adjR);
+        return;
+      }
+    }
+    this.sendDriveToDevice(deviceId, cmd, speedL, speedR);
   }
 
   private sendDriveToDevice(deviceId: string, cmd: DriveCommand, speedL: number, speedR: number, durationMs?: number): void {
