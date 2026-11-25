@@ -522,7 +522,7 @@ export class SceneRunner {
       if (!at) return false;
       b.posErr = Math.hypot(init.x - at.x, init.y - at.y);
       b.yawErr = Math.abs(shortestTurn(at.yaw, init.yaw));
-      if (b.motion !== null && b.position.state === "arrived" && b.posErr <= 42 && b.yawErr <= ARRIVE_YAW_DEG + 5) return true;
+      if (b.motion !== null && b.position.state === "arrived" && b.posErr <= 42 && b.yawErr <= 22) return true;
       return b.posErr <= ARRIVE_POS_MM && b.yawErr <= ARRIVE_YAW_DEG;
     };
     const check = (id: string, label: string, ok: boolean, detail: string, warn = false): RunCheck => ({ id, label, ok, detail, ...(warn ? { warn } : {}) });

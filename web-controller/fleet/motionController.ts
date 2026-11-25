@@ -131,8 +131,9 @@ export function predictTrajectory(
   const meanPwm = (drive.speedL + drive.speedR) / 2;
   const pwmRatio = maxPwm > minPwm ? clamp((meanPwm - minPwm) / (maxPwm - minPwm), 0.25, 1.0) : 0.7;
   const estSpeedMmS = baseSpeed * (0.55 + 0.45 * pwmRatio);
-  // ソフトストップ＋フリーラン自然停止時の余裕距離（実測値または安全側デフォルト45mm）
-  const brakingMm = Math.max(40, calibration?.brakingDistanceMm ?? 45) * (0.5 + 0.5 * pwmRatio);
+  // ソフトストップ＋フリーラン自然停止時の余裕距離（連続巡航時は100%、静止からの極短クリープパルスは運動エネルギー比でスケーリング）
+  const pulseEnergy = drive.continuous ? 1.0 : clamp(pulseSec / 0.3, 0.25, 1.0);
+  const brakingMm = Math.max(40, calibration?.brakingDistanceMm ?? 45) * (0.5 + 0.5 * pwmRatio) * pulseEnergy;
   const travelMm = estSpeedMmS * activeSec + brakingMm;
   const sign = drive.cmd === "b" ? -1 : 1;
   const rad = (effectiveYaw * Math.PI) / 180;
@@ -356,12 +357,13 @@ export function control(
 
     if (!prediction.insideSafeZone && movingOutward) {
       // 予測停止位置が絶対防衛ライン(130mm)を超える場合、連続巡航を禁止しクリープ短パルスで安全領域内に収まるか再試行
-      const safePwm = Math.round(clamp(limits.minPwm + clamp(stallBoost, 0, 15), limits.minPwm, effectiveMaxPwm));
+      const safePwm = Math.round(clamp(effectiveMinPwm + clamp(stallBoost, 0, 25), effectiveMinPwm, effectiveMaxPwm));
+      const safeDur = Math.min(110, 75 + Math.round(stallBoost * 0.8));
       const safeCreepDrive: Drive = {
         cmd,
         speedL: safePwm,
         speedR: safePwm,
-        durationMs: 75,
+        durationMs: safeDur,
         continuous: false,
       };
       const creepPred = predictTrajectory(pose, safeCreepDrive, calibration, runtime);
