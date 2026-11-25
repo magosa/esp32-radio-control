@@ -163,8 +163,9 @@ function spin(
   const pwm = Math.round(clamp(limits.minTurnPwm + extra + boost, limits.minTurnPwm, maxSafeTurnPwm));
   const rate = err > 0 ? (calibration?.turnRateLeftDegS ?? 150) : (calibration?.turnRateRightDegS ?? 150);
   // 1回のパルスで目標角度の約60%だけを回す（オーバーシュート防止）
+  // ファームウェアのソフトスタート(約35ms)を考慮し、最小75msを確保して静止摩擦での空打ちを防ぐ
   const idealMs = (absErr * 0.6 / Math.max(40, rate)) * 1000;
-  const durationMs = Math.round(clamp(idealMs, isCreepTurn ? 55 : 80, isCreepTurn ? 95 : 180));
+  const durationMs = Math.round(clamp(idealMs, isCreepTurn ? 75 : 85, isCreepTurn ? 110 : 180));
   return {
     drive: { cmd: err > 0 ? "c" : "d", speedL: pwm, speedR: pwm, durationMs },
     phase: isCreepTurn ? "creep" : "spin",
@@ -253,12 +254,13 @@ export function control(
   let durationMs: number;
 
   if (posErrMm <= CREEP_RADIUS_MM) {
-    // ① クリープ走行領域（20mm〜85mm）：最小駆動PWM＋極短パルスで10〜20mmずつ慎重に寄せる
+    // ① クリープ走行領域（20mm〜80mm）：最小駆動PWM＋短パルスで慎重に寄せる（ファームウェアのソフトスタート約35msを考慮し最小75ms）
     phase = "creep";
     targetPwm = clamp(limits.minPwm + adaptiveBoost, limits.minPwm, limits.maxPwm);
-    const baseCreepMs = calibration?.creepPulseMs ?? 60;
+    const baseCreepMs = calibration?.creepPulseMs ?? 70;
     const distRatio = clamp((posErrMm - POS_DEAD_MM) / (CREEP_RADIUS_MM - POS_DEAD_MM), 0.2, 1.0);
-    durationMs = Math.round(clamp(baseCreepMs * (0.65 + 0.55 * distRatio), 40, 85));
+    const stallTimeBonus = Math.min(25, Math.round(clamp(runtime?.stallBoostPwm ?? 0, 0, 35) * 0.7));
+    durationMs = Math.round(clamp(baseCreepMs * (0.95 + 0.45 * distRatio) + stallTimeBonus, 75, 115));
   } else if (consecutiveSteps < 3) {
     // ② ソフトスタート領域（走り出しの1〜3ステップ目）：いきなりフルスロットルにせず段階的に加速する
     phase = "softStart";
@@ -325,28 +327,30 @@ export function control(
     const movingOutward = predictedDistFromCenter > currentDistFromCenter;
 
     if (!prediction.insideSafeZone && movingOutward) {
-      // 予測停止位置が絶対防衛ラインを超える場合、クリープ極短パルスで安全領域内に収まるか再試行
+      // 予測停止位置が絶対防衛ラインを超える場合、クリープ短パルスで安全領域内に収まるか再試行
+      const safePwm = Math.round(clamp(limits.minPwm + clamp(runtime?.stallBoostPwm ?? 0, 0, 15), limits.minPwm, limits.maxPwm));
       const safeCreepDrive: Drive = {
         cmd,
-        speedL: limits.minPwm,
-        speedR: limits.minPwm,
-        durationMs: 45,
+        speedL: safePwm,
+        speedR: safePwm,
+        durationMs: 75,
       };
       const creepPred = predictTrajectory(pose, safeCreepDrive, calibration, runtime);
       if (creepPred.insideSafeZone) {
         return { ...base, drive: safeCreepDrive, phase: "creep", prediction: creepPred };
       }
-      // それでも安全境界を超える場合はコマンド送信前に緊急ブレーキ停止に置換
+      // それでも安全境界を超える場合はコマンド送信前に緊急停止に置換
       return { ...base, drive: STOP, phase: "geofenceBrake", prediction };
     }
 
     if (!prediction.insideSlowZone && movingOutward && phase !== "creep") {
-      // 外周減速ゾーン（160mm内側）に向かう場合は強制的にクリープ速度へ減速
+      // 外周減速ゾーンに向かう場合は強制的にクリープ速度へ減速（ただしスタック自動ブーストは維持する）
+      const slowCapPwm = Math.round(clamp(limits.minPwm + 8 + clamp(runtime?.stallBoostPwm ?? 0, 0, 20), limits.minPwm, limits.maxPwm));
       candidateDrive = {
         cmd,
-        speedL: Math.min(left, limits.minPwm + 4),
-        speedR: Math.min(right, limits.minPwm + 4),
-        durationMs: Math.min(durationMs, 65),
+        speedL: Math.min(left, slowCapPwm),
+        speedR: Math.min(right, slowCapPwm),
+        durationMs: Math.min(durationMs, 95),
       };
       phase = "creep";
     }

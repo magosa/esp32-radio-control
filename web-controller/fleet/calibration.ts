@@ -164,26 +164,46 @@ export class CalibrationRunner {
         leftRightTrimRatio = Math.round(Math.max(-0.25, Math.min(0.25, -yawDriftDeg * 0.004)) * 1000) / 1000;
       }
 
-      // 3. Left Turn: minTurnPwm, turnRateLeftDegS
-      emit("turnLeft", 55, "左旋回特性を測定中…");
-      let minTurnPwm = 140;
-      let turned = false;
-      for (const pwm of [120, 135, 150, 165]) {
+      // 3. Left & Right Turn minTurnPwm probe (左右両方向で動き出しPWMを検証し、大きい方を採用)
+      emit("turnLeft", 55, "左・右旋回の動き出しPWMと左旋回特性を測定中…");
+      let minTurnLeft = 140;
+      let turnedLeft = false;
+      for (const pwm of [125, 140, 155, 165]) {
         checkAborted();
         const before = getValidPose();
         this.deps.sendDrive(deviceId, "c", pwm, pwm);
-        await this.deps.sleep(250);
+        await this.deps.sleep(180);
         stop();
         await this.deps.sleep(380);
         const after = getValidPose();
         const angle = Math.abs(shortestTurn(before.yaw, after.yaw));
         if (angle >= 4) {
-          minTurnPwm = pwm;
-          turned = true;
+          minTurnLeft = pwm;
+          turnedLeft = true;
           break;
         }
       }
-      if (!turned) minTurnPwm = 140;
+      if (!turnedLeft) minTurnLeft = 145;
+
+      let minTurnRight = minTurnLeft;
+      let turnedRight = false;
+      for (const pwm of [125, 140, 155, 165]) {
+        if (pwm < minTurnLeft) continue;
+        checkAborted();
+        const before = getValidPose();
+        this.deps.sendDrive(deviceId, "d", pwm, pwm);
+        await this.deps.sleep(180);
+        stop();
+        await this.deps.sleep(380);
+        const after = getValidPose();
+        const angle = Math.abs(shortestTurn(before.yaw, after.yaw));
+        if (angle >= 4) {
+          minTurnRight = pwm;
+          turnedRight = true;
+          break;
+        }
+      }
+      const minTurnPwm = turnedRight ? Math.max(minTurnLeft, minTurnRight) : Math.max(minTurnLeft, 145);
 
       const turnPwm = 160;
       const turnDurationMs = 450;

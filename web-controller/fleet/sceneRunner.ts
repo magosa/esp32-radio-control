@@ -94,6 +94,8 @@ interface Bot {
   dynamicSpeedScale: number;
   // 直前のパルスで静止摩擦に負けて動かなかった場合の自動出力ブースト (PWM, 0〜35)
   stallBoostPwm: number;
+  // 停止完了後に「新しいカメラフレーム（停止後撮影）」が到着するまで次パルスを保留する基準時刻
+  pauseWaitFreshAfter: number | null;
   // 直前の駆動パルス開始時の姿勢と予測移動量（整定完了後に実移動量と比較して自動学習する）
   pendingObservation: PulseObservation | null;
 }
@@ -155,7 +157,7 @@ export class SceneRunner {
     this.bots = map.tracks.filter((t) => t.kind === "robot" && !t.muted && t.initial).map((track) => ({
       track, arrivals: new Map(), waited: new Map(), within: null, stuck: null, lost: null, lastDrive: null, lastSentAt: 0,
       spinStartedAt: null, spinPauseUntil: null, drivePulseStartedAt: null, drivePauseUntil: null, positionLostAt: null, aligningYaw: false,
-      consecutiveLinearSteps: 0, dynamicTrimRatio: 0, dynamicSpeedScale: 1.0, stallBoostPwm: 0, pendingObservation: null,
+      consecutiveLinearSteps: 0, dynamicTrimRatio: 0, dynamicSpeedScale: 1.0, stallBoostPwm: 0, pauseWaitFreshAfter: null, pendingObservation: null,
       position: { state: "waiting", detail: "", startedAt: null }, status: "idle", posErr: null, yawErr: null, pose: null, priority: null, goalEntry: null, motion: null,
       moves: this.plan!.entries.filter((e) => e.track === track && e.action.type === "move" && !e.blocked && e.outcome === "success" && e.start !== null)
         .sort((a, b) => a.start! - b.start!),
@@ -371,13 +373,21 @@ export class SceneRunner {
       // 細かすぎる位置補正を廃止し、ソフトストップ＋自然停止＋カメラフレーム安定まで400〜500msゆったり待つ
       const settleMs = Math.max(420, 320 + latencyWait);
 
+      // 低FPS時でも「停止後に撮影された新しいカメラフレーム」が届くまで次パルスを待つ（最大1100msで安全解放）
+      const poseCapturedAt = bot.pose?.ageMs !== undefined ? now - bot.pose.ageMs : now;
+      const waitingForFreshFrame =
+        bot.pauseWaitFreshAfter !== null &&
+        poseCapturedAt < bot.pauseWaitFreshAfter &&
+        now < bot.pauseWaitFreshAfter + 1100;
+
       if (isTurn) {
         bot.consecutiveLinearSteps = 0;
         bot.drivePulseStartedAt = null;
-        const spinWindowMs = Math.max(55, Math.min(180, rawDrive.durationMs ?? 90));
-        if (bot.spinPauseUntil !== null && now < bot.spinPauseUntil) {
+        const spinWindowMs = Math.max(70, Math.min(180, rawDrive.durationMs ?? 90));
+        if ((bot.spinPauseUntil !== null && now < bot.spinPauseUntil) || waitingForFreshFrame) {
           drive = STOP;
         } else if (bot.spinStartedAt === null) {
+          bot.pauseWaitFreshAfter = null;
           if (at) this.evaluateSettledObservation(bot, at);
           bot.spinStartedAt = now;
           if (at) {
@@ -393,15 +403,17 @@ export class SceneRunner {
         } else if (now - bot.spinStartedAt >= spinWindowMs) {
           bot.spinStartedAt = null;
           bot.spinPauseUntil = now + settleMs;
+          bot.pauseWaitFreshAfter = now + 80;
           drive = STOP;
         }
       } else if (isLinear) {
         bot.spinStartedAt = null;
-        const pulseWindowMs = Math.max(50, Math.min(150, (rawDrive.durationMs ?? 100) - 20));
-        if (bot.drivePauseUntil !== null && now < bot.drivePauseUntil) {
+        const pulseWindowMs = Math.max(70, Math.min(160, (rawDrive.durationMs ?? 100) - 10));
+        if ((bot.drivePauseUntil !== null && now < bot.drivePauseUntil) || waitingForFreshFrame) {
           drive = STOP;
         } else if (bot.drivePulseStartedAt === null) {
-          // 整定期間が明けたので、直前のステップの実移動量を評価してリアルタイム補正を更新
+          bot.pauseWaitFreshAfter = null;
+          // 整定期間＋新フレーム確認が明けたので、直前のステップの実移動量を評価してリアルタイム補正を更新
           if (at) this.evaluateSettledObservation(bot, at);
           bot.drivePulseStartedAt = now;
           bot.consecutiveLinearSteps += 1;
@@ -420,6 +432,7 @@ export class SceneRunner {
         } else if (now - bot.drivePulseStartedAt >= pulseWindowMs) {
           bot.drivePulseStartedAt = null;
           bot.drivePauseUntil = now + settleMs;
+          bot.pauseWaitFreshAfter = now + 80;
           drive = STOP;
         }
       } else {
